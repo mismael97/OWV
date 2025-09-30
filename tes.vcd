@@ -1,0 +1,18 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 1 ! clk $end
+$var wire 1 " reset $end
+$var wire 4 # data $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+0"
+b0000 #
+#10
+1!
+#20
+0!
+b1010 #
+#30
+1"
