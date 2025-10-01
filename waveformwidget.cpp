@@ -92,7 +92,6 @@ void WaveformWidget::removeSelectedSignals()
     update();
     emit signalSelected(-1);
 }
-
 void WaveformWidget::updateAllGroupIndices()
 {
     // Clear all group signal indices first
@@ -103,25 +102,10 @@ void WaveformWidget::updateAllGroupIndices()
         }
     }
     
-    // Rebuild group membership based on current hierarchy
-    int currentGroupIndex = -1;
-    
-    for (int i = 0; i < displayItems.size(); i++) {
-        if (isGroupItem(i)) {
-            currentGroupIndex = i;
-        } 
-        else if (isSpaceItem(i) || (currentGroupIndex != -1 && isGroupItem(i))) {
-            // End of current group when we hit a space or another group
-            currentGroupIndex = -1;
-        }
-        else if (isSignalItem(i) && currentGroupIndex != -1) {
-            // This signal belongs to the current group
-            GroupItem& group = displayItems[currentGroupIndex].getGroup();
-            if (!group.signalIndices.contains(i)) {
-                group.signalIndices.append(i);
-            }
-        }
-    }
+    // For each group, only add signals that were explicitly selected when creating the group
+    // Don't automatically add signals based on position
+    // Groups should only contain signals that were explicitly added to them
+    qDebug() << "Group system: Manual signal tracking - no automatic grouping";
 }
 
 // Helper method to update group indices after deletion
@@ -1218,16 +1202,25 @@ void WaveformWidget::addGroup()
     QList<int> signalIndices = selectedSignals.values();
     std::sort(signalIndices.begin(), signalIndices.end());
     
+    qDebug() << "Creating group with explicitly selected signals:" << signalIndices;
+    
     // Create group header above the first signal
     GroupItem group;
     group.name = name;
+    
+    // Only add the explicitly selected signals to the group
+    // Don't automatically add other signals
+    for (int sigIndex : signalIndices) {
+        if (isSignalItem(sigIndex)) {
+            group.signalIndices.append(sigIndex);
+        }
+    }
     
     // Insert group header at the position of the first selected signal
     int groupHeaderIndex = signalIndices.first();
     displayItems.insert(groupHeaderIndex, DisplayItem(group));
     
-    // Let updateAllGroupIndices handle the group membership
-    updateAllGroupIndices();
+    qDebug() << "Group created at index" << groupHeaderIndex << "with" << group.signalIndices.size() << "explicitly selected signals";
     
     update();
 }
