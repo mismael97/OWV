@@ -1,4 +1,3 @@
-// File: waveformwidget.h
 #ifndef WAVEFORMWIDGET_H
 #define WAVEFORMWIDGET_H
 
@@ -9,6 +8,8 @@
 #include <QMouseEvent>
 #include <QVector>
 #include <QList>
+#include <QLabel>
+
 #include "vcdparser.h"
 
 class WaveformWidget : public QWidget
@@ -22,10 +23,13 @@ public:
     void zoomIn();
     void zoomOut();
     void zoomFit();
+    void removeSelectedSignal();
+
     QList<VCDSignal> visibleSignals;
 
 signals:
     void timeChanged(int time);
+    void signalSelected(int signalIndex);  // Add this
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -44,6 +48,9 @@ private:
     int xToTime(int x) const;
     QString getSignalValueAtTime(const QString &identifier, int time) const;
     int calculateTimeStep(int startTime, int endTime) const;
+    int getSignalAtPosition(const QPoint &pos) const;  // Add this
+    void startDragSignal(int signalIndex);  // Add this
+    void performDrag(int mouseY);  // Add this
 
     VCDParser *vcdParser;
 
@@ -55,8 +62,13 @@ private:
     int topMargin;
 
     bool isDragging;
+    bool isDraggingSignal;  // Add this
     int dragStartX;
     int dragStartOffset;
+    int dragSignalIndex;    // Add this
+    int dragStartY;         // Add this
+
+    int selectedSignal;     // Add this
 
     QScrollBar *horizontalScrollBar;
 };

@@ -16,6 +16,7 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QGroupBox>
+#include <QDockWidget>
 #include "vcdparser.h"
 #include "waveformwidget.h"
 
@@ -38,11 +39,10 @@ private slots:
     void onSignalItemChanged(QTreeWidgetItem *item, int column);
     void selectAllSignals();
     void deselectAllSignals();
-    void addSelectedSignals();           // Add this
-    void removeSelectedSignals();        // Add this
-    void moveSignalUp();                 // Add this
-    void moveSignalDown();               // Add this
-    void onVisibleSignalSelectionChanged(); // Add this
+    void addSelectedSignals();
+    void removeSelectedSignal();
+    void showSignalHierarchy();  // Add this
+    void hideSignalHierarchy();  // Add this
 
 private:
     void createActions();
@@ -50,11 +50,10 @@ private:
     void createStatusBar();
     void setupUI();
     void loadVcdFile(const QString &filename);
-    void loadDefaultVcdFile();           // Add this
+    void loadDefaultVcdFile();
     void populateSignalTree();
     void updateVisibleSignals();
     void setAllSignalsCheckState(Qt::CheckState state);
-    void refreshVisibleSignalsList();    // Add this
 
     // UI Components
     QSplitter *mainSplitter;
@@ -68,16 +67,16 @@ private:
     QAction *zoomOutAction;
     QAction *zoomFitAction;
     QAction *aboutAction;
+    QAction *showHierarchyAction;  // Add this
 
     // Signal selection buttons
     QPushButton *selectAllButton;
     QPushButton *deselectAllButton;
-    QPushButton *addSignalsButton;       // Add this
-    QPushButton *removeSignalsButton;    // Add this
-    QPushButton *moveUpButton;           // Add this
-    QPushButton *moveDownButton;         // Add this
+    QPushButton *addSignalsButton;
+    QPushButton *removeSignalButton;  // Changed from removeSignalsButton
 
-    QListWidget *visibleSignalsList;     // Add this
+    // Dock for signal hierarchy
+    QDockWidget *hierarchyDock;  // Add this
 
     // Status Bar
     QLabel *statusLabel;

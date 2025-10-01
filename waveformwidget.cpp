@@ -1,4 +1,3 @@
-// File: waveformwidget.cpp
 #include "waveformwidget.h"
 #include <QScrollBar>
 #include <QWheelEvent>
@@ -9,8 +8,8 @@
 
 WaveformWidget::WaveformWidget(QWidget *parent)
     : QWidget(parent), vcdParser(nullptr), timeScale(1.0), timeOffset(0),
-    signalHeight(30), timeMarkersHeight(30), leftMargin(100), topMargin(10),
-    isDragging(false)
+    signalHeight(30), timeMarkersHeight(30), leftMargin(0), topMargin(10),  // leftMargin set to 0
+    isDragging(false), isDraggingSignal(false), dragSignalIndex(-1), selectedSignal(-1)  // Initialize new members
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -28,6 +27,7 @@ void WaveformWidget::setVcdData(VCDParser *parser)
     visibleSignals.clear();
     timeScale = 1.0;
     timeOffset = 0;
+    selectedSignal = -1;
     updateScrollBar();
     update();
 }
@@ -35,7 +35,19 @@ void WaveformWidget::setVcdData(VCDParser *parser)
 void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
 {
     this->visibleSignals = visibleSignals;
+    selectedSignal = -1;
     update();
+    emit signalSelected(-1); // Clear selection
+}
+
+void WaveformWidget::removeSelectedSignal()
+{
+    if (selectedSignal >= 0 && selectedSignal < visibleSignals.size()) {
+        visibleSignals.removeAt(selectedSignal);
+        selectedSignal = -1;
+        update();
+        emit signalSelected(-1);
+    }
 }
 
 void WaveformWidget::zoomIn()
@@ -71,6 +83,7 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
+    // Fill background
     painter.fillRect(rect(), Qt::white);
 
     if (!vcdParser || visibleSignals.isEmpty()) {
@@ -89,19 +102,28 @@ void WaveformWidget::drawGrid(QPainter &painter)
     int startTime = xToTime(0);
     int endTime = xToTime(width());
 
+    // Draw vertical time lines
     int timeStep = calculateTimeStep(startTime, endTime);
     for (int time = (startTime / timeStep) * timeStep; time <= endTime; time += timeStep) {
         int x = timeToX(time);
         painter.drawLine(x, 0, x, height());
 
+        // Draw time marker
         painter.setPen(QPen(Qt::black));
         painter.drawText(x + 2, timeMarkersHeight - 5, QString::number(time));
         painter.setPen(QPen(Qt::lightGray, 1, Qt::DotLine));
     }
 
+    // Draw horizontal signal separators
     for (int i = 0; i <= visibleSignals.size(); i++) {
         int y = topMargin + timeMarkersHeight + i * signalHeight;
         painter.drawLine(0, y, width(), y);
+    }
+
+    // Draw selection highlight
+    if (selectedSignal >= 0) {
+        int y = topMargin + timeMarkersHeight + selectedSignal * signalHeight;
+        painter.fillRect(0, y, width(), signalHeight, QColor(255, 255, 200)); // Light yellow highlight
     }
 }
 
@@ -128,11 +150,15 @@ void WaveformWidget::drawSignals(QPainter &painter)
         const VCDSignal &signal = visibleSignals[i];
         int yPos = topMargin + timeMarkersHeight + i * signalHeight;
 
-        painter.setPen(QPen(Qt::black));
-        QString displayName = signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name;
-        painter.drawText(5, yPos + signalHeight / 2 + 5, displayName);
-
+        // Signal name is now drawn in the separate names column
         drawSignalWaveform(painter, signal, yPos);
+    }
+
+    // Draw drag preview if dragging
+    if (isDraggingSignal && dragSignalIndex >= 0 && dragSignalIndex < visibleSignals.size()) {
+        int currentY = topMargin + timeMarkersHeight + dragSignalIndex * signalHeight;
+        painter.setPen(QPen(Qt::red, 2, Qt::DashLine));
+        painter.drawLine(0, currentY, width(), currentY);
     }
 }
 
@@ -141,7 +167,9 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
     if (changes.isEmpty()) return;
 
-    painter.setPen(QPen(Qt::blue, 2));
+    // Use different colors for different signals
+    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 200, 200);
+    painter.setPen(QPen(signalColor, 2));
 
     int signalMidY = yPos + signalHeight / 2;
     int highLevel = yPos + 5;
@@ -176,12 +204,104 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         painter.drawLine(prevX, lowLevel, endX, lowLevel);
     }
 
+    // Draw value labels for special states
     for (const auto &change : changes) {
         if (change.value == "X" || change.value == "Z") {
             int x = timeToX(change.timestamp);
             painter.setPen(QPen(Qt::red));
             painter.drawText(x + 2, signalMidY, change.value);
-            painter.setPen(QPen(Qt::blue, 2));
+            painter.setPen(QPen(signalColor, 2));
+        }
+    }
+}
+
+int WaveformWidget::getSignalAtPosition(const QPoint &pos) const
+{
+    if (visibleSignals.isEmpty()) return -1;
+
+    int y = pos.y();
+    int signalAreaTop = topMargin + timeMarkersHeight;
+
+    if (y < signalAreaTop) return -1;
+
+    int signalIndex = (y - signalAreaTop) / signalHeight;
+    if (signalIndex >= 0 && signalIndex < visibleSignals.size()) {
+        return signalIndex;
+    }
+
+    return -1;
+}
+
+void WaveformWidget::startDragSignal(int signalIndex)
+{
+    isDraggingSignal = true;
+    dragSignalIndex = signalIndex;
+    dragStartY = topMargin + timeMarkersHeight + signalIndex * signalHeight;
+    setCursor(Qt::ClosedHandCursor);
+}
+
+void WaveformWidget::performDrag(int mouseY)
+{
+    if (!isDraggingSignal || dragSignalIndex < 0) return;
+
+    int signalAreaTop = topMargin + timeMarkersHeight;
+    int newIndex = (mouseY - signalAreaTop) / signalHeight;
+    newIndex = qMax(0, qMin(newIndex, visibleSignals.size() - 1));
+
+    if (newIndex != dragSignalIndex) {
+        visibleSignals.move(dragSignalIndex, newIndex);
+        dragSignalIndex = newIndex;
+        selectedSignal = newIndex;
+        update();
+    }
+}
+
+void WaveformWidget::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        int signalIndex = getSignalAtPosition(event->pos());
+
+        if (signalIndex >= 0) {
+            // Signal clicked - select it and prepare for drag
+            selectedSignal = signalIndex;
+            startDragSignal(signalIndex);
+            emit signalSelected(signalIndex);
+            update();
+        } else {
+            // Start timeline dragging
+            isDragging = true;
+            dragStartX = event->pos().x();
+            dragStartOffset = timeOffset;
+            setCursor(Qt::ClosedHandCursor);
+        }
+    }
+}
+
+void WaveformWidget::mouseMoveEvent(QMouseEvent *event)
+{
+    if (isDraggingSignal) {
+        performDrag(event->pos().y());
+    } else if (isDragging) {
+        int delta = dragStartX - event->pos().x();
+        timeOffset = dragStartOffset + delta;
+        updateScrollBar();
+        update();
+    }
+
+    int currentTime = xToTime(event->pos().x());
+    emit timeChanged(currentTime);
+}
+
+void WaveformWidget::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        if (isDraggingSignal) {
+            isDraggingSignal = false;
+            dragSignalIndex = -1;
+            setCursor(Qt::ArrowCursor);
+        } else if (isDragging) {
+            isDragging = false;
+            setCursor(Qt::ArrowCursor);
         }
     }
 }
@@ -232,40 +352,6 @@ void WaveformWidget::wheelEvent(QWheelEvent *event)
         zoomIn();
     } else {
         zoomOut();
-    }
-}
-
-void WaveformWidget::mousePressEvent(QMouseEvent *event)
-{
-    if (event->button() == Qt::LeftButton) {
-        isDragging = true;
-        dragStartX = event->pos().x();
-        dragStartOffset = timeOffset;
-        setCursor(Qt::ClosedHandCursor);
-    }
-}
-
-void WaveformWidget::mouseMoveEvent(QMouseEvent *event)
-{
-    if (isDragging) {
-        int delta = dragStartX - event->pos().x();
-        timeOffset = dragStartOffset + delta;
-        updateScrollBar();
-        update();
-
-        int currentTime = xToTime(event->pos().x());
-        emit timeChanged(currentTime);
-    } else {
-        int currentTime = xToTime(event->pos().x());
-        emit timeChanged(currentTime);
-    }
-}
-
-void WaveformWidget::mouseReleaseEvent(QMouseEvent *event)
-{
-    if (event->button() == Qt::LeftButton && isDragging) {
-        isDragging = false;
-        setCursor(Qt::ArrowCursor);
     }
 }
 
