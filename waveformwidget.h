@@ -183,6 +183,8 @@ private:
     void updateGroupIndicesAfterDeletion(const QList<int>& deletedIndices);
     void updateAllGroupIndices();
     void debugGroupInfo();
+    void updateSignalGroupMembership(int signalIndex);
+
 
     VCDParser *vcdParser;
 
