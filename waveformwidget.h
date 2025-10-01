@@ -182,6 +182,7 @@ private:
     void selectGroup(int groupIndex);
     void updateGroupIndicesAfterDeletion(const QList<int>& deletedIndices);
     void updateAllGroupIndices();
+    void debugGroupInfo();
 
     VCDParser *vcdParser;
 
