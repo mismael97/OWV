@@ -139,19 +139,33 @@ void MainWindow::showAddSignalsDialog()
     if (!vcdParser) return;
 
     SignalSelectionDialog dialog(this);
-    dialog.setAvailableSignals(vcdParser->getSignals(), waveformWidget->visibleSignals);  // Use new method
+    
+    // Convert display items back to VCDSignals for the dialog
+    QList<VCDSignal> currentSignals;
+    for (const auto& item : waveformWidget->displayItems) {
+        if (item.getType() == DisplayItem::Signal) {
+            currentSignals.append(item.getSignal());
+        }
+    }
+    
+    dialog.setAvailableSignals(vcdParser->getSignals(), currentSignals);
 
     if (dialog.exec() == QDialog::Accepted) {
         QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
         if (!newSignalsToAdd.isEmpty()) {
-            QList<VCDSignal> currentSignals = waveformWidget->visibleSignals;
-
-            // Add the newly selected signals to current signals
-            currentSignals.append(newSignalsToAdd);
-
-            waveformWidget->setVisibleSignals(currentSignals);
-            statusLabel->setText(QString("%1 signal(s) displayed").arg(currentSignals.size()));
+            // Add new signals to display items
+            for (const auto& signal : newSignalsToAdd) {
+                waveformWidget->displayItems.append(DisplayItem(signal));
+            }
+            
+            int signalCount = 0;
+            for (const auto& item : waveformWidget->displayItems) {
+                if (item.getType() == DisplayItem::Signal) signalCount++;
+            }
+            
+            statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
             removeSignalsButton->setEnabled(false); // Clear selection
+            waveformWidget->update();
         }
     }
 }
@@ -161,7 +175,13 @@ void MainWindow::removeSelectedSignals()
     if (waveformWidget->getSelectedSignal() >= 0) {
         waveformWidget->removeSelectedSignals();
         removeSignalsButton->setEnabled(false);
-        statusLabel->setText(QString("%1 signal(s) displayed").arg(waveformWidget->visibleSignals.size()));
+        
+        int signalCount = 0;
+        for (const auto& item : waveformWidget->displayItems) {
+            if (item.getType() == DisplayItem::Signal) signalCount++;
+        }
+        
+        statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
     }
 }
 
