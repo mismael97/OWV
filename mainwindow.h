@@ -17,8 +17,13 @@
 #include <QListWidgetItem>
 #include <QGroupBox>
 #include <QDockWidget>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QKeyEvent>
 #include "vcdparser.h"
 #include "waveformwidget.h"
+
+class SignalSelectionDialog;
 
 class MainWindow : public QMainWindow
 {
@@ -28,21 +33,18 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+protected:
+    void keyPressEvent(QKeyEvent *event) override;
+
 private slots:
     void openFile();
     void zoomIn();
     void zoomOut();
     void zoomFit();
-    void signalSelectionChanged();
     void updateTimeDisplay(int time);
     void about();
-    void onSignalItemChanged(QTreeWidgetItem *item, int column);
-    void selectAllSignals();
-    void deselectAllSignals();
-    void addSelectedSignals();
-    void removeSelectedSignal();
-    void showSignalHierarchy();  // Add this
-    void hideSignalHierarchy();  // Add this
+    void showAddSignalsDialog();
+    void removeSelectedSignals();
 
 private:
     void createActions();
@@ -51,13 +53,8 @@ private:
     void setupUI();
     void loadVcdFile(const QString &filename);
     void loadDefaultVcdFile();
-    void populateSignalTree();
-    void updateVisibleSignals();
-    void setAllSignalsCheckState(Qt::CheckState state);
 
     // UI Components
-    QSplitter *mainSplitter;
-    QTreeWidget *signalTree;
     WaveformWidget *waveformWidget;
     QScrollBar *timeScrollBar;
 
@@ -67,16 +64,10 @@ private:
     QAction *zoomOutAction;
     QAction *zoomFitAction;
     QAction *aboutAction;
-    QAction *showHierarchyAction;  // Add this
 
-    // Signal selection buttons
-    QPushButton *selectAllButton;
-    QPushButton *deselectAllButton;
+    // Bottom controls
     QPushButton *addSignalsButton;
-    QPushButton *removeSignalButton;  // Changed from removeSignalsButton
-
-    // Dock for signal hierarchy
-    QDockWidget *hierarchyDock;  // Add this
+    QPushButton *removeSignalsButton;
 
     // Status Bar
     QLabel *statusLabel;
