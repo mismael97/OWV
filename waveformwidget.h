@@ -1,3 +1,4 @@
+// File: waveformwidget.h
 #ifndef WAVEFORMWIDGET_H
 #define WAVEFORMWIDGET_H
 
@@ -21,6 +22,7 @@ public:
     void zoomIn();
     void zoomOut();
     void zoomFit();
+    QList<VCDSignal> visibleSignals;
 
 signals:
     void timeChanged(int time);
@@ -44,7 +46,6 @@ private:
     int calculateTimeStep(int startTime, int endTime) const;
 
     VCDParser *vcdParser;
-    QList<VCDSignal> visibleSignals;
 
     double timeScale;
     int timeOffset;

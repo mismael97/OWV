@@ -1,3 +1,4 @@
+// file: vcdparser.h
 #ifndef VCDPARSER_H
 #define VCDPARSER_H
 

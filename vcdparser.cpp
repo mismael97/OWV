@@ -1,3 +1,4 @@
+// file: vcdparser.cpp
 #include "vcdparser.h"
 #include <QRegularExpression>
 #include <QDebug>

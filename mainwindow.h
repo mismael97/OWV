@@ -13,6 +13,9 @@
 #include <QPushButton>
 #include <QHBoxLayout>
 #include <QWidget>
+#include <QListWidget>
+#include <QListWidgetItem>
+#include <QGroupBox>
 #include "vcdparser.h"
 #include "waveformwidget.h"
 
@@ -35,6 +38,11 @@ private slots:
     void onSignalItemChanged(QTreeWidgetItem *item, int column);
     void selectAllSignals();
     void deselectAllSignals();
+    void addSelectedSignals();           // Add this
+    void removeSelectedSignals();        // Add this
+    void moveSignalUp();                 // Add this
+    void moveSignalDown();               // Add this
+    void onVisibleSignalSelectionChanged(); // Add this
 
 private:
     void createActions();
@@ -42,9 +50,11 @@ private:
     void createStatusBar();
     void setupUI();
     void loadVcdFile(const QString &filename);
+    void loadDefaultVcdFile();           // Add this
     void populateSignalTree();
     void updateVisibleSignals();
     void setAllSignalsCheckState(Qt::CheckState state);
+    void refreshVisibleSignalsList();    // Add this
 
     // UI Components
     QSplitter *mainSplitter;
@@ -62,6 +72,12 @@ private:
     // Signal selection buttons
     QPushButton *selectAllButton;
     QPushButton *deselectAllButton;
+    QPushButton *addSignalsButton;       // Add this
+    QPushButton *removeSignalsButton;    // Add this
+    QPushButton *moveUpButton;           // Add this
+    QPushButton *moveDownButton;         // Add this
+
+    QListWidget *visibleSignalsList;     // Add this
 
     // Status Bar
     QLabel *statusLabel;

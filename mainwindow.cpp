@@ -1,3 +1,4 @@
+// file: mainwindow.cpp
 #include "mainwindow.h"
 #include <QTreeWidgetItemIterator>
 #include <QFileInfo>
@@ -12,6 +13,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QWidget>
+#include <QDir>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), vcdParser(new VCDParser(this))
@@ -24,6 +26,23 @@ MainWindow::MainWindow(QWidget *parent)
     setupUI();
     createToolBar();
     createStatusBar();
+
+    // Auto-load default VCD file
+    loadDefaultVcdFile();
+}
+
+void MainWindow::loadDefaultVcdFile()
+{
+    // Default VCD file path
+    QString defaultPath = "C:/Users/mismael/Desktop/OWV/rtl.vcd";
+
+    // Check if default file exists
+    if (QFile::exists(defaultPath)) {
+        loadVcdFile(defaultPath);
+    } else {
+        statusLabel->setText("Default VCD file not found. Use File → Open to load a VCD file.");
+        qDebug() << "Default VCD file not found:" << defaultPath;
+    }
 }
 
 MainWindow::~MainWindow()
@@ -76,46 +95,85 @@ void MainWindow::setupUI()
 {
     mainSplitter = new QSplitter(Qt::Horizontal, this);
 
-    // Create a widget for the left panel (signal tree + buttons)
+    // === LEFT PANEL - SIGNAL BROWSER ===
     QWidget *leftPanel = new QWidget();
     QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
+    leftLayout->setContentsMargins(5, 5, 5, 5);
+    leftLayout->setSpacing(8);
 
-    // Create button layout
-    QHBoxLayout *buttonLayout = new QHBoxLayout();
+    // Signal Hierarchy Group
+    QGroupBox *hierarchyGroup = new QGroupBox("Signal Hierarchy");
+    QVBoxLayout *hierarchyLayout = new QVBoxLayout(hierarchyGroup);
 
-    // Create buttons
-    selectAllButton = new QPushButton("Select All");
-    deselectAllButton = new QPushButton("Deselect All");
-
-    // Style the buttons
-    selectAllButton->setStyleSheet("QPushButton { padding: 5px; font-weight: bold; }");
-    deselectAllButton->setStyleSheet("QPushButton { padding: 5px; font-weight: bold; }");
-
-    // Connect buttons to slots
-    connect(selectAllButton, &QPushButton::clicked, this, &MainWindow::selectAllSignals);
-    connect(deselectAllButton, &QPushButton::clicked, this, &MainWindow::deselectAllSignals);
-
-    // Add buttons to layout
-    buttonLayout->addWidget(selectAllButton);
-    buttonLayout->addWidget(deselectAllButton);
-    buttonLayout->addStretch(); // Push buttons to the left
-
-    // Create signal tree
     signalTree = new QTreeWidget();
-    signalTree->setHeaderLabel("Signals");
+    signalTree->setHeaderLabel("Modules & Signals");
     signalTree->setMinimumWidth(300);
+    signalTree->setAlternatingRowColors(true);
 
-    // Connect signals
     connect(signalTree, &QTreeWidget::itemSelectionChanged,
             this, &MainWindow::signalSelectionChanged);
     connect(signalTree, &QTreeWidget::itemChanged,
             this, &MainWindow::onSignalItemChanged);
 
-    // Add widgets to left panel layout
-    leftLayout->addLayout(buttonLayout);
-    leftLayout->addWidget(signalTree);
+    hierarchyLayout->addWidget(signalTree);
 
-    // Create waveform widget
+    // Signal Controls Group
+    QGroupBox *controlsGroup = new QGroupBox("Signal Controls");
+    QVBoxLayout *controlsLayout = new QVBoxLayout(controlsGroup);
+
+    // Selection buttons
+    QHBoxLayout *selectionLayout = new QHBoxLayout();
+    selectAllButton = new QPushButton("Select All");
+    deselectAllButton = new QPushButton("Deselect All");
+    addSignalsButton = new QPushButton("+ Add Signals");
+    removeSignalsButton = new QPushButton("− Remove Signals");
+
+    // Style buttons
+    QString buttonStyle = "QPushButton { padding: 6px; font-size: 11px; }";
+    selectAllButton->setStyleSheet(buttonStyle);
+    deselectAllButton->setStyleSheet(buttonStyle);
+    addSignalsButton->setStyleSheet(buttonStyle + " QPushButton { background-color: #4CAF50; color: white; }");
+    removeSignalsButton->setStyleSheet(buttonStyle + " QPushButton { background-color: #f44336; color: white; }");
+
+    selectionLayout->addWidget(selectAllButton);
+    selectionLayout->addWidget(deselectAllButton);
+    selectionLayout->addWidget(addSignalsButton);
+    selectionLayout->addWidget(removeSignalsButton);
+
+    // Reordering buttons
+    QHBoxLayout *reorderLayout = new QHBoxLayout();
+    moveUpButton = new QPushButton("↑ Move Up");
+    moveDownButton = new QPushButton("↓ Move Down");
+
+    moveUpButton->setStyleSheet(buttonStyle);
+    moveDownButton->setStyleSheet(buttonStyle);
+
+    reorderLayout->addWidget(moveUpButton);
+    reorderLayout->addWidget(moveDownButton);
+    reorderLayout->addStretch();
+
+    controlsLayout->addLayout(selectionLayout);
+    controlsLayout->addLayout(reorderLayout);
+
+    // Visible Signals Group
+    QGroupBox *visibleGroup = new QGroupBox("Visible Signals");
+    QVBoxLayout *visibleLayout = new QVBoxLayout(visibleGroup);
+
+    visibleSignalsList = new QListWidget();
+    visibleSignalsList->setAlternatingRowColors(true);
+    visibleSignalsList->setSelectionMode(QListWidget::SingleSelection);
+
+    connect(visibleSignalsList, &QListWidget::itemSelectionChanged,
+            this, &MainWindow::onVisibleSignalSelectionChanged);
+
+    visibleLayout->addWidget(visibleSignalsList);
+
+    // Add all groups to left panel
+    leftLayout->addWidget(hierarchyGroup, 2);  // More space for hierarchy
+    leftLayout->addWidget(controlsGroup);
+    leftLayout->addWidget(visibleGroup, 1);    // Less space for visible list
+
+    // === MAIN WAVEFORM AREA ===
     waveformWidget = new WaveformWidget();
     connect(waveformWidget, &WaveformWidget::timeChanged,
             this, &MainWindow::updateTimeDisplay);
@@ -128,13 +186,124 @@ void MainWindow::setupUI()
     mainSplitter->setStretchFactor(0, 0);
     mainSplitter->setStretchFactor(1, 1);
 
+    // Set initial sizes
+    QList<int> sizes;
+    sizes << 400 << 800;
+    mainSplitter->setSizes(sizes);
+
     setCentralWidget(mainSplitter);
+
+    // Connect new buttons
+    connect(selectAllButton, &QPushButton::clicked, this, &MainWindow::selectAllSignals);
+    connect(deselectAllButton, &QPushButton::clicked, this, &MainWindow::deselectAllSignals);
+    connect(addSignalsButton, &QPushButton::clicked, this, &MainWindow::addSelectedSignals);
+    connect(removeSignalsButton, &QPushButton::clicked, this, &MainWindow::removeSelectedSignals);
+    connect(moveUpButton, &QPushButton::clicked, this, &MainWindow::moveSignalUp);
+    connect(moveDownButton, &QPushButton::clicked, this, &MainWindow::moveSignalDown);
+}
+
+void MainWindow::onVisibleSignalSelectionChanged()
+{
+    // Enable/disable reordering buttons based on selection
+    bool hasSelection = visibleSignalsList->currentRow() >= 0;
+    moveUpButton->setEnabled(hasSelection);
+    moveDownButton->setEnabled(hasSelection);
+    removeSignalsButton->setEnabled(hasSelection);
+}
+
+void MainWindow::moveSignalDown()
+{
+    int currentRow = visibleSignalsList->currentRow();
+    QList<VCDSignal> currentSignals = waveformWidget->visibleSignals;
+    if (currentRow >= 0 && currentRow < currentSignals.size() - 1) {
+        currentSignals.move(currentRow, currentRow + 1);
+        waveformWidget->setVisibleSignals(currentSignals);
+        refreshVisibleSignalsList();
+        visibleSignalsList->setCurrentRow(currentRow + 1);
+    }
+}
+
+void MainWindow::moveSignalUp()
+{
+    int currentRow = visibleSignalsList->currentRow();
+    if (currentRow > 0) {
+        QList<VCDSignal> currentSignals = waveformWidget->visibleSignals;
+        currentSignals.move(currentRow, currentRow - 1);
+        waveformWidget->setVisibleSignals(currentSignals);
+        refreshVisibleSignalsList();
+        visibleSignalsList->setCurrentRow(currentRow - 1);
+    }
+}
+
+void MainWindow::removeSelectedSignals()
+{
+    int currentRow = visibleSignalsList->currentRow();
+    if (currentRow >= 0 && currentRow < waveformWidget->visibleSignals.size()) {
+        QList<VCDSignal> currentSignals = waveformWidget->visibleSignals;
+        currentSignals.removeAt(currentRow);
+        waveformWidget->setVisibleSignals(currentSignals);
+        refreshVisibleSignalsList();
+        statusLabel->setText("Signal removed");
+    } else {
+        statusLabel->setText("No signal selected to remove");
+    }
+}
+
+void MainWindow::refreshVisibleSignalsList()
+{
+    visibleSignalsList->clear();
+    for (const auto& signal : waveformWidget->visibleSignals) {
+        QString displayName = signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name;
+        visibleSignalsList->addItem(displayName);
+    }
+
+    // Update status
+    statusLabel->setText(QString("%1 signal(s) displayed").arg(waveformWidget->visibleSignals.size()));
+}
+
+void MainWindow::addSelectedSignals()
+{
+    // Get all checked signals from tree
+    QList<VCDSignal> signalsToAdd;
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it) {
+        if ((*it)->checkState(0) == Qt::Checked) {
+            QVariant data = (*it)->data(0, Qt::UserRole);
+            if (data.canConvert<VCDSignal>()) {
+                VCDSignal signal = data.value<VCDSignal>();
+                // Check if signal is already in visible list
+                bool alreadyExists = false;
+                for (const auto& visibleSignal : waveformWidget->visibleSignals) {
+                    if (visibleSignal.identifier == signal.identifier) {
+                        alreadyExists = true;
+                        break;
+                    }
+                }
+                if (!alreadyExists) {
+                    signalsToAdd.append(signal);
+                }
+            }
+        }
+        ++it;
+    }
+
+    if (!signalsToAdd.isEmpty()) {
+        // Add to waveform widget
+        QList<VCDSignal> currentSignals = waveformWidget->visibleSignals;
+        currentSignals.append(signalsToAdd);
+        waveformWidget->setVisibleSignals(currentSignals);
+
+        // Update visible signals list
+        refreshVisibleSignalsList();
+
+        statusLabel->setText(QString("Added %1 signal(s)").arg(signalsToAdd.size()));
+    }
 }
 
 void MainWindow::openFile()
 {
     QString filename = QFileDialog::getOpenFileName(
-        this, "Open VCD File", "", "VCD Files (*.vcd)");
+        this, "Open VCD File", "C:/Users/mismael/Desktop/OWV", "VCD Files (*.vcd)");
 
     if (!filename.isEmpty()) {
         loadVcdFile(filename);
@@ -243,26 +412,12 @@ void MainWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
 
 void MainWindow::updateVisibleSignals()
 {
-    QList<VCDSignal> selectedSignals;
-
-    // Get all checked signals
-    QTreeWidgetItemIterator it(signalTree);
-    while (*it) {
-        if ((*it)->checkState(0) == Qt::Checked) {
-            QVariant data = (*it)->data(0, Qt::UserRole);
-            if (data.canConvert<VCDSignal>()) {
-                selectedSignals.append(data.value<VCDSignal>());
-            }
-        }
-        ++it;
-    }
-
-    // Update the waveform widget with selected signals
-    waveformWidget->setVisibleSignals(selectedSignals);
-
-    // Update status
-    statusLabel->setText(QString("%1 signal(s) displayed").arg(selectedSignals.size()));
+    // This method is now handled by the new button system
+    // We'll keep it for checkbox changes but it won't update the waveform directly
+    refreshVisibleSignalsList();
 }
+
+
 
 void MainWindow::setAllSignalsCheckState(Qt::CheckState state)
 {

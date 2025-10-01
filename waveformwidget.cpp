@@ -1,3 +1,4 @@
+// File: waveformwidget.cpp
 #include "waveformwidget.h"
 #include <QScrollBar>
 #include <QWheelEvent>
