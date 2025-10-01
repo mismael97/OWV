@@ -133,38 +133,30 @@ void MainWindow::showAddSignalsDialog()
     if (!vcdParser) return;
 
     SignalSelectionDialog dialog(this);
-    dialog.setSignals(vcdParser->getSignals(), waveformWidget->visibleSignals);
+    dialog.setAvailableSignals(vcdParser->getSignals(), waveformWidget->visibleSignals);  // Use new method
 
     if (dialog.exec() == QDialog::Accepted) {
-        QList<VCDSignal> newlySelectedSignals = dialog.getSelectedSignals();
-        if (!newlySelectedSignals.isEmpty()) {
+        QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
+        if (!newSignalsToAdd.isEmpty()) {
             QList<VCDSignal> currentSignals = waveformWidget->visibleSignals;
 
-            // Add only signals that aren't already displayed
-            for (const auto& signal : newlySelectedSignals) {
-                bool alreadyExists = false;
-                for (const auto& existing : currentSignals) {
-                    if (existing.identifier == signal.identifier) {
-                        alreadyExists = true;
-                        break;
-                    }
-                }
-                if (!alreadyExists) {
-                    currentSignals.append(signal);
-                }
-            }
+            // Add the newly selected signals to current signals
+            currentSignals.append(newSignalsToAdd);
 
             waveformWidget->setVisibleSignals(currentSignals);
             statusLabel->setText(QString("%1 signal(s) displayed").arg(currentSignals.size()));
+            removeSignalsButton->setEnabled(false); // Clear selection
         }
     }
 }
 
 void MainWindow::removeSelectedSignals()
 {
-    waveformWidget->removeSelectedSignals();
-    removeSignalsButton->setEnabled(false);
-    statusLabel->setText(QString("%1 signal(s) displayed").arg(waveformWidget->visibleSignals.size()));
+    if (waveformWidget->getSelectedSignal() >= 0) {
+        waveformWidget->removeSelectedSignals();
+        removeSignalsButton->setEnabled(false);
+        statusLabel->setText(QString("%1 signal(s) displayed").arg(waveformWidget->visibleSignals.size()));
+    }
 }
 
 void MainWindow::loadDefaultVcdFile()

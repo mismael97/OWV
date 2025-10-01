@@ -40,19 +40,24 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     mainLayout->addWidget(buttonBox);
 }
 
-void SignalSelectionDialog::setSignals(const QVector<VCDSignal> &vcdSignals, const QList<VCDSignal> &currentSignals)
+void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals)
 {
     signalTree->clear();
 
-    QMap<QString, QTreeWidgetItem*> scopeItems;
-
-    // Create a set of current signal identifiers for quick lookup
-    QSet<QString> currentSignalIdentifiers;
-    for (const auto& signal : currentSignals) {
-        currentSignalIdentifiers.insert(signal.identifier);
+    // Create a set of visible signal identifiers for quick lookup
+    QSet<QString> visibleSignalIdentifiers;
+    for (const auto& signal : visibleSignals) {
+        visibleSignalIdentifiers.insert(signal.identifier);
     }
 
-    for (const auto& signal : vcdSignals) {
+    QMap<QString, QTreeWidgetItem*> scopeItems;
+
+    for (const auto& signal : allSignals) {
+        // Skip signals that are already visible in the waveform
+        if (visibleSignalIdentifiers.contains(signal.identifier)) {
+            continue;
+        }
+
         QString scopePath = signal.scope;
         if (!scopeItems.contains(scopePath)) {
             QStringList scopeParts = scopePath.split('.');
@@ -88,13 +93,7 @@ void SignalSelectionDialog::setSignals(const QVector<VCDSignal> &vcdSignals, con
         signalItem->setText(2, signal.type);
         signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
         signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-
-        // Check if this signal is already in the current visible signals
-        if (currentSignalIdentifiers.contains(signal.identifier)) {
-            signalItem->setCheckState(0, Qt::Checked);
-        } else {
-            signalItem->setCheckState(0, Qt::Unchecked);
-        }
+        signalItem->setCheckState(0, Qt::Unchecked); // All signals start unchecked
 
         scopeItems[scopePath]->addChild(signalItem);
     }
