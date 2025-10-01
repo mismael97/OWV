@@ -28,6 +28,7 @@ struct SpaceItem {
 struct GroupItem {
     QString name;
     QList<int> signalIndices; // Indices of signals in this group
+    bool collapsed = false;   // Optional: for future collapse/expand functionality
     bool operator==(const GroupItem& other) const { return name == other.name; }
 };
 
@@ -175,6 +176,12 @@ private:
     void updateSelection(int itemIndex, bool isMultiSelect);
     void renameItem(int itemIndex);
     QString promptForName(const QString &title, const QString &defaultName = "");
+    bool isSignalInGroup(int index) const;
+    int getGroupBottomIndex(int groupIndex) const;
+    bool isGroupBoundary(int index) const;
+    void selectGroup(int groupIndex);
+    void updateGroupIndicesAfterDeletion(const QList<int>& deletedIndices);
+    void updateAllGroupIndices();
 
     VCDParser *vcdParser;
 

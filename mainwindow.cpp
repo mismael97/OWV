@@ -38,15 +38,22 @@ MainWindow::~MainWindow()
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Delete) {
-        removeSelectedSignals();
-    event->accept();
+        // Let the waveform widget handle deletion if it has focus
+        if (waveformWidget->hasFocus() && !waveformWidget->getSelectedSignalIndices().isEmpty()) {
+            waveformWidget->removeSelectedSignals();
+            event->accept();
+        } else {
+            // Fall back to the main window's delete handling
+            removeSelectedSignals();
+            event->accept();
+        }
     } else if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier) {
         waveformWidget->selectAllSignals();
         removeSignalsButton->setEnabled(true);
         event->accept();
     } else {
-    QMainWindow::keyPressEvent(event);
-}
+        QMainWindow::keyPressEvent(event);
+    }
 }
 
 void MainWindow::createActions()
@@ -170,17 +177,20 @@ void MainWindow::showAddSignalsDialog()
     }
 }
 
+// In mainwindow.cpp, update the removeSelectedSignals method:
 void MainWindow::removeSelectedSignals()
 {
-    if (waveformWidget->getSelectedSignal() >= 0) {
+    // Check if there are any selected items in the waveform widget
+    if (!waveformWidget->getSelectedSignalIndices().isEmpty()) {
         waveformWidget->removeSelectedSignals();
         removeSignalsButton->setEnabled(false);
-        
+
+        // Count only signals for display (not spaces or groups)
         int signalCount = 0;
         for (const auto& item : waveformWidget->displayItems) {
             if (item.getType() == DisplayItem::Signal) signalCount++;
         }
-        
+
         statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
     }
 }
