@@ -13,6 +13,7 @@
 #include <QContextMenuEvent>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QSet>
 
 #include "vcdparser.h"
 
@@ -28,7 +29,9 @@ public:
     void zoomOut();
     void zoomFit();
     void removeSelectedSignals();
-    int getSelectedSignal() const { return selectedSignal; }
+    void selectAllSignals();
+    int getSelectedSignal() const { return selectedSignals.isEmpty() ? -1 : *selectedSignals.begin(); }
+    QList<int> getSelectedSignalIndices() const { return selectedSignals.values(); }
     int signalHeight = 30;
 
     QList<VCDSignal> visibleSignals;
@@ -46,6 +49,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
 
 private:
     void drawSignalNamesColumn(QPainter &painter);
@@ -65,11 +69,13 @@ private:
     void addSpaceAbove();
     void addSpaceBelow();
     void addGroup();
+    void handleMultiSelection(int signalIndex, QMouseEvent *event);
+    void updateSelection(int signalIndex, bool isMultiSelect);
 
     VCDParser *vcdParser;
 
     // Layout parameters
-    int signalNamesWidth = 250;  // Fixed width for signal names column
+    int signalNamesWidth = 250;
     double timeScale;
     int timeOffset;
     int timeMarkersHeight;
@@ -82,7 +88,8 @@ private:
     int dragSignalIndex;
     int dragStartY;
 
-    int selectedSignal;
+    QSet<int> selectedSignals;  // Changed from int to QSet for multi-selection
+    int lastSelectedSignal;     // For shift-selection range
 
     QScrollBar *horizontalScrollBar;
 };

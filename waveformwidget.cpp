@@ -5,12 +5,13 @@
 #include <QResizeEvent>
 #include <QPaintEvent>
 #include <QContextMenuEvent>
+#include <QKeyEvent>
 #include <cmath>
 
 WaveformWidget::WaveformWidget(QWidget *parent)
     : QWidget(parent), vcdParser(nullptr), timeScale(1.0), timeOffset(0),
     timeMarkersHeight(30), topMargin(10),
-    isDragging(false), isDraggingSignal(false), dragSignalIndex(-1), selectedSignal(-1)
+    isDragging(false), isDraggingSignal(false), dragSignalIndex(-1), lastSelectedSignal(-1)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -29,7 +30,8 @@ void WaveformWidget::setVcdData(VCDParser *parser)
     visibleSignals.clear();
     timeScale = 1.0;
     timeOffset = 0;
-    selectedSignal = -1;
+    selectedSignals.clear();
+    lastSelectedSignal = -1;
     updateScrollBar();
     update();
 }
@@ -37,19 +39,41 @@ void WaveformWidget::setVcdData(VCDParser *parser)
 void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
 {
     this->visibleSignals = visibleSignals;
-    selectedSignal = -1;
+    selectedSignals.clear();
+    lastSelectedSignal = -1;
     update();
     emit signalSelected(-1);
 }
 
 void WaveformWidget::removeSelectedSignals()
 {
-    if (selectedSignal >= 0 && selectedSignal < visibleSignals.size()) {
-        visibleSignals.removeAt(selectedSignal);
-        selectedSignal = -1;
+    if (selectedSignals.isEmpty()) return;
+
+    // Remove signals in reverse order to maintain correct indices
+    QList<int> indices = selectedSignals.values();
+    std::sort(indices.begin(), indices.end(), std::greater<int>());
+    
+    for (int index : indices) {
+        if (index >= 0 && index < visibleSignals.size()) {
+        visibleSignals.removeAt(index);
+        }
+    }
+    
+    selectedSignals.clear();
+        lastSelectedSignal = -1;
         update();
         emit signalSelected(-1);
     }
+
+void WaveformWidget::selectAllSignals()
+{
+    selectedSignals.clear();
+    for (int i = 0; i < visibleSignals.size(); i++) {
+        selectedSignals.insert(i);
+    }
+    lastSelectedSignal = visibleSignals.size() - 1;
+    update();
+    emit signalSelected(selectedSignals.isEmpty() ? -1 : *selectedSignals.begin());
 }
 
 void WaveformWidget::zoomIn()
@@ -115,13 +139,18 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     painter.setPen(QPen(Qt::white));
     painter.drawText(5, timeMarkersHeight - 8, "Signal Name");
 
-    // Draw signal names
+    // Draw selection count if multiple signals selected
+    if (selectedSignals.size() > 1) {
+        painter.drawText(signalNamesWidth - 50, timeMarkersHeight - 8, 
+                        QString("(%1 selected)").arg(selectedSignals.size()));
+    }
+    
     for (int i = 0; i < visibleSignals.size(); i++) {
         const VCDSignal &signal = visibleSignals[i];
         int yPos = topMargin + timeMarkersHeight + i * signalHeight;
 
         // Draw selection background
-        if (i == selectedSignal) {
+        if (selectedSignals.contains(i)) {
             painter.fillRect(0, yPos, signalNamesWidth, signalHeight, QColor(60, 60, 90));
         } else if (i % 2 == 0) {
             painter.fillRect(0, yPos, signalNamesWidth, signalHeight, QColor(45, 45, 48));
@@ -147,12 +176,10 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 
 void WaveformWidget::drawWaveformArea(QPainter &painter)
 {
-    // Set clip region for waveform area only
-    painter.setClipRect(signalNamesWidth, 0, width() - signalNamesWidth, height());
+        painter.setClipRect(signalNamesWidth, 0, width() - signalNamesWidth, height());
     painter.translate(signalNamesWidth, 0);
 
-    // Draw waveform background
-    painter.fillRect(0, 0, width() - signalNamesWidth, height(), QColor(30, 30, 30));
+        painter.fillRect(0, 0, width() - signalNamesWidth, height(), QColor(30, 30, 30));
 
     if (!visibleSignals.isEmpty()) {
         drawGrid(painter);
@@ -170,27 +197,24 @@ void WaveformWidget::drawGrid(QPainter &painter)
     int startTime = xToTime(0);
     int endTime = xToTime(width() - signalNamesWidth);
 
-    // Draw vertical time lines
-    int timeStep = calculateTimeStep(startTime, endTime);
+        int timeStep = calculateTimeStep(startTime, endTime);
     for (int time = (startTime / timeStep) * timeStep; time <= endTime; time += timeStep) {
         int x = timeToX(time);
         painter.drawLine(x, 0, x, height());
 
-        // Draw time marker
-        painter.setPen(QPen(Qt::white));
+                painter.setPen(QPen(Qt::white));
         painter.drawText(x + 2, timeMarkersHeight - 5, QString::number(time));
         painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
     }
 
-    // Draw horizontal signal separators
-    for (int i = 0; i <= visibleSignals.size(); i++) {
+        for (int i = 0; i <= visibleSignals.size(); i++) {
         int y = topMargin + timeMarkersHeight + i * signalHeight;
         painter.drawLine(0, y, width() - signalNamesWidth, y);
     }
 
-    // Draw selection highlight in waveform area
-    if (selectedSignal >= 0) {
-        int y = topMargin + timeMarkersHeight + selectedSignal * signalHeight;
+    // Draw selection highlight for all selected signals
+    for (int index : selectedSignals) {
+        int y = topMargin + timeMarkersHeight + index * signalHeight;
         painter.fillRect(0, y, width() - signalNamesWidth, signalHeight, QColor(60, 60, 90));
     }
 }
@@ -298,6 +322,43 @@ int WaveformWidget::getSignalAtPosition(const QPoint &pos) const
     return -1;
 }
 
+void WaveformWidget::handleMultiSelection(int signalIndex, QMouseEvent *event)
+{
+    if (event->modifiers() & Qt::ShiftModifier && lastSelectedSignal != -1) {
+        // Shift-click: select range from last selected to current
+        selectedSignals.clear();
+        int start = qMin(lastSelectedSignal, signalIndex);
+        int end = qMax(lastSelectedSignal, signalIndex);
+        for (int i = start; i <= end; i++) {
+            selectedSignals.insert(i);
+        }
+    } else if (event->modifiers() & Qt::ControlModifier) {
+        // Ctrl-click: toggle selection
+        if (selectedSignals.contains(signalIndex)) {
+            selectedSignals.remove(signalIndex);
+        } else {
+            selectedSignals.insert(signalIndex);
+        }
+        lastSelectedSignal = signalIndex;
+    } else {
+        // Regular click: single selection
+        selectedSignals.clear();
+        selectedSignals.insert(signalIndex);
+        lastSelectedSignal = signalIndex;
+    }
+}
+
+void WaveformWidget::updateSelection(int signalIndex, bool isMultiSelect)
+{
+    if (!isMultiSelect) {
+        selectedSignals.clear();
+        selectedSignals.insert(signalIndex);
+        lastSelectedSignal = signalIndex;
+    }
+    update();
+    emit signalSelected(signalIndex);
+}
+
 void WaveformWidget::startDragSignal(int signalIndex)
 {
     isDraggingSignal = true;
@@ -316,8 +377,15 @@ void WaveformWidget::performDrag(int mouseY)
 
     if (newIndex != dragSignalIndex) {
         visibleSignals.move(dragSignalIndex, newIndex);
+
+        // Update selection if dragging a selected signal
+        if (selectedSignals.contains(dragSignalIndex)) {
+            selectedSignals.remove(dragSignalIndex);
+            selectedSignals.insert(newIndex);
+            lastSelectedSignal = newIndex;
+        }
+
         dragSignalIndex = newIndex;
-        selectedSignal = newIndex;
         update();
     }
 }
@@ -339,14 +407,22 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
         int signalIndex = getSignalAtPosition(event->pos());
 
         if (signalIndex >= 0) {
-            // Signal clicked - select it
-            selectedSignal = signalIndex;
-            emit signalSelected(signalIndex);
+            // Handle multi-selection
+            handleMultiSelection(signalIndex, event);
 
             // Prepare for drag (works in both names column and waveform area)
             startDragSignal(signalIndex);
             update();
+emit signalSelected(signalIndex);
         } else if (!inNamesColumn) {
+// Clear selection when clicking empty space
+            if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
+                selectedSignals.clear();
+                lastSelectedSignal = -1;
+                update();
+                emit signalSelected(-1);
+            }
+            
             // Start timeline dragging with left button (waveform area only)
             isDragging = true;
             dragStartX = event->pos().x() - signalNamesWidth;
@@ -385,6 +461,16 @@ void WaveformWidget::mouseReleaseEvent(QMouseEvent *event)
             isDragging = false;
             setCursor(Qt::ArrowCursor);
         }
+    }
+}
+
+void WaveformWidget::keyPressEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier) {
+        selectAllSignals();
+        event->accept();
+    } else {
+        QWidget::keyPressEvent(event);
     }
 }
 
@@ -465,6 +551,13 @@ void WaveformWidget::contextMenuEvent(QContextMenuEvent *event)
 void WaveformWidget::showContextMenu(const QPoint &pos, int signalIndex)
 {
     QMenu contextMenu(this);
+
+    bool hasSelection = !selectedSignals.isEmpty();
+    
+    if (hasSelection) {
+        contextMenu.addAction("Remove Selected Signals", this, &WaveformWidget::removeSelectedSignals);
+        contextMenu.addSeparator();
+    }
 
     if (signalIndex >= 0) {
         contextMenu.addAction("Add Space Above", this, &WaveformWidget::addSpaceAbove);

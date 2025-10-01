@@ -39,8 +39,14 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Delete) {
         removeSelectedSignals();
-    }
+    event->accept();
+    } else if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier) {
+        waveformWidget->selectAllSignals();
+        removeSignalsButton->setEnabled(true);
+        event->accept();
+    } else {
     QMainWindow::keyPressEvent(event);
+}
 }
 
 void MainWindow::createActions()
