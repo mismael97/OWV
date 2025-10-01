@@ -7,47 +7,57 @@
 #include <QMap>
 #include <QFile>
 #include <QTextStream>
+#include <QSet>
+
+struct VCDSignal {
+    QString identifier;
+    QString name;
+    QString scope;
+    int width;
+    QString type;
+
+    bool operator==(const VCDSignal& other) const {
+        return identifier == other.identifier;
+    }
+};
+
+Q_DECLARE_METATYPE(VCDSignal)
+
+struct VCDValueChange {
+    int timestamp;
+    QString value;
+};
 
 class VCDParser : public QObject
 {
     Q_OBJECT
 
 public:
-    struct SignalValue {
-        quint64 time;
-        QString value;
-
-        SignalValue(quint64 t, const QString& v) : time(t), value(v) {}
-    };
-
-    struct Signal {
-        QString id;
-        QString name;
-        int width;
-        QVector<SignalValue> values;
-    };
-
     explicit VCDParser(QObject *parent = nullptr);
+    ~VCDParser();
 
-    bool parseFile(const QString& fileName);
-    const QVector<Signal>& getSignals() const { return m_signals; }
-    QString errorString() const { return m_errorString; }
-    double getTimeScale() const { return m_timeScale; }
+    bool parseFile(const QString &filename);
+    QString getError() const { return errorString; }
 
-signals:
-    void parsingCompleted();
+    const QVector<VCDSignal>& getSignals() const { return vcdSignals; }
+    const QMap<QString, QVector<VCDValueChange>>& getValueChanges() const { return valueChanges; }
+    int getEndTime() const { return endTime; }
+    const QMap<QString, VCDSignal>& getIdentifierMap() const { return identifierMap; }
 
 private:
-    bool parseHeader(QTextStream& stream);
-    bool parseValueChanges(QTextStream& stream);
-    void addValueChange(const QString& id, const QString& value, quint64 time);
+    bool parseHeader(QTextStream &stream);
+    bool parseValueChanges(QTextStream &stream);
+    void parseScopeLine(const QString &line);
+    void parseVarLine(const QString &line);
+    void parseTimescale(const QString &line);
 
-    QVector<Signal> m_signals;
-    QMap<QString, int> m_idToIndex;
-    QString m_errorString;
-    double m_timeScale;
-    QString m_timeUnit;
-    quint64 m_currentTime;
+    QString errorString;
+    QVector<VCDSignal> vcdSignals;
+    QMap<QString, VCDSignal> identifierMap;
+    QMap<QString, QVector<VCDValueChange>> valueChanges;
+    QString currentScope;
+    int endTime;
+    QString timescale;
 };
 
 #endif // VCDPARSER_H

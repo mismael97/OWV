@@ -3,143 +3,174 @@
 #include <QDebug>
 
 VCDParser::VCDParser(QObject *parent)
-    : QObject(parent)
-    , m_timeScale(1.0)
-    , m_currentTime(0)
+    : QObject(parent), endTime(0)
 {
 }
 
-bool VCDParser::parseFile(const QString& fileName)
+VCDParser::~VCDParser()
 {
-    qDebug() << "Parsing VCD file:" << fileName;
+}
 
-    m_signals.clear();
-    m_idToIndex.clear();
-    m_errorString.clear();
-    m_timeScale = 1.0;
-    m_currentTime = 0;
-
-    QFile file(fileName);
+bool VCDParser::parseFile(const QString &filename)
+{
+    QFile file(filename);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        m_errorString = "Cannot open file: " + file.errorString();
-        qDebug() << "File open error:" << m_errorString;
+        errorString = "Cannot open file: " + filename;
         return false;
     }
 
     QTextStream stream(&file);
-    bool headerSuccess = parseHeader(stream);
-    qDebug() << "Header parsing success:" << headerSuccess;
-    qDebug() << "Number of signals found:" << m_signals.size();
-    qDebug() << "Time scale:" << m_timeScale;
+    vcdSignals.clear();
+    valueChanges.clear();
+    identifierMap.clear();
+    currentScope.clear();
+    endTime = 0;
 
-    bool valueSuccess = parseValueChanges(stream);
-    qDebug() << "Value parsing success:" << valueSuccess;
+    if (!parseHeader(stream)) {
+        return false;
+    }
+
+    if (!parseValueChanges(stream)) {
+        return false;
+    }
 
     file.close();
 
-    if (headerSuccess && valueSuccess && !m_signals.isEmpty()) {
-        emit parsingCompleted();
-        return true;
-    } else {
-        m_errorString = "Failed to parse VCD file properly";
-        qDebug() << "Parse failed - signals:" << m_signals.size();
-        return false;
-    }
+    qDebug() << "VCD parsing completed";
+    qDebug() << "Signals:" << vcdSignals.size() << "End time:" << endTime;
+
+    return true;
 }
 
-bool VCDParser::parseHeader(QTextStream& stream)
+bool VCDParser::parseHeader(QTextStream &stream)
 {
-    QString line;
-    bool inScope = false;
-    QString currentScope;
+    QRegularExpression scopeRegex("^\\$scope\\s+(\\w+)\\s+(\\S+)\\s*\\$end$");
+    QRegularExpression varRegex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(\\S+)\\s*\\$end$");
+    QRegularExpression timescaleRegex("^\\$timescale\\s+(\\S+)\\s*\\$end$");
 
-    while (stream.readLineInto(&line)) {
-        line = line.trimmed();
-        if (line.isEmpty()) continue;
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
 
-        if (line.startsWith("$enddefinitions")) {
-            break;
-        }
-
-        if (line.startsWith("$timescale")) {
-            // Read the next line for timescale value
-            if (stream.readLineInto(&line)) {
-                line = line.trimmed();
-                // Parse timescale like "1ns" or "100ps"
-                QRegularExpression re("(\\d+\\.?\\d*)\\s*(\\w+)");
-                QRegularExpressionMatch match = re.match(line);
-                if (match.hasMatch()) {
-                    m_timeScale = match.captured(1).toDouble();
-                    m_timeUnit = match.captured(2);
-                    qDebug() << "Parsed timescale:" << m_timeScale << m_timeUnit;
-                }
-                // Skip until $end
-                while (line != "$end" && !stream.atEnd()) {
-                    stream.readLineInto(&line);
-                }
+        if (line.startsWith("$date")) {
+            while (!stream.atEnd() && !line.endsWith("$end")) {
+                line = stream.readLine().trimmed();
             }
+        }
+        else if (line.startsWith("$version")) {
+            while (!stream.atEnd() && !line.endsWith("$end")) {
+                line = stream.readLine().trimmed();
+            }
+        }
+        else if (line.startsWith("$timescale")) {
+            parseTimescale(line);
         }
         else if (line.startsWith("$scope")) {
-            inScope = true;
-            QStringList parts = line.split(' ', Qt::SkipEmptyParts);
-            if (parts.size() >= 3) {
-                currentScope = parts[2];
-                qDebug() << "Scope:" << currentScope;
-            }
-        }
-        else if (line.startsWith("$upscope")) {
-            inScope = false;
-            currentScope.clear();
+            parseScopeLine(line);
         }
         else if (line.startsWith("$var")) {
-            QStringList parts = line.split(' ', Qt::SkipEmptyParts);
-            if (parts.size() >= 5) {
-                Signal signal;
-                signal.width = parts[2].toInt();
-                signal.id = parts[3];
-                signal.name = currentScope.isEmpty() ? parts[4] : currentScope + "." + parts[4];
-
-                m_idToIndex[signal.id] = m_signals.size();
-                m_signals.append(signal);
-                qDebug() << "Added signal:" << signal.name << "ID:" << signal.id;
+            parseVarLine(line);
+        }
+        else if (line.startsWith("$upscope")) {
+            int lastDot = currentScope.lastIndexOf('.');
+            if (lastDot != -1) {
+                currentScope = currentScope.left(lastDot);
+            } else {
+                currentScope.clear();
             }
         }
-    }
-
-    qDebug() << "Header parsing complete. Total signals:" << m_signals.size();
-    return true;
-}
-
-bool VCDParser::parseValueChanges(QTextStream& stream)
-{
-    QString line;
-
-    while (stream.readLineInto(&line)) {
-        if (line.startsWith("#")) {
-            m_currentTime = line.mid(1).toULongLong();
-        }
-        else if (line.startsWith("b")) {
-            int spaceIndex = line.indexOf(' ');
-            if (spaceIndex != -1) {
-                QString value = line.mid(1, spaceIndex - 1);
-                QString id = line.mid(spaceIndex + 1);
-                addValueChange(id, value, m_currentTime);
-            }
-        }
-        else if (line.length() >= 2) {
-            QString value = line.left(1);
-            QString id = line.mid(1);
-            addValueChange(id, value, m_currentTime);
+        else if (line.startsWith("$enddefinitions")) {
+            break;
         }
     }
 
     return true;
 }
 
-void VCDParser::addValueChange(const QString& id, const QString& value, quint64 time)
+void VCDParser::parseTimescale(const QString &line)
 {
-    if (m_idToIndex.contains(id)) {
-        int index = m_idToIndex[id];
-        m_signals[index].values.append(SignalValue(time, value));
+    QRegularExpression regex("^\\$timescale\\s+(\\S+)\\s*\\$end$");
+    QRegularExpressionMatch match = regex.match(line);
+    if (match.hasMatch()) {
+        timescale = match.captured(1);
     }
+}
+
+void VCDParser::parseScopeLine(const QString &line)
+{
+    QRegularExpression regex("^\\$scope\\s+(\\w+)\\s+(\\S+)\\s*\\$end$");
+    QRegularExpressionMatch match = regex.match(line);
+    if (match.hasMatch()) {
+        QString scopeName = match.captured(2);
+        if (!currentScope.isEmpty()) {
+            currentScope += "." + scopeName;
+        } else {
+            currentScope = scopeName;
+        }
+    }
+}
+
+void VCDParser::parseVarLine(const QString &line)
+{
+    QRegularExpression regex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(\\S+)\\s*\\$end$");
+    QRegularExpressionMatch match = regex.match(line);
+    if (match.hasMatch()) {
+        VCDSignal signal;
+        signal.type = match.captured(1);
+        signal.width = match.captured(2).toInt();
+        signal.identifier = match.captured(3);
+        signal.name = match.captured(4);
+        signal.scope = currentScope;
+
+        vcdSignals.append(signal);
+        identifierMap[signal.identifier] = signal;
+    }
+}
+
+bool VCDParser::parseValueChanges(QTextStream &stream)
+{
+    QRegularExpression timestampRegex("^#(\\d+)$");
+    QRegularExpression valueChangeRegex("^([01xXzZ])(\\S+)$");
+    QRegularExpression vectorValueRegex("^[bB]([01xXzZ]+)\\s+(\\S+)$");
+
+    int currentTime = 0;
+
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+
+        if (line.isEmpty()) continue;
+
+        QRegularExpressionMatch timestampMatch = timestampRegex.match(line);
+        if (timestampMatch.hasMatch()) {
+            currentTime = timestampMatch.captured(1).toInt();
+            endTime = qMax(endTime, currentTime);
+            continue;
+        }
+
+        QRegularExpressionMatch valueMatch = valueChangeRegex.match(line);
+        if (valueMatch.hasMatch()) {
+            QString value = valueMatch.captured(1).toUpper();
+            QString identifier = valueMatch.captured(2);
+
+            VCDValueChange change;
+            change.timestamp = currentTime;
+            change.value = value;
+
+            valueChanges[identifier].append(change);
+            continue;
+        }
+
+        QRegularExpressionMatch vectorMatch = vectorValueRegex.match(line);
+        if (vectorMatch.hasMatch()) {
+            QString value = vectorMatch.captured(1);
+            QString identifier = vectorMatch.captured(2);
+
+            VCDValueChange change;
+            change.timestamp = currentTime;
+            change.value = value;
+
+            valueChanges[identifier].append(change);
+        }
+    }
+
+    return true;
 }

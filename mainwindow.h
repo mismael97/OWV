@@ -2,15 +2,19 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QSplitter>
 #include <QTreeWidget>
+#include <QSplitter>
 #include <QToolBar>
-#include <QAction>
+#include <QStatusBar>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QScrollBar>
 #include <QLabel>
+#include <QPushButton>
+#include <QHBoxLayout>
+#include <QWidget>
 #include "vcdparser.h"
-#include "waveformview.h"
+#include "waveformwidget.h"
 
 class MainWindow : public QMainWindow
 {
@@ -21,33 +25,50 @@ public:
     ~MainWindow();
 
 private slots:
-    void openVCDFile();
-    void onVCDLoaded();
-    void onSignalSelected(const QString& signalName);
-    void onSignalTreeSelectionChanged();
+    void openFile();
     void zoomIn();
     void zoomOut();
-    void resetZoom();
+    void zoomFit();
+    void signalSelectionChanged();
+    void updateTimeDisplay(int time);
+    void about();
+    void onSignalItemChanged(QTreeWidgetItem *item, int column);
+    void selectAllSignals();
+    void deselectAllSignals();
 
 private:
     void createActions();
-    void createMenus();
-    void createToolBars();
+    void createToolBar();
     void createStatusBar();
     void setupUI();
+    void loadVcdFile(const QString &filename);
+    void populateSignalTree();
+    void updateVisibleSignals();
+    void setAllSignalsCheckState(Qt::CheckState state);
 
-    VCDParser* m_parser;
-    WaveformView* m_waveformView;
-    QTreeWidget* m_signalTree;
-    QSplitter* m_splitter;
+    // UI Components
+    QSplitter *mainSplitter;
+    QTreeWidget *signalTree;
+    WaveformWidget *waveformWidget;
+    QScrollBar *timeScrollBar;
 
-    QAction* m_openAct;
-    QAction* m_exitAct;
-    QAction* m_zoomInAct;
-    QAction* m_zoomOutAct;
-    QAction* m_resetZoomAct;
+    // Toolbar Actions
+    QAction *openAction;
+    QAction *zoomInAction;
+    QAction *zoomOutAction;
+    QAction *zoomFitAction;
+    QAction *aboutAction;
 
-    QLabel* m_statusLabel;
+    // Signal selection buttons
+    QPushButton *selectAllButton;
+    QPushButton *deselectAllButton;
+
+    // Status Bar
+    QLabel *statusLabel;
+    QLabel *timeLabel;
+
+    // Data
+    VCDParser *vcdParser;
 };
 
 #endif // MAINWINDOW_H
