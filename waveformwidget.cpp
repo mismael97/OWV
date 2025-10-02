@@ -136,8 +136,11 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     }
 
     drawSignalNamesColumn(painter);
+    drawSignalValuesColumn(painter);  // Add values column
     drawWaveformArea(painter);
+    drawTimeCursor(painter);          // Add time cursor
 }
+
 
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 {
@@ -205,21 +208,25 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 }
 
 void WaveformWidget::drawWaveformArea(QPainter &painter) {
-    painter.setClipRect(signalNamesWidth, 0, width() - signalNamesWidth, height());
-    painter.translate(signalNamesWidth, 0);
-    painter.fillRect(0, 0, width() - signalNamesWidth, height(), QColor(30, 30, 30));
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    painter.setClipRect(waveformStartX, 0, width() - waveformStartX, height());
+    painter.translate(waveformStartX, 0);
+    painter.fillRect(0, 0, width() - waveformStartX, height(), QColor(30, 30, 30));
     
     if (!displayItems.isEmpty()) {
         drawGrid(painter);
         drawSignals(painter);
     }
     
-    painter.translate(-signalNamesWidth, 0);
+    painter.translate(-waveformStartX, 0);
     painter.setClipping(false);
 }
 
 void WaveformWidget::drawGrid(QPainter &painter)
 {
+        // Draw timeline area background
+    painter.fillRect(0, 0, width() - signalNamesWidth, timeMarkersHeight, QColor(40, 40, 50));
+    
     painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
 
     int startTime = xToTime(0);
@@ -380,8 +387,21 @@ void WaveformWidget::moveItem(int itemIndex, int newIndex)
 
 void WaveformWidget::mousePressEvent(QMouseEvent *event)
 {
+    // Check if click is in timeline area (top part of waveform area)
+    bool inTimelineArea = event->pos().x() >= (signalNamesWidth + valuesColumnWidth) && 
+                         event->pos().y() < timeMarkersHeight;
+
+    if (event->button() == Qt::LeftButton && inTimelineArea) {
+        // Update cursor time only when clicking in timeline area
+        updateCursorTime(event->pos());
+        event->accept();
+        return;
+    }
+
     // Check if click is in signal names column or waveform area
     bool inNamesColumn = event->pos().x() < signalNamesWidth;
+    bool inWaveformArea = event->pos().x() >= (signalNamesWidth + valuesColumnWidth);
+
 
     if (event->button() == Qt::MiddleButton)
     {
@@ -443,22 +463,19 @@ void WaveformWidget::mouseDoubleClickEvent(QMouseEvent *event)
 
 void WaveformWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (isDraggingItem)
-    {
+    if (isDraggingItem) {
         performDrag(event->pos().y());
-    }
-    else if (isDragging)
-    {
+    } else if (isDragging) {
         int delta = dragStartX - (event->pos().x() - signalNamesWidth);
         timeOffset = dragStartOffset + delta;
         updateScrollBar();
         update();
     }
 
-    // Emit time change for cursor position in waveform area
-    if (event->pos().x() >= signalNamesWidth)
-    {
-        int currentTime = xToTime(event->pos().x() - signalNamesWidth);
+    // REMOVE the automatic cursor update on mouse movement
+    // Only update time display for status bar
+    if (event->pos().x() >= (signalNamesWidth + valuesColumnWidth)) {
+        int currentTime = xToTime(event->pos().x() - (signalNamesWidth + valuesColumnWidth));
         emit timeChanged(currentTime);
     }
 }
@@ -1199,4 +1216,116 @@ QColor WaveformWidget::getSignalColor(const QString& identifier) const
     
     // Default to green for all signals
     return QColor(0, 255, 0);
+}
+
+void WaveformWidget::drawTimeCursor(QPainter &painter)
+{
+    if (!showCursor || cursorTime < 0) return;
+    
+    // Convert cursor time to X position in waveform area
+    int cursorX = timeToX(cursorTime);
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    
+    // Draw vertical cursor line only in waveform area
+    painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
+    painter.drawLine(waveformStartX + cursorX, 0, waveformStartX + cursorX, height());
+    
+    // Draw cursor time label at top
+    painter.setPen(QPen(Qt::white));
+    QString timeText = QString("Time: %1").arg(cursorTime);
+    QRect timeRect(waveformStartX + cursorX + 5, 5, 100, 20);
+    painter.fillRect(timeRect, QColor(0, 0, 0, 200));
+    painter.drawText(timeRect, Qt::AlignLeft | Qt::AlignVCenter, timeText);
+}
+
+void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
+{
+    if (!showCursor || cursorTime < 0 || !vcdParser) return;
+    
+    int valuesColumnX = signalNamesWidth + valuesColumnWidth;
+    
+    // Draw values column background
+    painter.fillRect(signalNamesWidth, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
+    
+    // Draw column separator
+    painter.setPen(QPen(QColor(80, 80, 80), 2));
+    painter.drawLine(valuesColumnX, 0, valuesColumnX, height());
+    
+    // Draw header
+    painter.fillRect(signalNamesWidth, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
+    painter.setPen(QPen(Qt::white));
+    painter.drawText(signalNamesWidth + 5, timeMarkersHeight - 8, "Value @ Time");
+    
+    int currentY = topMargin + timeMarkersHeight;
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
+        int itemHeight = item.getHeight();
+        
+        // Draw background for this row
+        if (selectedItems.contains(i)) {
+            painter.fillRect(signalNamesWidth, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
+        } else if (i % 2 == 0) {
+            painter.fillRect(signalNamesWidth, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
+        } else {
+            painter.fillRect(signalNamesWidth, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
+        }
+        
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal& signal = item.signal.signal;
+            QString value = getSignalValueAtTime(signal.identifier, cursorTime);
+            
+            // Format the value based on signal type
+            QString displayValue;
+            if (signal.width > 1) {
+                displayValue = formatBusValue(value);
+            } else {
+                displayValue = value.toUpper();
+            }
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(signalNamesWidth + 5, currentY + itemHeight / 2 + 4, displayValue);
+        }
+        
+        // Draw horizontal separator
+        painter.setPen(QPen(QColor(80, 80, 80)));
+        painter.drawLine(signalNamesWidth, currentY + itemHeight, valuesColumnX, currentY + itemHeight);
+        
+        currentY += itemHeight;
+    }
+}
+
+void WaveformWidget::debugCursorPosition(const QPoint &pos)
+{
+    qDebug() << "=== Cursor Debug ===";
+    qDebug() << "Mouse position:" << pos;
+    qDebug() << "signalNamesWidth:" << signalNamesWidth;
+    qDebug() << "valuesColumnWidth:" << valuesColumnWidth;
+    qDebug() << "Waveform area starts at X:" << (signalNamesWidth + valuesColumnWidth);
+    qDebug() << "Click relative to waveform:" << (pos.x() - (signalNamesWidth + valuesColumnWidth));
+    qDebug() << "timeOffset:" << timeOffset;
+    qDebug() << "timeScale:" << timeScale;
+    qDebug() << "Calculated time:" << xToTime(pos.x() - (signalNamesWidth + valuesColumnWidth));
+}
+
+void WaveformWidget::updateCursorTime(const QPoint &pos)
+{
+    // Only set cursor if click is in the timeline area (top part)
+    if (pos.x() < signalNamesWidth + valuesColumnWidth || pos.y() >= timeMarkersHeight) {
+        return;
+    }
+    
+    // Calculate the visible time range
+    int visibleStartTime = xToTime(0);
+    int visibleEndTime = xToTime(width() - (signalNamesWidth + valuesColumnWidth));
+    
+    // Calculate click position as fraction of visible area
+    double clickFraction = (double)(pos.x() - (signalNamesWidth + valuesColumnWidth)) / 
+                          (width() - (signalNamesWidth + valuesColumnWidth));
+    
+    cursorTime = visibleStartTime + (int)(clickFraction * (visibleEndTime - visibleStartTime));
+    showCursor = true;
+    update();
+    
+    qDebug() << "Cursor time:" << cursorTime << "Visible range:" << visibleStartTime << "-" << visibleEndTime;
 }
