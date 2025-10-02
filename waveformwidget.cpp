@@ -7,16 +7,14 @@
 #include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QInputDialog>
-#include <QColorDialog>
 #include <QApplication>
 #include <cmath>
-#include <stdexcept>
 
 WaveformWidget::WaveformWidget(QWidget *parent)
     : QWidget(parent), vcdParser(nullptr), timeScale(1.0), timeOffset(0),
       timeMarkersHeight(30), topMargin(10),
       isDragging(false), isDraggingItem(false), dragItemIndex(-1), lastSelectedItem(-1),
-      busDisplayFormat(Hex), cursorTime(0), showCursor(true)  // Initialize cursor at time 0 and show it
+      busDisplayFormat(Hex), cursorTime(0), showCursor(true)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -112,14 +110,31 @@ void WaveformWidget::zoomFit()
     if (!vcdParser || vcdParser->getEndTime() == 0)
         return;
 
-    int availableWidth = width() - signalNamesWidth - 20;
+    int availableWidth = width() - signalNamesWidth - valuesColumnWidth - 20;
     timeScale = static_cast<double>(availableWidth) / vcdParser->getEndTime();
     timeOffset = 0;
     updateScrollBar();
     update();
 }
 
-// Painting
+void WaveformWidget::resetSignalColors()
+{
+    signalColors.clear();
+    update();
+}
+
+void WaveformWidget::setHighlightBusses(bool highlight)
+{
+    highlightBusses = highlight;
+    update();
+}
+
+void WaveformWidget::setBusDisplayFormat(BusFormat format)
+{
+    busDisplayFormat = format;
+    update();
+}
+
 void WaveformWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
@@ -137,21 +152,19 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     }
 
     drawSignalNamesColumn(painter);
-    drawSignalValuesColumn(painter);  // Add values column
+    drawSignalValuesColumn(painter);
     drawWaveformArea(painter);
-    drawTimeCursor(painter);          // Add time cursor
+    drawTimeCursor(painter);
 }
-
 
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 {
     // Draw signal names column background
     painter.fillRect(0, 0, signalNamesWidth, height(), QColor(37, 37, 38));
 
-    // Draw column separator
-    painter.setPen(QPen(QColor(80, 80, 80), 2));
-    painter.drawLine(signalNamesWidth, 0, signalNamesWidth, height());
-
+    // Draw names splitter
+    painter.fillRect(signalNamesWidth - 1, 0, 2, height(), QColor(100, 100, 100));
+    
     // Draw header
     painter.fillRect(0, 0, signalNamesWidth, timeMarkersHeight, QColor(60, 60, 60));
     painter.setPen(QPen(Qt::white));
@@ -208,6 +221,63 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     }
 }
 
+void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
+{
+    if (!showCursor || cursorTime < 0 || !vcdParser) return;
+    
+    int valuesColumnStart = signalNamesWidth;
+    
+    // Draw values column background
+    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
+    
+    // Draw values splitter
+    painter.fillRect(valuesColumnStart + valuesColumnWidth - 1, 0, 2, height(), QColor(100, 100, 100));
+
+    // Draw header
+    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
+    painter.setPen(QPen(Qt::white));
+    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value @ Time");
+    
+    int currentY = topMargin + timeMarkersHeight;
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
+        int itemHeight = item.getHeight();
+        
+        // Draw background for this row
+        if (selectedItems.contains(i)) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
+        } else if (i % 2 == 0) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
+        } else {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
+        }
+        
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal& signal = item.signal.signal;
+            QString value = getSignalValueAtTime(signal.identifier, cursorTime);
+            
+            // Format the value based on signal type
+            QString displayValue;
+            if (signal.width > 1) {
+                displayValue = formatBusValue(value);
+            } else {
+                displayValue = value.toUpper();
+            }
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(valuesColumnStart + 5, currentY + itemHeight / 2 + 4, displayValue);
+        }
+        
+        // Draw horizontal separator
+        painter.setPen(QPen(QColor(80, 80, 80)));
+        painter.drawLine(valuesColumnStart, currentY + itemHeight, 
+                        valuesColumnStart + valuesColumnWidth, currentY + itemHeight);
+        
+        currentY += itemHeight;
+    }
+}
+
 void WaveformWidget::drawWaveformArea(QPainter &painter) {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
     painter.setClipRect(waveformStartX, 0, width() - waveformStartX, height());
@@ -223,15 +293,31 @@ void WaveformWidget::drawWaveformArea(QPainter &painter) {
     painter.setClipping(false);
 }
 
+void WaveformWidget::drawTimeCursor(QPainter &painter)
+{
+    if (!showCursor || cursorTime < 0) return;
+    
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    int cursorX = timeToX(cursorTime);
+    
+    // Draw vertical cursor line only in waveform area
+    painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
+    painter.drawLine(waveformStartX + cursorX, 0, waveformStartX + cursorX, height());
+    
+    // Draw cursor time label at top
+    painter.setPen(QPen(Qt::white));
+    QString timeText = QString("Time: %1").arg(cursorTime);
+    QRect timeRect(waveformStartX + cursorX + 5, 5, 100, 20);
+    painter.fillRect(timeRect, QColor(0, 0, 0, 200));
+    painter.drawText(timeRect, Qt::AlignLeft | Qt::AlignVCenter, timeText);
+}
+
 void WaveformWidget::drawGrid(QPainter &painter)
 {
-        // Draw timeline area background
-    painter.fillRect(0, 0, width() - signalNamesWidth, timeMarkersHeight, QColor(40, 40, 50));
-    
     painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
 
     int startTime = xToTime(0);
-    int endTime = xToTime(width() - signalNamesWidth);
+    int endTime = xToTime(width() - signalNamesWidth - valuesColumnWidth);
 
     int timeStep = calculateTimeStep(startTime, endTime);
     for (int time = (startTime / timeStep) * timeStep; time <= endTime; time += timeStep)
@@ -248,7 +334,7 @@ void WaveformWidget::drawGrid(QPainter &painter)
     int currentY = topMargin + timeMarkersHeight;
     for (int i = 0; i <= displayItems.size(); i++)
     {
-        painter.drawLine(0, currentY, width() - signalNamesWidth, currentY);
+        painter.drawLine(0, currentY, width() - signalNamesWidth - valuesColumnWidth, currentY);
         if (i < displayItems.size()) {
             currentY += displayItems[i].getHeight();
         }
@@ -261,10 +347,267 @@ void WaveformWidget::drawGrid(QPainter &painter)
         int itemHeight = displayItems[i].getHeight();
         if (selectedItems.contains(i))
         {
-            painter.fillRect(0, currentY, width() - signalNamesWidth, itemHeight, QColor(60, 60, 90));
+            painter.fillRect(0, currentY, width() - signalNamesWidth - valuesColumnWidth, itemHeight, QColor(60, 60, 90));
         }
         currentY += itemHeight;
     }
+}
+
+void WaveformWidget::drawSignals(QPainter &painter) {
+    int currentY = topMargin + timeMarkersHeight;
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
+        
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal& signal = item.signal.signal;
+            
+            // Draw as bus if width > 1, otherwise as single line
+            if (signal.width > 1) {
+                drawBusWaveform(painter, signal, currentY);
+            } else {
+                drawSignalWaveform(painter, signal, currentY);
+            }
+        }
+        
+        currentY += item.getHeight();
+    }
+}
+
+void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
+    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
+    if (changes.isEmpty()) return;
+
+    QColor signalColor = getSignalColor(signal.identifier);
+    
+    int signalMidY = yPos + 15;
+    int highLevel = yPos + 5;
+    int lowLevel = yPos + 25;
+    int middleLevel = yPos + 15; // Middle level for X/Z values
+
+    int prevTime = 0;
+    QString prevValue = "0";
+    int prevX = timeToX(prevTime);
+
+    for (const auto &change : changes) {
+        int currentX = timeToX(change.timestamp);
+        
+        // Handle X and Z values with special colors and levels
+        QColor drawColor = signalColor;
+        bool isX = (change.value == "x" || change.value == "X");
+        bool isZ = (change.value == "z" || change.value == "Z");
+        bool prevIsX = (prevValue == "x" || prevValue == "X");
+        bool prevIsZ = (prevValue == "z" || prevValue == "Z");
+        
+        if (isX) {
+            drawColor = QColor(255, 0, 0); // Red for X
+        } else if (isZ) {
+            drawColor = QColor(255, 165, 0); // Orange for Z
+        }
+        
+        painter.setPen(QPen(drawColor, 2));
+
+        // Draw the segment based on previous value
+        if (prevIsX || prevIsZ) {
+            // Previous value was X or Z - draw at middle level
+            painter.drawLine(prevX, middleLevel, currentX, middleLevel);
+        } else if (prevValue == "1") {
+            painter.drawLine(prevX, highLevel, currentX, highLevel);
+        } else {
+            painter.drawLine(prevX, lowLevel, currentX, lowLevel);
+        }
+
+        // Draw transition line if value changed
+        if (prevValue != change.value) {
+            int fromY, toY;
+            
+            // Determine starting Y position
+            if (prevIsX || prevIsZ) {
+                fromY = middleLevel;
+            } else if (prevValue == "1") {
+                fromY = highLevel;
+            } else {
+                fromY = lowLevel;
+            }
+            
+            // Determine ending Y position  
+            if (isX || isZ) {
+                toY = middleLevel;
+            } else if (change.value == "1") {
+                toY = highLevel;
+            } else {
+                toY = lowLevel;
+            }
+            
+            painter.drawLine(currentX, fromY, currentX, toY);
+        }
+
+        prevTime = change.timestamp;
+        prevValue = change.value;
+        prevX = currentX;
+    }
+
+    // Draw the final segment
+    QColor finalColor = signalColor;
+    bool finalIsX = (prevValue == "x" || prevValue == "X");
+    bool finalIsZ = (prevValue == "z" || prevValue == "Z");
+    
+    if (finalIsX) {
+        finalColor = QColor(255, 0, 0);
+    } else if (finalIsZ) {
+        finalColor = QColor(255, 165, 0);
+    }
+    
+    painter.setPen(QPen(finalColor, 2));
+    
+    int endX = timeToX(vcdParser->getEndTime());
+    
+    if (finalIsX || finalIsZ) {
+        painter.drawLine(prevX, middleLevel, endX, middleLevel);
+    } else if (prevValue == "1") {
+        painter.drawLine(prevX, highLevel, endX, highLevel);
+    } else {
+        painter.drawLine(prevX, lowLevel, endX, lowLevel);
+    }
+}
+
+void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
+    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
+    if (changes.isEmpty()) return;
+
+    QColor signalColor = getSignalColor(signal.identifier);
+    painter.setPen(QPen(signalColor, 2));
+
+    int signalHeight = 25;
+    int signalTop = yPos + 2;
+    int signalBottom = yPos + signalHeight;
+    int textY = yPos + 17; // Position for text
+
+    int prevTime = 0;
+    QString prevValue = getBusValueAtTime(signal.identifier, 0);
+    int prevX = timeToX(prevTime);
+
+    // Draw the bus background
+    painter.fillRect(prevX, signalTop, width() - signalNamesWidth - valuesColumnWidth, signalHeight, QColor(40, 40, 40, 128));
+
+    // Draw value regions and labels
+    for (int i = 0; i < changes.size(); i++) {
+        const auto &change = changes[i];
+        int currentX = timeToX(change.timestamp);
+        
+        // Handle X and Z values with special colors for the region
+        QColor regionColor = QColor(50, 50, 50, 180);
+        QColor textColor = Qt::white;
+        
+        if (prevValue.contains('x') || prevValue.contains('X')) {
+            regionColor = QColor(255, 0, 0, 100); // Red background for X
+        } else if (prevValue.contains('z') || prevValue.contains('Z')) {
+            regionColor = QColor(255, 165, 0, 100); // Orange background for Z
+        }
+        
+        // Draw the value region
+        painter.fillRect(prevX, signalTop, currentX - prevX, signalHeight, regionColor);
+        
+        // Draw the value text centered in this region
+        if (currentX - prevX > 30) { // Only draw text if region is wide enough
+            QString displayValue = formatBusValue(prevValue);
+            int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
+            int centerX = prevX + (currentX - prevX) / 2;
+            
+            painter.setPen(QPen(textColor));
+            painter.drawText(centerX - textWidth/2, textY, displayValue);
+            painter.setPen(QPen(signalColor, 2));
+        }
+        
+        // Draw vertical separator at value change
+        painter.drawLine(currentX, signalTop, currentX, signalBottom);
+        
+        prevTime = change.timestamp;
+        prevValue = change.value;
+        prevX = currentX;
+    }
+
+    // Draw the final region
+    int endX = timeToX(vcdParser->getEndTime());
+    if (endX > prevX) {
+        QColor finalRegionColor = QColor(50, 50, 50, 180);
+        if (prevValue.contains('x') || prevValue.contains('X')) {
+            finalRegionColor = QColor(255, 0, 0, 100);
+        } else if (prevValue.contains('z') || prevValue.contains('Z')) {
+            finalRegionColor = QColor(255, 165, 0, 100);
+        }
+        
+        painter.fillRect(prevX, signalTop, endX - prevX, signalHeight, finalRegionColor);
+        
+        if (endX - prevX > 30) {
+            QString displayValue = formatBusValue(prevValue);
+            int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
+            int centerX = prevX + (endX - prevX) / 2;
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(centerX - textWidth/2, textY, displayValue);
+        }
+    }
+
+    // Draw bus outline with signal color
+    painter.setPen(QPen(signalColor, 2));
+    painter.drawRect(timeToX(0), signalTop, endX - timeToX(0), signalHeight);
+}
+
+void WaveformWidget::updateScrollBar()
+{
+    if (!vcdParser)
+    {
+        horizontalScrollBar->setRange(0, 0);
+        return;
+    }
+
+    int contentWidth = timeToX(vcdParser->getEndTime());
+    int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
+
+    horizontalScrollBar->setRange(0, qMax(0, contentWidth - viewportWidth));
+    horizontalScrollBar->setPageStep(viewportWidth);
+    horizontalScrollBar->setSingleStep(viewportWidth / 10);
+
+    horizontalScrollBar->setGeometry(signalNamesWidth + valuesColumnWidth, height() - 20, width() - signalNamesWidth - valuesColumnWidth, 20);
+}
+
+int WaveformWidget::timeToX(int time) const
+{
+    return static_cast<int>(time * timeScale) - timeOffset;
+}
+
+int WaveformWidget::xToTime(int x) const
+{
+    return static_cast<int>((x + timeOffset) / timeScale);
+}
+
+QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time) const
+{
+    const auto &changes = vcdParser->getValueChanges().value(identifier);
+    QString value = "0";
+
+    for (const auto &change : changes)
+    {
+        if (change.timestamp > time)
+            break;
+        value = change.value;
+    }
+
+    return value;
+}
+
+QString WaveformWidget::getBusValueAtTime(const QString &identifier, int time) const {
+    const auto &changes = vcdParser->getValueChanges().value(identifier);
+    QString value = "0"; // Default value
+
+    for (const auto &change : changes) {
+        if (change.timestamp > time)
+            break;
+        value = change.value;
+    }
+
+    return value;
 }
 
 int WaveformWidget::calculateTimeStep(int startTime, int endTime) const
@@ -386,14 +729,29 @@ void WaveformWidget::moveItem(int itemIndex, int newIndex)
     update();
 }
 
+
 void WaveformWidget::mousePressEvent(QMouseEvent *event)
 {
+    if (event->button() == Qt::LeftButton) {
+        if (isOverNamesSplitter(event->pos())) {
+            draggingNamesSplitter = true;
+            setCursor(Qt::SplitHCursor);
+            event->accept();
+            return;
+        } else if (isOverValuesSplitter(event->pos())) {
+            draggingValuesSplitter = true;
+            setCursor(Qt::SplitHCursor);
+            event->accept();
+            return;
+        }
+    }
+
     // Check if click is in timeline area (top part of waveform area)
-    bool inTimelineArea = event->pos().x() >= (signalNamesWidth + valuesColumnWidth) && 
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    bool inTimelineArea = event->pos().x() >= waveformStartX && 
                          event->pos().y() < timeMarkersHeight;
 
     if (event->button() == Qt::LeftButton && inTimelineArea) {
-        // Update cursor time only when clicking in timeline area
         updateCursorTime(event->pos());
         event->accept();
         return;
@@ -401,16 +759,15 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
 
     // Check if click is in signal names column or waveform area
     bool inNamesColumn = event->pos().x() < signalNamesWidth;
-    bool inWaveformArea = event->pos().x() >= (signalNamesWidth + valuesColumnWidth);
-
+    bool inWaveformArea = event->pos().x() >= waveformStartX;
 
     if (event->button() == Qt::MiddleButton)
     {
         // Start middle button drag for horizontal scrolling (waveform area only)
-        if (!inNamesColumn)
+        if (!inNamesColumn && inWaveformArea)
         {
             isDragging = true;
-            dragStartX = event->pos().x() - signalNamesWidth;
+            dragStartX = event->pos().x() - waveformStartX;
             dragStartOffset = timeOffset;
             setCursor(Qt::ClosedHandCursor);
         }
@@ -429,7 +786,7 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
             update();
             emit itemSelected(itemIndex);
         }
-        else if (!inNamesColumn)
+        else if (!inNamesColumn && inWaveformArea)
         {
             // Clear selection when clicking empty space
             if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
@@ -442,7 +799,7 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
 
             // Start timeline dragging with left button (waveform area only)
             isDragging = true;
-            dragStartX = event->pos().x() - signalNamesWidth;
+            dragStartX = event->pos().x() - waveformStartX;
             dragStartOffset = timeOffset;
             setCursor(Qt::ClosedHandCursor);
         }
@@ -464,25 +821,49 @@ void WaveformWidget::mouseDoubleClickEvent(QMouseEvent *event)
 
 void WaveformWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (isDraggingItem) {
-        performDrag(event->pos().y());
-    } else if (isDragging) {
-        int delta = dragStartX - (event->pos().x() - signalNamesWidth);
-        timeOffset = dragStartOffset + delta;
-        updateScrollBar();
-        update();
-    }
+    if (draggingNamesSplitter) {
+        signalNamesWidth = qMax(150, event->pos().x());
+        updateSplitterPositions();
+    } else if (draggingValuesSplitter) {
+        valuesColumnWidth = qMax(80, event->pos().x() - signalNamesWidth);
+        updateSplitterPositions();
+    } else {
+        // Update cursor when over splitter
+        if (isOverNamesSplitter(event->pos()) || isOverValuesSplitter(event->pos())) {
+            setCursor(Qt::SplitHCursor);
+        } else {
+            setCursor(Qt::ArrowCursor);
+        }
 
-    // REMOVE the automatic cursor update on mouse movement
-    // Only update time display for status bar
-    if (event->pos().x() >= (signalNamesWidth + valuesColumnWidth)) {
-        int currentTime = xToTime(event->pos().x() - (signalNamesWidth + valuesColumnWidth));
-        emit timeChanged(currentTime);
+        if (isDraggingItem) {
+            performDrag(event->pos().y());
+        } else if (isDragging) {
+            int waveformStartX = signalNamesWidth + valuesColumnWidth;
+            int delta = dragStartX - (event->pos().x() - waveformStartX);
+            timeOffset = dragStartOffset + delta;
+            updateScrollBar();
+            update();
+        }
+
+        // Emit time change for cursor position in waveform area
+        int waveformStartX = signalNamesWidth + valuesColumnWidth;
+        if (event->pos().x() >= waveformStartX) {
+            int currentTime = xToTime(event->pos().x() - waveformStartX);
+            emit timeChanged(currentTime);
+        }
     }
 }
 
 void WaveformWidget::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (event->button() == Qt::LeftButton && (draggingNamesSplitter || draggingValuesSplitter)) {
+        draggingNamesSplitter = false;
+        draggingValuesSplitter = false;
+        setCursor(Qt::ArrowCursor);
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::MiddleButton || event->button() == Qt::LeftButton)
     {
         if (isDraggingItem)
@@ -543,49 +924,6 @@ void WaveformWidget::wheelEvent(QWheelEvent *event)
     {
         QWidget::wheelEvent(event);
     }
-}
-
-void WaveformWidget::updateScrollBar()
-{
-    if (!vcdParser)
-    {
-        horizontalScrollBar->setRange(0, 0);
-        return;
-    }
-
-    int contentWidth = timeToX(vcdParser->getEndTime());
-    int viewportWidth = width() - signalNamesWidth;
-
-    horizontalScrollBar->setRange(0, qMax(0, contentWidth - viewportWidth));
-    horizontalScrollBar->setPageStep(viewportWidth);
-    horizontalScrollBar->setSingleStep(viewportWidth / 10);
-
-    horizontalScrollBar->setGeometry(signalNamesWidth, height() - 20, width() - signalNamesWidth, 20);
-}
-
-int WaveformWidget::timeToX(int time) const
-{
-    return static_cast<int>(time * timeScale) - timeOffset;
-}
-
-int WaveformWidget::xToTime(int x) const
-{
-    return static_cast<int>((x + timeOffset) / timeScale);
-}
-
-QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time) const
-{
-    const auto &changes = vcdParser->getValueChanges().value(identifier);
-    QString value = "0";
-
-    for (const auto &change : changes)
-    {
-        if (change.timestamp > time)
-            break;
-        value = change.value;
-    }
-
-    return value;
 }
 
 void WaveformWidget::contextMenuEvent(QContextMenuEvent *event)
@@ -672,303 +1010,140 @@ void WaveformWidget::renameItem(int itemIndex)
     }
 }
 
-void WaveformWidget::drawSignals(QPainter &painter) {
-    int currentY = topMargin + timeMarkersHeight;
-    
-    for (int i = 0; i < displayItems.size(); i++) {
-        const auto& item = displayItems[i];
-        
-        if (item.type == DisplayItem::Signal) {
-            const VCDSignal& signal = item.signal.signal;
-            
-            // Draw as bus if width > 1, otherwise as single line
-            if (signal.width > 1) {
-                drawBusWaveform(painter, signal, currentY);
-            } else {
-                drawSignalWaveform(painter, signal, currentY);
-            }
-        }
-        
-        currentY += item.getHeight();
+QColor WaveformWidget::getSignalColor(const QString& identifier) const
+{
+    // If user has set a custom color, use it
+    if (signalColors.contains(identifier)) {
+        return signalColors[identifier];
     }
+    
+    // Default to green for all signals
+    return QColor(0, 255, 0);
 }
 
-void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
-    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
-    if (changes.isEmpty()) return;
-
-    QColor signalColor = getSignalColor(signal.identifier);
-
-    int signalHeight = 25;
-    int signalTop = yPos + 2;
-    int signalBottom = yPos + signalHeight;
-    int textY = yPos + 17;
-
-    int prevTime = 0;
-    QString prevValue = getBusValueAtTime(signal.identifier, 0);
-    int prevX = timeToX(prevTime);
-
-    // Draw the bus background
-    painter.fillRect(prevX, signalTop, width() - signalNamesWidth, signalHeight, QColor(40, 40, 40, 128));
-
-    // Draw value regions and labels
-    for (int i = 0; i < changes.size(); i++) {
-        const auto &change = changes[i];
-        int currentX = timeToX(change.timestamp);
-        
-        // Handle X and Z values with special colors for the region
-        QColor regionColor = QColor(50, 50, 50, 180);
-        QColor textColor = Qt::white;
-        
-        if (prevValue.contains('x') || prevValue.contains('X')) {
-            regionColor = QColor(255, 0, 0, 100); // Red background for X
-        } else if (prevValue.contains('z') || prevValue.contains('Z')) {
-            regionColor = QColor(255, 165, 0, 100); // Orange background for Z
-        }
-        
-        // Draw the value region
-        painter.fillRect(prevX, signalTop, currentX - prevX, signalHeight, regionColor);
-        
-        // Draw the value text centered in this region
-        if (currentX - prevX > 30) {
-            QString displayValue = formatBusValue(prevValue);
-            int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
-            int centerX = prevX + (currentX - prevX) / 2;
-            
-            painter.setPen(QPen(textColor));
-            painter.drawText(centerX - textWidth/2, textY, displayValue);
-        }
-        
-        // Draw vertical separator at value change
-        painter.setPen(QPen(signalColor, 2));
-        painter.drawLine(currentX, signalTop, currentX, signalBottom);
-        
-        prevTime = change.timestamp;
-        prevValue = change.value;
-        prevX = currentX;
-    }
-
-    // Draw the final region
-    int endX = timeToX(vcdParser->getEndTime());
-    if (endX > prevX) {
-        QColor finalRegionColor = QColor(50, 50, 50, 180);
-        if (prevValue.contains('x') || prevValue.contains('X')) {
-            finalRegionColor = QColor(255, 0, 0, 100);
-        } else if (prevValue.contains('z') || prevValue.contains('Z')) {
-            finalRegionColor = QColor(255, 165, 0, 100);
-        }
-        
-        painter.fillRect(prevX, signalTop, endX - prevX, signalHeight, finalRegionColor);
-        
-        if (endX - prevX > 30) {
-            QString displayValue = formatBusValue(prevValue);
-            int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
-            int centerX = prevX + (endX - prevX) / 2;
-            
-            painter.setPen(QPen(Qt::white));
-            painter.drawText(centerX - textWidth/2, textY, displayValue);
-        }
-    }
-
-    // Draw bus outline with signal color
-    painter.setPen(QPen(signalColor, 2));
-    painter.drawRect(timeToX(0), signalTop, endX - timeToX(0), signalHeight);
-}
-
-void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
-    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
-    if (changes.isEmpty()) return;
-
-    QColor signalColor = getSignalColor(signal.identifier);
+void WaveformWidget::changeSignalColor(int itemIndex)
+{
+    if (selectedItems.isEmpty()) return;
     
-    int signalMidY = yPos + 15;
-    int highLevel = yPos + 5;
-    int lowLevel = yPos + 25;
-    int middleLevel = yPos + 15; // Middle level for X/Z values
-
-    int prevTime = 0;
-    QString prevValue = "0";
-    int prevX = timeToX(prevTime);
-
-    for (const auto &change : changes) {
-        int currentX = timeToX(change.timestamp);
-        
-        // Handle X and Z values with special colors and levels
-        QColor drawColor = signalColor;
-        bool isX = (change.value == "x" || change.value == "X");
-        bool isZ = (change.value == "z" || change.value == "Z");
-        bool prevIsX = (prevValue == "x" || prevValue == "X");
-        bool prevIsZ = (prevValue == "z" || prevValue == "Z");
-        
-        if (isX) {
-            drawColor = QColor(255, 0, 0); // Red for X
-        } else if (isZ) {
-            drawColor = QColor(255, 165, 0); // Orange for Z
-        }
-        
-        painter.setPen(QPen(drawColor, 2));
-
-        // Draw the segment based on previous value
-        if (prevIsX || prevIsZ) {
-            // Previous value was X or Z - draw at middle level
-            painter.drawLine(prevX, middleLevel, currentX, middleLevel);
-        } else if (prevValue == "1") {
-            painter.drawLine(prevX, highLevel, currentX, highLevel);
-        } else {
-            painter.drawLine(prevX, lowLevel, currentX, lowLevel);
-        }
-
-        // Draw transition line if value changed
-        if (prevValue != change.value) {
-            int fromY, toY;
-            
-            // Determine starting Y position
-            if (prevIsX || prevIsZ) {
-                fromY = middleLevel;
-            } else if (prevValue == "1") {
-                fromY = highLevel;
-            } else {
-                fromY = lowLevel;
-            }
-            
-            // Determine ending Y position  
-            if (isX || isZ) {
-                toY = middleLevel;
-            } else if (change.value == "1") {
-                toY = highLevel;
-            } else {
-                toY = lowLevel;
-            }
-            
-            painter.drawLine(currentX, fromY, currentX, toY);
-        }
-
-        prevTime = change.timestamp;
-        prevValue = change.value;
-        prevX = currentX;
-    }
-
-    // Draw the final segment
-    QColor finalColor = signalColor;
-    bool finalIsX = (prevValue == "x" || prevValue == "X");
-    bool finalIsZ = (prevValue == "z" || prevValue == "Z");
-    
-    if (finalIsX) {
-        finalColor = QColor(255, 0, 0);
-    } else if (finalIsZ) {
-        finalColor = QColor(255, 165, 0);
-    }
-    
-    painter.setPen(QPen(finalColor, 2));
-    
-    int endX = timeToX(vcdParser->getEndTime());
-    
-    if (finalIsX || finalIsZ) {
-        painter.drawLine(prevX, middleLevel, endX, middleLevel);
-    } else if (prevValue == "1") {
-        painter.drawLine(prevX, highLevel, endX, highLevel);
-    } else {
-        painter.drawLine(prevX, lowLevel, endX, lowLevel);
-    }
-}
-
-QString WaveformWidget::getBusValueAtTime(const QString &identifier, int time) const {
-    const auto &changes = vcdParser->getValueChanges().value(identifier);
-    QString value = "0"; // Default value
-
-    for (const auto &change : changes) {
-        if (change.timestamp > time)
+    // Get the first selected signal to use as current color reference
+    QColor currentColor = Qt::green;
+    for (int index : selectedItems) {
+        if (isSignalItem(index)) {
+            const VCDSignal& signal = displayItems[index].signal.signal;
+            currentColor = getSignalColor(signal.identifier);
             break;
-        value = change.value;
-    }
-
-    return value;
-}
-
-QString WaveformWidget::formatBusValue(const QString& binaryValue) const {
-    if (binaryValue.isEmpty()) return "x";
-    
-    // Handle special cases
-    if (binaryValue == "x" || binaryValue == "X") return "x";
-    if (binaryValue == "z" || binaryValue == "Z") return "z";
-    
-    // Check if it's a valid binary string
-    if (!isValidBinary(binaryValue)) {
-        return binaryValue; // Return as-is if not pure binary
-    }
-    
-    switch(busDisplayFormat) {
-        case Hex: return binaryToHex(binaryValue);
-        case Binary: return binaryValue;
-        case Octal: return binaryToOctal(binaryValue);
-        case Decimal: return binaryToDecimal(binaryValue);
-        default: return binaryToHex(binaryValue);
-    }
-}
-
-QString WaveformWidget::binaryToOctal(const QString& binaryValue) const {
-    if (binaryValue.isEmpty()) return "0";
-    
-    // Convert binary to octal
-    QString octal;
-    QString paddedBinary = binaryValue;
-    
-    // Pad with zeros to make length multiple of 3
-    while (paddedBinary.length() % 3 != 0) {
-        paddedBinary = "0" + paddedBinary;
-    }
-    
-    for (int i = 0; i < paddedBinary.length(); i += 3) {
-        QString chunk = paddedBinary.mid(i, 3);
-        int decimal = chunk.toInt(nullptr, 2);
-        octal += QString::number(decimal);
-    }
-    
-    return "0" + octal;
-}
-
-QString WaveformWidget::binaryToDecimal(const QString& binaryValue) const {
-    if (binaryValue.isEmpty()) return "0";
-    
-    bool ok;
-    unsigned long long value = binaryValue.toULongLong(&ok, 2);
-    
-    if (!ok) {
-        return "x"; // Conversion failed
-    }
-    
-    return QString::number(value);
-}
-
-bool WaveformWidget::isValidBinary(const QString& value) const {
-    for (QChar ch : value) {
-        if (ch != '0' && ch != '1') {
-            return false;
         }
     }
-    return true;
-}
-
-QString WaveformWidget::binaryToHex(const QString& binaryValue) const {
-    if (binaryValue.isEmpty()) return "0";
     
-    // Convert binary string to integer
-    bool ok;
-    unsigned long long value = binaryValue.toULongLong(&ok, 2);
+    QMenu colorMenu(this);
     
-    if (!ok) {
-        return "x"; // Conversion failed
+    // Predefined colors
+    QList<QPair<QString, QColor>> predefinedColors = {
+        {"Red", QColor(255, 0, 0)},
+        {"Green", QColor(0, 255, 0)},
+        {"Blue", QColor(0, 0, 255)},
+        {"Yellow", QColor(255, 255, 0)},
+        {"Cyan", QColor(0, 255, 255)},
+        {"Magenta", QColor(255, 0, 255)},
+        {"Orange", QColor(255, 165, 0)},
+        {"Purple", QColor(128, 0, 128)},
+        {"Pink", QColor(255, 192, 203)},
+        {"White", QColor(255, 255, 255)}
+    };
+    
+    for (const auto& colorPair : predefinedColors) {
+        QAction *colorAction = colorMenu.addAction(colorPair.first);
+        colorAction->setData(colorPair.second);
+        
+        // Create color icon
+        QPixmap pixmap(16, 16);
+        pixmap.fill(colorPair.second);
+        colorAction->setIcon(QIcon(pixmap));
     }
     
-    // Calculate number of hex digits needed
-    int bitCount = binaryValue.length();
-    int hexDigits = (bitCount + 3) / 4; // ceil(bitCount / 4)
+    colorMenu.addSeparator();
+    colorMenu.addAction("Custom Color...");
     
-    // Format as hex with appropriate number of digits
-    return "0x" + QString::number(value, 16).rightJustified(hexDigits, '0').toUpper();
+    // Update menu title to show how many signals are selected
+    if (selectedItems.size() > 1) {
+        colorMenu.setTitle(QString("Change Color for %1 Signals").arg(selectedItems.size()));
+    }
+    
+    QAction *selectedAction = colorMenu.exec(QCursor::pos());
+    
+    if (selectedAction) {
+        QColor newColor;
+        
+        if (selectedAction->text() == "Custom Color...") {
+            newColor = QColorDialog::getColor(currentColor, this, 
+                                           QString("Choose color for %1 signals").arg(selectedItems.size()));
+            if (!newColor.isValid()) {
+                return; // User cancelled
+            }
+        } else {
+            newColor = selectedAction->data().value<QColor>();
+        }
+        
+        // Apply the color to all selected signals
+        for (int index : selectedItems) {
+            if (isSignalItem(index)) {
+                const VCDSignal& signal = displayItems[index].signal.signal;
+                signalColors[signal.identifier] = newColor;
+            }
+        }
+        update();
+    }
 }
 
-// Update the context menu to include bus display options
+bool WaveformWidget::isOverNamesSplitter(const QPoint &pos) const
+{
+    return (pos.x() >= signalNamesWidth - 3 && pos.x() <= signalNamesWidth + 3);
+}
+
+bool WaveformWidget::isOverValuesSplitter(const QPoint &pos) const
+{
+    int valuesColumnStart = signalNamesWidth;
+    int valuesColumnEnd = valuesColumnStart + valuesColumnWidth;
+    return (pos.x() >= valuesColumnEnd - 3 && pos.x() <= valuesColumnEnd + 3);
+}
+
+void WaveformWidget::updateSplitterPositions()
+{
+    // Ensure minimum widths
+    signalNamesWidth = qMax(150, signalNamesWidth);
+    valuesColumnWidth = qMax(80, valuesColumnWidth);
+    
+    // Ensure maximum widths
+    if (signalNamesWidth + valuesColumnWidth > width() - 300) {
+        valuesColumnWidth = width() - 300 - signalNamesWidth;
+    }
+    
+    update();
+}
+
+void WaveformWidget::updateCursorTime(const QPoint &pos)
+{
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    
+    // Only set cursor if click is in the timeline area (top part)
+    if (pos.x() < waveformStartX || pos.y() >= timeMarkersHeight) {
+        return;
+    }
+    
+    // Calculate cursor time based on the entire widget width, ignoring the left columns
+    double totalWaveformWidth = width() - waveformStartX;
+    double clickFraction = (double)(pos.x() - waveformStartX) / totalWaveformWidth;
+    
+    if (vcdParser) {
+        cursorTime = clickFraction * vcdParser->getEndTime();
+    } else {
+        cursorTime = clickFraction * 1000; // Fallback
+    }
+    
+    showCursor = true;
+    update();
+}
+
 void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
     QMenu contextMenu(this);
 
@@ -1106,227 +1281,85 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
     emit contextMenuRequested(pos, itemIndex);
 }
 
-void WaveformWidget::resetSignalColors()
-{
-    signalColors.clear();
-    update();
+QString WaveformWidget::formatBusValue(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "x";
+    
+    // Handle special cases
+    if (binaryValue == "x" || binaryValue == "X") return "x";
+    if (binaryValue == "z" || binaryValue == "Z") return "z";
+    
+    // Check if it's a valid binary string
+    if (!isValidBinary(binaryValue)) {
+        return binaryValue; // Return as-is if not pure binary
+    }
+    
+    switch(busDisplayFormat) {
+        case Hex: return binaryToHex(binaryValue);
+        case Binary: return binaryValue;
+        case Octal: return binaryToOctal(binaryValue);
+        case Decimal: return binaryToDecimal(binaryValue);
+        default: return binaryToHex(binaryValue);
+    }
 }
 
-void WaveformWidget::changeSignalColor(int itemIndex)
-{
-    if (selectedItems.isEmpty()) return;
-    
-    // Get the first selected signal to use as current color reference
-    QColor currentColor = Qt::green;
-    for (int index : selectedItems) {
-        if (isSignalItem(index)) {
-            const VCDSignal& signal = displayItems[index].signal.signal;
-            currentColor = getSignalColor(signal.identifier);
-            break;
+bool WaveformWidget::isValidBinary(const QString& value) const {
+    for (QChar ch : value) {
+        if (ch != '0' && ch != '1') {
+            return false;
         }
     }
+    return true;
+}
+
+QString WaveformWidget::binaryToHex(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "0";
     
-    QMenu colorMenu(this);
+    // Convert binary string to integer
+    bool ok;
+    unsigned long long value = binaryValue.toULongLong(&ok, 2);
     
-    // Predefined colors
-    QList<QPair<QString, QColor>> predefinedColors = {
-        {"Red", QColor(255, 0, 0)},
-        {"Green", QColor(0, 255, 0)},
-        {"Blue", QColor(0, 0, 255)},
-        {"Yellow", QColor(255, 255, 0)},
-        {"Cyan", QColor(0, 255, 255)},
-        {"Magenta", QColor(255, 0, 255)},
-        {"Orange", QColor(255, 165, 0)},
-        {"Purple", QColor(128, 0, 128)},
-        {"Pink", QColor(255, 192, 203)},
-        {"White", QColor(255, 255, 255)}
-    };
-    
-    for (const auto& colorPair : predefinedColors) {
-        QAction *colorAction = colorMenu.addAction(colorPair.first);
-        colorAction->setData(colorPair.second);
-        
-        // Create color icon
-        QPixmap pixmap(16, 16);
-        pixmap.fill(colorPair.second);
-        colorAction->setIcon(QIcon(pixmap));
+    if (!ok) {
+        return "x"; // Conversion failed
     }
     
-    colorMenu.addSeparator();
-    colorMenu.addAction("Custom Color...");
+    // Calculate number of hex digits needed
+    int bitCount = binaryValue.length();
+    int hexDigits = (bitCount + 3) / 4; // ceil(bitCount / 4)
     
-    // Update menu title to show how many signals are selected
-    if (selectedItems.size() > 1) {
-        colorMenu.setTitle(QString("Change Color for %1 Signals").arg(selectedItems.size()));
+    // Format as hex with appropriate number of digits
+    return "0x" + QString::number(value, 16).rightJustified(hexDigits, '0').toUpper();
+}
+
+QString WaveformWidget::binaryToOctal(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "0";
+    
+    // Convert binary to octal
+    QString octal;
+    QString paddedBinary = binaryValue;
+    
+    // Pad with zeros to make length multiple of 3
+    while (paddedBinary.length() % 3 != 0) {
+        paddedBinary = "0" + paddedBinary;
     }
     
-    QAction *selectedAction = colorMenu.exec(QCursor::pos());
-    
-    if (selectedAction) {
-        QColor newColor;
-        
-        if (selectedAction->text() == "Custom Color...") {
-            newColor = QColorDialog::getColor(currentColor, this, 
-                                           QString("Choose color for %1 signals").arg(selectedItems.size()));
-            if (!newColor.isValid()) {
-                return; // User cancelled
-            }
-        } else {
-            newColor = selectedAction->data().value<QColor>();
-        }
-        
-        // Apply the color to all selected signals
-        for (int index : selectedItems) {
-            if (isSignalItem(index)) {
-                const VCDSignal& signal = displayItems[index].signal.signal;
-                signalColors[signal.identifier] = newColor;
-            }
-        }
-        update();
-    }
-}
-
-void WaveformWidget::setHighlightBusses(bool highlight)
-{
-    highlightBusses = highlight;
-    update();
-}
-
-void WaveformWidget::setBusDisplayFormat(BusFormat format)
-{
-    busDisplayFormat = format;
-    update();
-}
-
-// QColor WaveformWidget::getDefaultSignalColor(const VCDSignal& signal) const
-// {
-//     if (highlightBusses && signal.width > 1) {
-//         return QColor(255, 215, 0); // Gold color for busses
-//     }
-    
-//     // Default to green for regular signals
-//     return QColor(0, 255, 0);
-// }
-
-QColor WaveformWidget::getSignalColor(const QString& identifier) const
-{
-    // If user has set a custom color, use it
-    if (signalColors.contains(identifier)) {
-        return signalColors[identifier];
+    for (int i = 0; i < paddedBinary.length(); i += 3) {
+        QString chunk = paddedBinary.mid(i, 3);
+        int decimal = chunk.toInt(nullptr, 2);
+        octal += QString::number(decimal);
     }
     
-    // Default to green for all signals
-    return QColor(0, 255, 0);
+    return "0" + octal;
 }
 
-void WaveformWidget::drawTimeCursor(QPainter &painter)
-{
-    if (!showCursor || cursorTime < 0) return;
+QString WaveformWidget::binaryToDecimal(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "0";
     
-    // Convert cursor time to X position in waveform area
-    int cursorX = timeToX(cursorTime);
-    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    bool ok;
+    unsigned long long value = binaryValue.toULongLong(&ok, 2);
     
-    // Draw vertical cursor line only in waveform area
-    painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
-    painter.drawLine(waveformStartX + cursorX, 0, waveformStartX + cursorX, height());
-    
-    // Draw cursor time label at top
-    painter.setPen(QPen(Qt::white));
-    QString timeText = QString("Time: %1").arg(cursorTime);
-    QRect timeRect(waveformStartX + cursorX + 5, 5, 100, 20);
-    painter.fillRect(timeRect, QColor(0, 0, 0, 200));
-    painter.drawText(timeRect, Qt::AlignLeft | Qt::AlignVCenter, timeText);
-}
-
-void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
-{
-    if (!showCursor || cursorTime < 0 || !vcdParser) return;
-    
-    int valuesColumnX = signalNamesWidth + valuesColumnWidth;
-    
-    // Draw values column background
-    painter.fillRect(signalNamesWidth, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
-    
-    // Draw column separator
-    painter.setPen(QPen(QColor(80, 80, 80), 2));
-    painter.drawLine(valuesColumnX, 0, valuesColumnX, height());
-    
-    // Draw header
-    painter.fillRect(signalNamesWidth, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
-    painter.setPen(QPen(Qt::white));
-    painter.drawText(signalNamesWidth + 5, timeMarkersHeight - 8, "Value @ Time");
-    
-    int currentY = topMargin + timeMarkersHeight;
-    
-    for (int i = 0; i < displayItems.size(); i++) {
-        const auto& item = displayItems[i];
-        int itemHeight = item.getHeight();
-        
-        // Draw background for this row
-        if (selectedItems.contains(i)) {
-            painter.fillRect(signalNamesWidth, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
-        } else if (i % 2 == 0) {
-            painter.fillRect(signalNamesWidth, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
-        } else {
-            painter.fillRect(signalNamesWidth, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
-        }
-        
-        if (item.type == DisplayItem::Signal) {
-            const VCDSignal& signal = item.signal.signal;
-            QString value = getSignalValueAtTime(signal.identifier, cursorTime);
-            
-            // Format the value based on signal type
-            QString displayValue;
-            if (signal.width > 1) {
-                displayValue = formatBusValue(value);
-            } else {
-                displayValue = value.toUpper();
-            }
-            
-            painter.setPen(QPen(Qt::white));
-            painter.drawText(signalNamesWidth + 5, currentY + itemHeight / 2 + 4, displayValue);
-        }
-        
-        // Draw horizontal separator
-        painter.setPen(QPen(QColor(80, 80, 80)));
-        painter.drawLine(signalNamesWidth, currentY + itemHeight, valuesColumnX, currentY + itemHeight);
-        
-        currentY += itemHeight;
-    }
-}
-
-void WaveformWidget::debugCursorPosition(const QPoint &pos)
-{
-    qDebug() << "=== Cursor Debug ===";
-    qDebug() << "Mouse position:" << pos;
-    qDebug() << "signalNamesWidth:" << signalNamesWidth;
-    qDebug() << "valuesColumnWidth:" << valuesColumnWidth;
-    qDebug() << "Waveform area starts at X:" << (signalNamesWidth + valuesColumnWidth);
-    qDebug() << "Click relative to waveform:" << (pos.x() - (signalNamesWidth + valuesColumnWidth));
-    qDebug() << "timeOffset:" << timeOffset;
-    qDebug() << "timeScale:" << timeScale;
-    qDebug() << "Calculated time:" << xToTime(pos.x() - (signalNamesWidth + valuesColumnWidth));
-}
-
-void WaveformWidget::updateCursorTime(const QPoint &pos)
-{
-    // Only set cursor if click is in the timeline area (top part)
-    if (pos.x() < signalNamesWidth + valuesColumnWidth || pos.y() >= timeMarkersHeight) {
-        return;
+    if (!ok) {
+        return "x"; // Conversion failed
     }
     
-    // Calculate the visible time range
-    int visibleStartTime = xToTime(0);
-    int visibleEndTime = xToTime(width() - (signalNamesWidth + valuesColumnWidth));
-    
-    // Calculate click position as fraction of visible area
-    double clickFraction = (double)(pos.x() - (signalNamesWidth + valuesColumnWidth)) / 
-                          (width() - (signalNamesWidth + valuesColumnWidth));
-    
-    cursorTime = visibleStartTime + (int)(clickFraction * (visibleEndTime - visibleStartTime));
-    showCursor = true;
-    update();
-    
-    qDebug() << "Cursor time:" << cursorTime << "Visible range:" << visibleStartTime << "-" << visibleEndTime;
+    return QString::number(value);
 }
