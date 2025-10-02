@@ -387,6 +387,10 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
     int cursorX = timeToX(cursorTime);
 
+    // Only draw if cursor is within visible waveform area
+    if (cursorX < 0 || cursorX > (width() - waveformStartX))
+        return;
+
     // Draw vertical cursor line only in waveform area
     painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
     painter.drawLine(waveformStartX + cursorX, 0, waveformStartX + cursorX, height());
@@ -394,21 +398,23 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     // Draw cursor time label at top
     painter.setPen(QPen(Qt::white));
     QString timeText = QString("Time: %1").arg(cursorTime);
-
+    
     // Calculate text width to make rectangle dynamic
     int textWidth = painter.fontMetrics().horizontalAdvance(timeText) + 10; // +10 for padding
     int textHeight = 20;
-
+    
     // Ensure the rectangle doesn't go off-screen to the right
     int maxX = width() - textWidth - 5; // 5px margin from right edge
     int labelX = waveformStartX + cursorX + 5;
-
+    
     // If the label would go off-screen, position it to the left of the cursor
-    if (labelX + textWidth > width())
-    {
+    if (labelX + textWidth > width()) {
         labelX = waveformStartX + cursorX - textWidth - 5;
     }
-
+    
+    // Also ensure it doesn't go off-screen to the left
+    labelX = qMax(waveformStartX + 5, labelX);
+    
     QRect timeRect(labelX, 5, textWidth, textHeight);
     painter.fillRect(timeRect, QColor(0, 0, 0, 200));
     painter.drawText(timeRect, Qt::AlignCenter, timeText);
@@ -879,7 +885,7 @@ void WaveformWidget::startDrag(int itemIndex)
     isDraggingItem = true;
     dragItemIndex = itemIndex;
     dragStartPos = QCursor::pos();
-    dragStartY = getItemYPosition(itemIndex);
+    dragStartY = getItemYPosition(itemIndex) - verticalOffset;  // Account for vertical offset
     setCursor(Qt::ClosedHandCursor);
 }
 
@@ -888,14 +894,17 @@ void WaveformWidget::performDrag(int mouseY)
     if (!isDraggingItem || dragItemIndex < 0)
         return;
 
+    // Adjust mouseY by vertical offset to get the actual position in the content
+    int adjustedMouseY = mouseY + verticalOffset;
+    
     int newIndex = -1;
     int currentY = topMargin + timeMarkersHeight;
 
-    // Find new position based on mouse Y
+    // Find new position based on adjusted mouse Y
     for (int i = 0; i < displayItems.size(); i++)
     {
         int itemHeight = displayItems[i].getHeight();
-        if (mouseY >= currentY && mouseY < currentY + itemHeight)
+        if (adjustedMouseY >= currentY && adjustedMouseY < currentY + itemHeight)
         {
             newIndex = i;
             break;
@@ -938,12 +947,11 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
 {
     // Check if click is in search bar area
     QPoint pos = event->pos();
-    bool inSearchBar = (pos.y() >= timeMarkersHeight &&
-                        pos.y() <= timeMarkersHeight + 25 &&
-                        pos.x() < signalNamesWidth);
-
-    if (event->button() == Qt::LeftButton && inSearchBar)
-    {
+    bool inSearchBar = (pos.y() >= timeMarkersHeight && 
+                       pos.y() <= timeMarkersHeight + 25 && 
+                       pos.x() < signalNamesWidth);
+    
+    if (event->button() == Qt::LeftButton && inSearchBar) {
         // Focus search bar on click
         isSearchFocused = true;
         update();
@@ -951,17 +959,13 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    if (event->button() == Qt::LeftButton)
-    {
-        if (isOverNamesSplitter(event->pos()))
-        {
+    if (event->button() == Qt::LeftButton) {
+        if (isOverNamesSplitter(event->pos())) {
             draggingNamesSplitter = true;
             setCursor(Qt::SplitHCursor);
             event->accept();
             return;
-        }
-        else if (isOverValuesSplitter(event->pos()))
-        {
+        } else if (isOverValuesSplitter(event->pos())) {
             draggingValuesSplitter = true;
             setCursor(Qt::SplitHCursor);
             event->accept();
@@ -971,11 +975,10 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
 
     // Check if click is in timeline area (top part of waveform area)
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
-    bool inTimelineArea = event->pos().x() >= waveformStartX &&
-                          event->pos().y() < timeMarkersHeight;
+    bool inTimelineArea = event->pos().x() >= waveformStartX && 
+                         event->pos().y() < timeMarkersHeight;
 
-    if (event->button() == Qt::LeftButton && inTimelineArea)
-    {
+    if (event->button() == Qt::LeftButton && inTimelineArea) {
         updateCursorTime(event->pos());
         event->accept();
         return;
@@ -998,6 +1001,13 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
     }
     else if (event->button() == Qt::LeftButton)
     {
+        // Also allow setting cursor time when clicking in the main waveform area
+        if (inWaveformArea && event->pos().y() >= timeMarkersHeight) {
+            updateCursorTime(event->pos());
+            event->accept();
+            return;
+        }
+
         int itemIndex = getItemAtPosition(event->pos());
 
         if (itemIndex >= 0)
@@ -1005,7 +1015,8 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
             // Handle multi-selection
             handleMultiSelection(itemIndex, event);
 
-            // Prepare for drag
+            // Prepare for drag - update visible signals first
+            updateVisibleSignals();
             startDrag(itemIndex);
             update();
             emit itemSelected(itemIndex);
@@ -1027,15 +1038,15 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
             dragStartOffset = timeOffset;
             setCursor(Qt::ClosedHandCursor);
         }
-
+        
         // Lose search focus when clicking outside search bar
-        if (isSearchFocused && !inSearchBar)
-        {
+        if (isSearchFocused && !inSearchBar) {
             isSearchFocused = false;
             update();
         }
     }
 }
+
 
 void WaveformWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
@@ -1079,6 +1090,8 @@ void WaveformWidget::mouseMoveEvent(QMouseEvent *event)
         if (isDraggingItem)
         {
             performDrag(event->pos().y());
+            updateVisibleSignals(); // Update visible signals during drag
+            update();
         }
         else if (isDragging)
         {
@@ -1479,18 +1492,11 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
         return;
     }
 
-    // Calculate cursor time based on the entire widget width, ignoring the left columns
-    double totalWaveformWidth = width() - waveformStartX;
-    double clickFraction = (double)(pos.x() - waveformStartX) / totalWaveformWidth;
-
-    if (vcdParser)
-    {
-        cursorTime = clickFraction * vcdParser->getEndTime();
-    }
-    else
-    {
-        cursorTime = clickFraction * 1000; // Fallback
-    }
+    // Calculate cursor time based on the visible waveform area, accounting for horizontal scrolling
+    int clickXInWaveform = pos.x() - waveformStartX;
+    
+    // Convert the click position to time, accounting for current zoom and scroll
+    cursorTime = xToTime(clickXInWaveform);
 
     showCursor = true;
     update();
