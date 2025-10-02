@@ -171,6 +171,7 @@ private:
     // Search functionality
     QString searchText;
     bool isSearchActive = false;
+    bool isSearchFocused = false;  
     QSet<int> searchResults;
     void drawSearchBar(QPainter &painter);
     void handleSearchInput(const QString &text);

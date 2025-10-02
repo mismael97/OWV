@@ -941,6 +941,68 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
     }
 }
 
+
+// Check if click is in timeline area (top part of waveform area)
+int waveformStartX = signalNamesWidth + valuesColumnWidth;
+bool inTimelineArea = event->pos().x() >= waveformStartX &&
+                      event->pos().y() < timeMarkersHeight;
+
+if (event->button() == Qt::LeftButton && inTimelineArea)
+{
+    updateCursorTime(event->pos());
+    event->accept();
+    return;
+}
+
+// Check if click is in signal names column or waveform area
+bool inNamesColumn = event->pos().x() < signalNamesWidth;
+bool inWaveformArea = event->pos().x() >= waveformStartX;
+
+if (event->button() == Qt::MiddleButton)
+{
+    // Start middle button drag for horizontal scrolling (waveform area only)
+    if (!inNamesColumn && inWaveformArea)
+    {
+        isDragging = true;
+        dragStartX = event->pos().x() - waveformStartX;
+        dragStartOffset = timeOffset;
+        setCursor(Qt::ClosedHandCursor);
+    }
+}
+else if (event->button() == Qt::LeftButton)
+{
+    int itemIndex = getItemAtPosition(event->pos());
+
+    if (itemIndex >= 0)
+    {
+        // Handle multi-selection
+        handleMultiSelection(itemIndex, event);
+
+        // Prepare for drag
+        startDrag(itemIndex);
+        update();
+        emit itemSelected(itemIndex);
+    }
+    else if (!inNamesColumn && inWaveformArea)
+    {
+        // Clear selection when clicking empty space
+        if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
+        {
+            selectedItems.clear();
+            lastSelectedItem = -1;
+            update();
+            emit itemSelected(-1);
+        }
+
+        // Start timeline dragging with left button (waveform area only)
+        isDragging = true;
+        dragStartX = event->pos().x() - waveformStartX;
+        dragStartOffset = timeOffset;
+        setCursor(Qt::ClosedHandCursor);
+    }
+}
+}
+
 void WaveformWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
     int itemIndex = getItemAtPosition(event->pos());
@@ -1046,46 +1108,37 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
     {
         // Clear search on Escape and lose focus
         handleSearchInput("");
-        isSearchFocused = false; // Lose focus
+        isSearchFocused = false;  // Lose focus
         event->accept();
     }
     else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
     {
         // Keep search but lose focus on Enter
-        if (isSearchActive)
-        {
+        if (isSearchActive) {
             isSearchFocused = false;
             update();
             event->accept();
-        }
-        else
-        {
+        } else {
             QWidget::keyPressEvent(event);
         }
     }
     else if (event->key() == Qt::Key_Backspace)
     {
         // Handle backspace in search
-        if (isSearchActive)
-        {
+        if (isSearchActive) {
             handleSearchInput(searchText.left(searchText.length() - 1));
             event->accept();
-        }
-        else
-        {
+        } else {
             QWidget::keyPressEvent(event);
         }
     }
     else if (!event->text().isEmpty() && event->text().at(0).isPrint())
     {
         // Handle regular text input for search
-        if (!isSearchActive)
-        {
+        if (!isSearchActive) {
             // Start new search
             handleSearchInput(event->text());
-        }
-        else
-        {
+        } else {
             // Append to existing search
             handleSearchInput(searchText + event->text());
         }
@@ -1096,6 +1149,7 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
         QWidget::keyPressEvent(event);
     }
 }
+
 
 void WaveformWidget::wheelEvent(QWheelEvent *event)
 {
@@ -1618,59 +1672,54 @@ QString WaveformWidget::binaryToDecimal(const QString &binaryValue) const
 void WaveformWidget::drawSearchBar(QPainter &painter)
 {
     int searchBarHeight = 25;
-
+    
     // Draw search bar background with focus indication
     QColor searchBgColor = isSearchFocused ? QColor(90, 90, 100) : QColor(70, 70, 80);
     painter.fillRect(0, timeMarkersHeight, signalNamesWidth, searchBarHeight, searchBgColor);
-
+    
     // Draw border when focused
-    if (isSearchFocused)
-    {
+    if (isSearchFocused) {
         painter.setPen(QPen(QColor(100, 150, 255), 2));
         painter.drawRect(1, timeMarkersHeight + 1, signalNamesWidth - 2, searchBarHeight - 2);
     }
-
+    
     // Draw search icon or label
     painter.setPen(QPen(Qt::white));
     painter.drawText(5, timeMarkersHeight + searchBarHeight - 8, "🔍");
-
+    
     // Draw search text with cursor
-    if (searchText.isEmpty())
-    {
+    if (searchText.isEmpty()) {
         painter.setPen(QPen(QColor(180, 180, 180)));
         painter.drawText(25, timeMarkersHeight + searchBarHeight - 8, "Search signals...");
-    }
-    else
-    {
+    } else {
         painter.setPen(QPen(Qt::white));
         painter.drawText(25, timeMarkersHeight + searchBarHeight - 8, searchText);
-
+        
         // Draw blinking cursor when focused (optional)
-        if (isSearchFocused)
-        {
+        if (isSearchFocused) {
             int textWidth = painter.fontMetrics().horizontalAdvance(searchText);
             int cursorX = 25 + textWidth + 2;
             painter.drawLine(cursorX, timeMarkersHeight + 5, cursorX, timeMarkersHeight + searchBarHeight - 5);
         }
-
+        
         // Draw result count
-        if (!searchResults.isEmpty())
-        {
+        if (!searchResults.isEmpty()) {
             QString resultText = QString("(%1)").arg(searchResults.size());
             int textWidth = painter.fontMetrics().horizontalAdvance(resultText);
             painter.drawText(signalNamesWidth - textWidth - 5, timeMarkersHeight + searchBarHeight - 8, resultText);
         }
     }
-
+    
     // Update top margin to account for search bar
     topMargin = searchBarHeight;
 }
+
 
 void WaveformWidget::handleSearchInput(const QString &text)
 {
     searchText = text;
     isSearchActive = !searchText.isEmpty();
-    isSearchFocused = true; // Set focus when typing
+    isSearchFocused = true;  // Set focus when typing
     updateSearchResults();
     update();
 }
@@ -1678,40 +1727,31 @@ void WaveformWidget::handleSearchInput(const QString &text)
 void WaveformWidget::updateSearchResults()
 {
     searchResults.clear();
-
-    if (!isSearchActive || searchText.isEmpty())
-    {
+    
+    if (!isSearchActive || searchText.isEmpty()) {
         // If no search, show all signals
-        for (int i = 0; i < displayItems.size(); i++)
-        {
-            if (displayItems[i].type == DisplayItem::Signal)
-            {
+        for (int i = 0; i < displayItems.size(); i++) {
+            if (displayItems[i].type == DisplayItem::Signal) {
                 searchResults.insert(i);
             }
         }
         // Clear focus when search is completely cleared
-        if (searchText.isEmpty())
-        {
+        if (searchText.isEmpty()) {
             isSearchFocused = false;
         }
-    }
-    else
-    {
+    } else {
         // Filter signals based on search text
         QString searchLower = searchText.toLower();
-        for (int i = 0; i < displayItems.size(); i++)
-        {
-            if (displayItems[i].type == DisplayItem::Signal)
-            {
+        for (int i = 0; i < displayItems.size(); i++) {
+            if (displayItems[i].type == DisplayItem::Signal) {
                 QString signalName = displayItems[i].getFullPath().toLower();
-                if (signalName.contains(searchLower))
-                {
+                if (signalName.contains(searchLower)) {
                     searchResults.insert(i);
                 }
             }
         }
     }
-
+    
     qDebug() << "Search results:" << searchResults;
     applySearchFilter();
 }
@@ -1739,4 +1779,252 @@ void WaveformWidget::applySearchFilter()
     }
     update();
     emit itemSelected(lastSelectedItem);
-}
+}#ifndef WAVEFORMWIDGET_H
+#define WAVEFORMWIDGET_H
+
+#include <QWidget>
+#include <QPainter>
+#include <QScrollBar>
+#include <QWheelEvent>
+#include <QMouseEvent>
+#include <QVector>
+#include <QList>
+#include <QLabel>
+#include <QMenu>
+#include <QContextMenuEvent>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QSet>
+#include <QInputDialog>
+#include <QColorDialog>
+
+#include "vcdparser.h"
+
+// Simple signal display structure
+struct DisplaySignal {
+    VCDSignal signal;
+};
+
+// Space structure
+struct DisplaySpace {
+    QString name;
+};
+
+// Unified display item
+struct DisplayItem {
+    enum Type { Signal, Space };
+    Type type;
+    
+    // Only one of these is valid based on type
+    DisplaySignal signal;
+    DisplaySpace space;
+    
+    // Constructor for signal
+    static DisplayItem createSignal(const VCDSignal& sig) {
+        DisplayItem item;
+        item.type = Signal;
+        item.signal = {sig};
+        return item;
+    }
+    
+    // Constructor for space
+    static DisplayItem createSpace(const QString& name = "") {
+        DisplayItem item;
+        item.type = Space;
+        item.space = {name};
+        return item;
+    }
+    
+    QString getName() const {
+        switch(type) {
+            case Signal: {
+                QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+                // Remove any width information like "[3:0]" from the name
+                int bracketPos = name.indexOf('[');
+                if (bracketPos != -1) {
+                    name = name.left(bracketPos).trimmed();
+                }
+                return name;
+            }
+            case Space: 
+                return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
+        }
+        return "";
+    }
+    
+    // Helper function to get full scope path for searching
+    QString getFullPath() const {
+        if (type == Signal) {
+            QString fullPath = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+            // Remove any width information for consistency
+            int bracketPos = fullPath.indexOf('[');
+            if (bracketPos != -1) {
+                fullPath = fullPath.left(bracketPos).trimmed();
+            }
+            return fullPath;
+        }
+        return getName();
+    }
+    
+    int getHeight() const {
+        return 30; // Fixed height for all items
+    }
+    
+    bool isSelectable() const { return true; }
+    bool isMovable() const { return true; }
+};
+
+class WaveformWidget : public QWidget
+{
+    Q_OBJECT
+
+public:
+    enum BusFormat { Hex, Binary, Octal, Decimal };
+    
+    explicit WaveformWidget(QWidget *parent = nullptr);
+    void setVcdData(VCDParser *parser);
+    void setVisibleSignals(const QList<VCDSignal> &visibleSignals);
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
+    void removeSelectedSignals();
+    void selectAllSignals();
+    void resetSignalColors();
+    void setHighlightBusses(bool highlight);
+    void setBusDisplayFormat(BusFormat format);
+    BusFormat getBusDisplayFormat() const { return busDisplayFormat; }
+    int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
+    QList<int> getSelectedItemIndices() const { return selectedItems.values(); }
+    
+    // Item management
+    int getItemCount() const { return displayItems.size(); }
+    const DisplayItem* getItem(int index) const;
+
+signals:
+    void timeChanged(int time);
+    void itemSelected(int itemIndex);
+    void contextMenuRequested(const QPoint &pos, int itemIndex);
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+
+private:
+    void updateCursorTime(const QPoint &pos);
+    void drawSignalNamesColumn(QPainter &painter);
+    void drawSignalValuesColumn(QPainter &painter);
+    void drawWaveformArea(QPainter &painter);
+    void drawTimeCursor(QPainter &painter);
+    void drawGrid(QPainter &painter);
+    void drawSignals(QPainter &painter);
+    void drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos);
+    void drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos);
+    void updateScrollBar();
+    int timeToX(int time) const;
+    int xToTime(int x) const;
+    QString getSignalValueAtTime(const QString &identifier, int time) const;
+    QString getBusValueAtTime(const QString &identifier, int time) const;
+    int calculateTimeStep(int startTime, int endTime) const;
+    int getItemAtPosition(const QPoint &pos) const;
+    int getItemYPosition(int index) const;
+    void showContextMenu(const QPoint &pos, int itemIndex);
+    void addSpaceAbove(int index);
+    void addSpaceBelow(int index);
+    void renameItem(int itemIndex);
+    QString promptForName(const QString &title, const QString &defaultName = "");
+    
+    // Color management
+    void changeSignalColor(int itemIndex);
+    QColor getSignalColor(const QString& identifier) const;
+    
+    // Splitter handling
+    bool isOverNamesSplitter(const QPoint &pos) const;
+    bool isOverValuesSplitter(const QPoint &pos) const;
+    void updateSplitterPositions();
+    
+    // Search functionality
+    QString searchText;
+    bool isSearchActive = false;
+    bool isSearchFocused = false;  
+    QSet<int> searchResults;
+    void drawSearchBar(QPainter &painter);
+    void handleSearchInput(const QString &text);
+    void updateSearchResults();
+    void applySearchFilter();
+    
+    // Drag and movement
+    void startDrag(int itemIndex);
+    void performDrag(int mouseY);
+    void moveItem(int itemIndex, int newIndex);
+    
+    // Selection
+    void handleMultiSelection(int itemIndex, QMouseEvent *event);
+    
+    // Helper methods
+    bool isSignalItem(int index) const { 
+        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Signal; 
+    }
+    bool isSpaceItem(int index) const { 
+        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Space; 
+    }
+    VCDSignal getSignalFromItem(int index) const {
+        return isSignalItem(index) ? displayItems[index].signal.signal : VCDSignal();
+    }
+
+    // Bus display helpers
+    QString formatBusValue(const QString& binaryValue) const;
+    bool isValidBinary(const QString& value) const;
+    QString binaryToHex(const QString& binaryValue) const;
+    QString binaryToOctal(const QString& binaryValue) const;
+    QString binaryToDecimal(const QString& binaryValue) const;
+
+    VCDParser *vcdParser;
+
+    // Layout parameters
+    int signalNamesWidth = 250;
+    int valuesColumnWidth = 120;
+    double timeScale;
+    int timeOffset;
+    int timeMarkersHeight;
+    int topMargin;
+
+    // Display items
+    QList<DisplayItem> displayItems;
+
+    // Signal colors
+    QMap<QString, QColor> signalColors;
+    bool highlightBusses = false;
+    BusFormat busDisplayFormat = Hex;
+
+    // Splitter state
+    bool draggingNamesSplitter = false;
+    bool draggingValuesSplitter = false;
+
+    // Drag state
+    bool isDragging;
+    bool isDraggingItem;
+    int dragStartX;
+    int dragStartOffset;
+    int dragItemIndex;
+    int dragStartY;
+    QPoint dragStartPos;
+
+    // Selection state
+    QSet<int> selectedItems;
+    int lastSelectedItem;
+
+    // Time cursor and values display
+    int cursorTime = 0;
+    bool showCursor = true;
+
+    QScrollBar *horizontalScrollBar;
+};
+
+#endif // WAVEFORMWIDGET_H

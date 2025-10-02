@@ -1,6 +1,7 @@
 #include "SignalSelectionDialog.h"
 #include <QHeaderView>
 #include <QDebug>
+#include <QApplication>
 
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent), lastHighlightedItem(nullptr)
@@ -31,6 +32,12 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     signalTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     signalTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     signalTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+
+     // Enable multi-selection
+    signalTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    
+    // Connect item clicked signal
+    connect(signalTree, &QTreeWidget::itemClicked, this, &SignalSelectionDialog::onItemClicked);
 
     // Controls
     QHBoxLayout *controlsLayout = new QHBoxLayout();
@@ -155,6 +162,7 @@ void SignalSelectionDialog::selectAll()
         }
         ++it;
     }
+    lastSelectedItem = nullptr; // Reset last selection
 }
 
 void SignalSelectionDialog::deselectAll()
@@ -167,6 +175,7 @@ void SignalSelectionDialog::deselectAll()
         }
         ++it;
     }
+    lastSelectedItem = nullptr; // Reset last selection
 }
 
 void SignalSelectionDialog::onSearchTextChanged(const QString &text)
@@ -246,4 +255,63 @@ void SignalSelectionDialog::expandAllParents(QTreeWidgetItem *item)
         parent->setExpanded(true);
         parent = parent->parent();
     }
+}
+
+void SignalSelectionDialog::onItemClicked(QTreeWidgetItem *item, int column)
+{
+    Q_UNUSED(column);
+    handleMultiSelection(item);
+}
+
+
+void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
+{
+    if (!item) return;
+    
+    QVariant data = item->data(0, Qt::UserRole);
+    if (!data.canConvert<VCDSignal>()) return;
+    
+    Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
+    
+    if (modifiers & Qt::ShiftModifier && lastSelectedItem) {
+        // Find all items between lastSelectedItem and current item
+        QList<QTreeWidgetItem*> allSignalItems;
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it) {
+            QVariant itData = (*it)->data(0, Qt::UserRole);
+            if (itData.canConvert<VCDSignal>()) {
+                allSignalItems.append(*it);
+            }
+            ++it;
+        }
+        
+        int startIndex = allSignalItems.indexOf(lastSelectedItem);
+        int endIndex = allSignalItems.indexOf(item);
+        
+        if (startIndex != -1 && endIndex != -1) {
+            int low = qMin(startIndex, endIndex);
+            int high = qMax(startIndex, endIndex);
+            
+            for (int i = low; i <= high; i++) {
+                allSignalItems[i]->setCheckState(0, Qt::Checked);
+            }
+        }
+    } else if (modifiers & Qt::ControlModifier) {
+        // Toggle current item
+        Qt::CheckState newState = (item->checkState(0) == Qt::Checked) ? Qt::Unchecked : Qt::Checked;
+        item->setCheckState(0, newState);
+    } else {
+        // Single selection - clear all others
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it) {
+            QVariant itData = (*it)->data(0, Qt::UserRole);
+            if (itData.canConvert<VCDSignal>()) {
+                (*it)->setCheckState(0, Qt::Unchecked);
+            }
+            ++it;
+        }
+        item->setCheckState(0, Qt::Checked);
+    }
+    
+    lastSelectedItem = item;
 }
