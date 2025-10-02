@@ -270,7 +270,7 @@ void MainWindow::removeSelectedSignals()
 
 void MainWindow::loadDefaultVcdFile()
 {
-    QString defaultPath = "C:/Users/mismael/Desktop/OWV/test.vcd";
+    QString defaultPath = "F:/OWV/test.vcd";
 
     if (QFile::exists(defaultPath)) {
         loadVcdFile(defaultPath);

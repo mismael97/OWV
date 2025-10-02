@@ -15,7 +15,8 @@
 WaveformWidget::WaveformWidget(QWidget *parent)
     : QWidget(parent), vcdParser(nullptr), timeScale(1.0), timeOffset(0),
       timeMarkersHeight(30), topMargin(10),
-      isDragging(false), isDraggingItem(false), dragItemIndex(-1), lastSelectedItem(-1)
+      isDragging(false), isDraggingItem(false), dragItemIndex(-1), lastSelectedItem(-1),
+      busDisplayFormat(Hex), cursorTime(0), showCursor(true)  // Initialize cursor at time 0 and show it
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
