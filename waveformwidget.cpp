@@ -918,7 +918,8 @@ int WaveformWidget::getItemYPosition(int index) const
     for (int i = 0; i < index; i++)
     {
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+        int itemHeight = (item.type == DisplayItem::Signal) ? 
+            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
         yPos += itemHeight;
     }
     return yPos;
@@ -950,33 +951,55 @@ void WaveformWidget::performDrag(int mouseY)
     // Find new position based on adjusted mouse Y
     for (int i = 0; i < displayItems.size(); i++)
     {
-        int itemHeight = displayItems[i].getHeight();
-        if (adjustedMouseY >= currentY && adjustedMouseY < currentY + itemHeight)
+        const auto &item = displayItems[i];
+        int itemHeight = (item.type == DisplayItem::Signal) ? 
+            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+
+        // Check if mouse is within the first half of the item height (insert above)
+        if (adjustedMouseY >= currentY && adjustedMouseY < currentY + itemHeight / 2)
         {
             newIndex = i;
+            break;
+        }
+        // Check if mouse is within the second half of the item height (insert below)
+        else if (adjustedMouseY >= currentY + itemHeight / 2 && adjustedMouseY < currentY + itemHeight)
+        {
+            newIndex = i + 1;
             break;
         }
         currentY += itemHeight;
     }
 
+    // If we reached the end without finding a position, put it at the end
     if (newIndex == -1)
-        newIndex = displayItems.size() - 1;
-    if (newIndex == dragItemIndex)
+    {
+        newIndex = displayItems.size();
+    }
+
+    // Clamp the new index to valid range
+    newIndex = qMax(0, qMin(newIndex, displayItems.size()));
+    
+    // Don't move if it's the same position
+    if (newIndex == dragItemIndex || newIndex == dragItemIndex + 1)
         return;
 
     moveItem(dragItemIndex, newIndex);
 }
 
+
 void WaveformWidget::moveItem(int itemIndex, int newIndex)
 {
+    // If moving to a position after the current item, adjust for the removal
+    if (newIndex > itemIndex)
+    {
+        newIndex--;
+    }
+
     DisplayItem item = displayItems[itemIndex];
     displayItems.removeAt(itemIndex);
-
-    // Adjust new index if we're moving past the original position
-    if (newIndex > itemIndex)
-        newIndex--;
-
     displayItems.insert(newIndex, item);
+    
+    // Update drag item index to the new position
     dragItemIndex = newIndex;
 
     // Update selection
@@ -1380,8 +1403,10 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
     {
         // Use the same height calculation as in drawing functions
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+        int itemHeight = (item.type == DisplayItem::Signal) ? 
+            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
 
+        // Check if click is within the full item height (not just the drawn area)
         if (y >= currentY && y < currentY + itemHeight)
             return i;
         currentY += itemHeight;
