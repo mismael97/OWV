@@ -34,7 +34,14 @@ void WaveformWidget::setVcdData(VCDParser *parser)
     timeOffset = 0;
     selectedItems.clear();
     lastSelectedItem = -1;
-    updateScrollBar();
+    
+    // Apply zoom fit automatically when VCD data is loaded
+    if (vcdParser && vcdParser->getEndTime() > 0) {
+        zoomFit();
+    } else {
+        updateScrollBar();
+    }
+    
     update();
 }
 
@@ -351,9 +358,23 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     // Draw cursor time label at top
     painter.setPen(QPen(Qt::white));
     QString timeText = QString("Time: %1").arg(cursorTime);
-    QRect timeRect(waveformStartX + cursorX + 5, 5, 100, 20);
+    
+    // Calculate text width to make rectangle dynamic
+    int textWidth = painter.fontMetrics().horizontalAdvance(timeText) + 10; // +10 for padding
+    int textHeight = 20;
+    
+    // Ensure the rectangle doesn't go off-screen to the right
+    int maxX = width() - textWidth - 5; // 5px margin from right edge
+    int labelX = waveformStartX + cursorX + 5;
+    
+    // If the label would go off-screen, position it to the left of the cursor
+    if (labelX + textWidth > width()) {
+        labelX = waveformStartX + cursorX - textWidth - 5;
+    }
+    
+    QRect timeRect(labelX, 5, textWidth, textHeight);
     painter.fillRect(timeRect, QColor(0, 0, 0, 200));
-    painter.drawText(timeRect, Qt::AlignLeft | Qt::AlignVCenter, timeText);
+    painter.drawText(timeRect, Qt::AlignCenter, timeText);
 }
 
 void WaveformWidget::drawGrid(QPainter &painter)

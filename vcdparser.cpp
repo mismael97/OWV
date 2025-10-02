@@ -123,7 +123,7 @@ void VCDParser::parseScopeLine(const QString &line)
         } else {
             currentScope = scopeName;
         }
-        qDebug() << "Entering scope:" << currentScope;
+        // qDebug() << "Entering scope:" << currentScope;
     }
 }
 
