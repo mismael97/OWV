@@ -917,18 +917,49 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
     QMenu contextMenu(this);
 
     if (itemIndex >= 0) {
-        // ... existing context menu code ...
+        // Ensure the clicked item is selected if no multi-selection
+        if (!selectedItems.contains(itemIndex) && selectedItems.size() <= 1) {
+            selectedItems.clear();
+            selectedItems.insert(itemIndex);
+            lastSelectedItem = itemIndex;
+            update();
+        }
 
-        // Add color change option for signals
-        if (isSignalItem(itemIndex)) {
-            contextMenu.addAction("Change Color", this, [this, itemIndex]() {
+        // Remove option - show count if multiple selected
+        QString removeText = "Remove";
+        if (selectedItems.size() > 1) {
+            removeText = QString("Remove %1 Signals").arg(selectedItems.size());
+        } else if (isSignalItem(itemIndex)) {
+            removeText = "Remove Signal";
+        } else if (isSpaceItem(itemIndex)) {
+            removeText = "Remove Space";
+        }
+        
+        contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
+        contextMenu.addSeparator();
+
+        // Color change for signals - show count if multiple selected
+        bool hasSignals = false;
+        for (int index : selectedItems) {
+            if (isSignalItem(index)) {
+                hasSignals = true;
+                break;
+            }
+        }
+        
+        if (hasSignals) {
+            QString colorText = "Change Color";
+            if (selectedItems.size() > 1) {
+                colorText = QString("Change Color for %1 Signals").arg(selectedItems.size());
+            }
+            contextMenu.addAction(colorText, this, [this, itemIndex]() {
                 changeSignalColor(itemIndex);
             });
             contextMenu.addSeparator();
         }
 
-        // Rename for spaces
-        if (isSpaceItem(itemIndex)) {
+        // Rename for spaces (only if single space selected)
+        if (isSpaceItem(itemIndex) && selectedItems.size() == 1) {
             contextMenu.addAction("Rename", this, [this, itemIndex]() {
                 renameItem(itemIndex);
             });
@@ -953,11 +984,22 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
             QAction* binAction = busFormatMenu->addAction("Binary", [this]() {
                 setBusDisplayFormat(WaveformWidget::Binary);
             });
+            QAction* octAction = busFormatMenu->addAction("Octal", [this]() {
+                setBusDisplayFormat(WaveformWidget::Octal);
+            });
+            QAction* decAction = busFormatMenu->addAction("Decimal", [this]() {
+                setBusDisplayFormat(WaveformWidget::Decimal);
+            });
             
             hexAction->setCheckable(true);
             binAction->setCheckable(true);
-            hexAction->setChecked(busDisplayHex);
-            binAction->setChecked(!busDisplayHex);
+            octAction->setCheckable(true);
+            decAction->setCheckable(true);
+            
+            hexAction->setChecked(busDisplayFormat == Hex);
+            binAction->setChecked(busDisplayFormat == Binary);
+            octAction->setChecked(busDisplayFormat == Octal);
+            decAction->setChecked(busDisplayFormat == Decimal);
             
             contextMenu.addSeparator();
         }
@@ -979,16 +1021,27 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
         QAction* binAction = busFormatMenu->addAction("Binary", [this]() {
             setBusDisplayFormat(WaveformWidget::Binary);
         });
+        QAction* octAction = busFormatMenu->addAction("Octal", [this]() {
+            setBusDisplayFormat(WaveformWidget::Octal);
+        });
+        QAction* decAction = busFormatMenu->addAction("Decimal", [this]() {
+            setBusDisplayFormat(WaveformWidget::Decimal);
+        });
         
         hexAction->setCheckable(true);
         binAction->setCheckable(true);
-        hexAction->setChecked(busDisplayHex);
-        binAction->setChecked(!busDisplayHex);
+        octAction->setCheckable(true);
+        decAction->setCheckable(true);
+        
+        hexAction->setChecked(busDisplayFormat == Hex);
+        binAction->setChecked(busDisplayFormat == Binary);
+        octAction->setChecked(busDisplayFormat == Octal);
+        decAction->setChecked(busDisplayFormat == Decimal);
     }
 
     QAction* selectedAction = contextMenu.exec(pos);
-    if (!selectedAction && itemIndex >= 0) {
-        // Restore selection if menu was cancelled
+    if (!selectedAction && itemIndex >= 0 && selectedItems.size() <= 1) {
+        // Restore selection if menu was cancelled and only single item was selected
         selectedItems.clear();
         selectedItems.insert(itemIndex);
         update();
@@ -1005,13 +1058,17 @@ void WaveformWidget::resetSignalColors()
 
 void WaveformWidget::changeSignalColor(int itemIndex)
 {
-    if (itemIndex < 0 || itemIndex >= displayItems.size()) return;
+    if (selectedItems.isEmpty()) return;
     
-    const DisplayItem& item = displayItems[itemIndex];
-    if (item.type != DisplayItem::Signal) return;
-    
-    const VCDSignal& signal = item.signal.signal;
-    QColor currentColor = getSignalColor(signal.identifier);
+    // Get the first selected signal to use as current color reference
+    QColor currentColor = Qt::green;
+    for (int index : selectedItems) {
+        if (isSignalItem(index)) {
+            const VCDSignal& signal = displayItems[index].signal.signal;
+            currentColor = getSignalColor(signal.identifier);
+            break;
+        }
+    }
     
     QMenu colorMenu(this);
     
@@ -1042,21 +1099,34 @@ void WaveformWidget::changeSignalColor(int itemIndex)
     colorMenu.addSeparator();
     colorMenu.addAction("Custom Color...");
     
+    // Update menu title to show how many signals are selected
+    if (selectedItems.size() > 1) {
+        colorMenu.setTitle(QString("Change Color for %1 Signals").arg(selectedItems.size()));
+    }
+    
     QAction *selectedAction = colorMenu.exec(QCursor::pos());
     
     if (selectedAction) {
+        QColor newColor;
+        
         if (selectedAction->text() == "Custom Color...") {
-            QColor newColor = QColorDialog::getColor(currentColor, this, 
-                                                   "Choose color for " + signal.name);
-            if (newColor.isValid()) {
-                signalColors[signal.identifier] = newColor;
-                update();
+            newColor = QColorDialog::getColor(currentColor, this, 
+                                           QString("Choose color for %1 signals").arg(selectedItems.size()));
+            if (!newColor.isValid()) {
+                return; // User cancelled
             }
         } else {
-            QColor newColor = selectedAction->data().value<QColor>();
-            signalColors[signal.identifier] = newColor;
-            update();
+            newColor = selectedAction->data().value<QColor>();
         }
+        
+        // Apply the color to all selected signals
+        for (int index : selectedItems) {
+            if (isSignalItem(index)) {
+                const VCDSignal& signal = displayItems[index].signal.signal;
+                signalColors[signal.identifier] = newColor;
+            }
+        }
+        update();
     }
 }
 
