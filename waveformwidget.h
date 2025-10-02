@@ -20,75 +20,92 @@
 #include "vcdparser.h"
 
 // Simple signal display structure
-struct DisplaySignal {
+struct DisplaySignal
+{
     VCDSignal signal;
 };
 
 // Space structure
-struct DisplaySpace {
+struct DisplaySpace
+{
     QString name;
 };
 
 // Unified display item
-struct DisplayItem {
-    enum Type { Signal, Space };
+struct DisplayItem
+{
+    enum Type
+    {
+        Signal,
+        Space
+    };
     Type type;
-    
+
     // Only one of these is valid based on type
     DisplaySignal signal;
     DisplaySpace space;
-    
+
     // Constructor for signal
-    static DisplayItem createSignal(const VCDSignal& sig) {
+    static DisplayItem createSignal(const VCDSignal &sig)
+    {
         DisplayItem item;
         item.type = Signal;
         item.signal = {sig};
         return item;
     }
-    
+
     // Constructor for space
-    static DisplayItem createSpace(const QString& name = "") {
+    static DisplayItem createSpace(const QString &name = "")
+    {
         DisplayItem item;
         item.type = Space;
         item.space = {name};
         return item;
     }
-    
-    QString getName() const {
-        switch(type) {
-            case Signal: {
-                QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
-                // Remove any width information like "[3:0]" from the name
-                int bracketPos = name.indexOf('[');
-                if (bracketPos != -1) {
-                    name = name.left(bracketPos).trimmed();
-                }
-                return name;
+
+    QString getName() const
+    {
+        switch (type)
+        {
+        case Signal:
+        {
+            QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+            // Remove any width information like "[3:0]" from the name
+            int bracketPos = name.indexOf('[');
+            if (bracketPos != -1)
+            {
+                name = name.left(bracketPos).trimmed();
             }
-            case Space: 
-                return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
+            return name;
+        }
+        case Space:
+            return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
         }
         return "";
     }
-    
+
     // Helper function to get full scope path for searching
-    QString getFullPath() const {
-        if (type == Signal) {
+    QString getFullPath() const
+    {
+        if (type == Signal)
+        {
             QString fullPath = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
             // Remove any width information for consistency
             int bracketPos = fullPath.indexOf('[');
-            if (bracketPos != -1) {
+            if (bracketPos != -1)
+            {
                 fullPath = fullPath.left(bracketPos).trimmed();
             }
             return fullPath;
         }
         return getName();
     }
-    
-    int getHeight() const {
+
+    int getHeight() const
+    {
         return 30; // Fixed height for all items
     }
-    
+
     bool isSelectable() const { return true; }
     bool isMovable() const { return true; }
 };
@@ -98,8 +115,14 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
-    enum BusFormat { Hex, Binary, Octal, Decimal };
-    
+    enum BusFormat
+    {
+        Hex,
+        Binary,
+        Octal,
+        Decimal
+    };
+
     explicit WaveformWidget(QWidget *parent = nullptr);
     void setVcdData(VCDParser *parser);
     void setVisibleSignals(const QList<VCDSignal> &visibleSignals);
@@ -114,10 +137,10 @@ public:
     BusFormat getBusDisplayFormat() const { return busDisplayFormat; }
     int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
     QList<int> getSelectedItemIndices() const { return selectedItems.values(); }
-    
+
     // Item management
     int getItemCount() const { return displayItems.size(); }
-    const DisplayItem* getItem(int index) const;
+    const DisplayItem *getItem(int index) const;
 
 signals:
     void timeChanged(int time);
@@ -136,6 +159,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    int calculateTotalHeight() const;
     void updateCursorTime(const QPoint &pos);
     void drawSignalNamesColumn(QPainter &painter);
     void drawSignalValuesColumn(QPainter &painter);
@@ -158,51 +182,54 @@ private:
     void addSpaceBelow(int index);
     void renameItem(int itemIndex);
     QString promptForName(const QString &title, const QString &defaultName = "");
-    
+
     // Color management
     void changeSignalColor(int itemIndex);
-    QColor getSignalColor(const QString& identifier) const;
-    
+    QColor getSignalColor(const QString &identifier) const;
+
     // Splitter handling
     bool isOverNamesSplitter(const QPoint &pos) const;
     bool isOverValuesSplitter(const QPoint &pos) const;
     void updateSplitterPositions();
-    
+
     // Search functionality
     QString searchText;
     bool isSearchActive = false;
-    bool isSearchFocused = false;  
+    bool isSearchFocused = false;
     QSet<int> searchResults;
     void drawSearchBar(QPainter &painter);
     void handleSearchInput(const QString &text);
     void updateSearchResults();
     void applySearchFilter();
-    
+
     // Drag and movement
     void startDrag(int itemIndex);
     void performDrag(int mouseY);
     void moveItem(int itemIndex, int newIndex);
-    
+
     // Selection
     void handleMultiSelection(int itemIndex, QMouseEvent *event);
-    
+
     // Helper methods
-    bool isSignalItem(int index) const { 
-        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Signal; 
+    bool isSignalItem(int index) const
+    {
+        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Signal;
     }
-    bool isSpaceItem(int index) const { 
-        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Space; 
+    bool isSpaceItem(int index) const
+    {
+        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Space;
     }
-    VCDSignal getSignalFromItem(int index) const {
+    VCDSignal getSignalFromItem(int index) const
+    {
         return isSignalItem(index) ? displayItems[index].signal.signal : VCDSignal();
     }
 
     // Bus display helpers
-    QString formatBusValue(const QString& binaryValue) const;
-    bool isValidBinary(const QString& value) const;
-    QString binaryToHex(const QString& binaryValue) const;
-    QString binaryToOctal(const QString& binaryValue) const;
-    QString binaryToDecimal(const QString& binaryValue) const;
+    QString formatBusValue(const QString &binaryValue) const;
+    bool isValidBinary(const QString &value) const;
+    QString binaryToHex(const QString &binaryValue) const;
+    QString binaryToOctal(const QString &binaryValue) const;
+    QString binaryToDecimal(const QString &binaryValue) const;
 
     VCDParser *vcdParser;
 
@@ -244,6 +271,8 @@ private:
     bool showCursor = true;
 
     QScrollBar *horizontalScrollBar;
+    QScrollBar *verticalScrollBar; 
+    int verticalOffset = 0;        
 };
 
 #endif // WAVEFORMWIDGET_H

@@ -12,7 +12,7 @@
 
 WaveformWidget::WaveformWidget(QWidget *parent)
     : QWidget(parent), vcdParser(nullptr), timeScale(1.0), timeOffset(0),
-      timeMarkersHeight(30), topMargin(10),
+      timeMarkersHeight(30), topMargin(10), verticalOffset(0),  // Initialize verticalOffset
       isDragging(false), isDraggingItem(false), dragItemIndex(-1), lastSelectedItem(-1),
       busDisplayFormat(Hex), cursorTime(0), showCursor(true)
 {
@@ -20,10 +20,17 @@ WaveformWidget::WaveformWidget(QWidget *parent)
     setMouseTracking(true);
 
     horizontalScrollBar = new QScrollBar(Qt::Horizontal, this);
-    connect(horizontalScrollBar, &QScrollBar::valueChanged, [this](int value)
-            {
+    connect(horizontalScrollBar, &QScrollBar::valueChanged, [this](int value) {
         timeOffset = value;
-        update(); });
+        update();
+    });
+
+    // Add vertical scrollbar
+    verticalScrollBar = new QScrollBar(Qt::Vertical, this);
+    connect(verticalScrollBar, &QScrollBar::valueChanged, [this](int value) {
+        verticalOffset = value;
+        update();
+    });
 }
 
 void WaveformWidget::setVcdData(VCDParser *parser)
@@ -34,7 +41,14 @@ void WaveformWidget::setVcdData(VCDParser *parser)
     timeOffset = 0;
     selectedItems.clear();
     lastSelectedItem = -1;
-    updateScrollBar();
+    
+    // Apply zoom fit automatically when VCD data is loaded
+    if (vcdParser && vcdParser->getEndTime() > 0) {
+        zoomFit();
+    } else {
+        updateScrollBar();
+    }
+    
     update();
 }
 
@@ -171,7 +185,7 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 
     // Draw names splitter
     painter.fillRect(signalNamesWidth - 1, 0, 2, height(), QColor(100, 100, 100));
-
+    
     // Draw header
     painter.fillRect(0, 0, signalNamesWidth, timeMarkersHeight, QColor(60, 60, 60));
     painter.setPen(QPen(Qt::white));
@@ -179,81 +193,72 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 
     // Draw search bar
     drawSearchBar(painter);
-
-    int currentY = topMargin + timeMarkersHeight;
-
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        const auto &item = displayItems[i];
+    
+    int currentY = topMargin + timeMarkersHeight - verticalOffset;
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
         int itemHeight = item.getHeight();
+        
+        // Skip drawing if item is outside visible area
+        if (currentY + itemHeight < 0) {
+            currentY += itemHeight;
+            continue;
+        }
+        if (currentY > height()) {
+            break;
+        }
 
         // Draw background based on selection and type
         bool isSelected = selectedItems.contains(i);
         bool isSearchMatch = searchResults.contains(i);
-
-        if (isSelected)
-        {
+        
+        if (isSelected) {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(60, 60, 90));
-        }
-        else if (isSearchActive && isSearchMatch)
-        {
+        } else if (isSearchActive && isSearchMatch) {
             // Highlight search matches with a different color
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 80, 120, 150));
-        }
-        else if (item.type == DisplayItem::Space)
-        {
+        } else if (item.type == DisplayItem::Space) {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 160, 80, 120));
-        }
-        else if (i % 2 == 0)
-        {
+        } else if (i % 2 == 0) {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(45, 45, 48));
-        }
-        else
-        {
+        } else {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(40, 40, 43));
         }
 
         // Draw item name with appropriate styling
-        if (isSelected)
-        {
+        if (isSelected) {
             painter.setPen(QPen(Qt::white));
-        }
-        else if (isSearchActive && isSearchMatch)
-        {
+        } else if (isSearchActive && isSearchMatch) {
             painter.setPen(QPen(QColor(200, 200, 255))); // Light blue for search matches
-        }
-        else if (item.type == DisplayItem::Space)
-        {
+        } else if (item.type == DisplayItem::Space) {
             painter.setPen(QPen(QColor(150, 255, 150)));
-        }
-        else
-        {
+        } else {
             painter.setPen(QPen(Qt::white));
         }
-
+        
         QString displayName = item.getName();
         int textIndent = 5;
-
+        
         painter.drawText(textIndent, currentY + itemHeight / 2 + 4, displayName);
 
         // Draw horizontal separator
         painter.setPen(QPen(QColor(80, 80, 80)));
         painter.drawLine(0, currentY + itemHeight, signalNamesWidth, currentY + itemHeight);
-
+        
         currentY += itemHeight;
     }
 }
 
 void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
 {
-    if (!showCursor || cursorTime < 0 || !vcdParser)
-        return;
-
+    if (!showCursor || cursorTime < 0 || !vcdParser) return;
+    
     int valuesColumnStart = signalNamesWidth;
-
+    
     // Draw values column background
     painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
-
+    
     // Draw values splitter
     painter.fillRect(valuesColumnStart + valuesColumnWidth - 1, 0, 2, height(), QColor(100, 100, 100));
 
@@ -261,78 +266,73 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
     painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
     painter.setPen(QPen(Qt::white));
     painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value @ Time");
-
-    int currentY = topMargin + timeMarkersHeight;
-
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        const auto &item = displayItems[i];
+    
+    int currentY = topMargin + timeMarkersHeight - verticalOffset;
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
         int itemHeight = item.getHeight();
-
+        
+        // Skip drawing if item is outside visible area
+        if (currentY + itemHeight < 0) {
+            currentY += itemHeight;
+            continue;
+        }
+        if (currentY > height()) {
+            break;
+        }
+        
         // Draw background for this row
         bool isSelected = selectedItems.contains(i);
         bool isSearchMatch = searchResults.contains(i);
-
-        if (isSelected)
-        {
+        
+        if (isSelected) {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
-        }
-        else if (isSearchActive && isSearchMatch)
-        {
+        } else if (isSearchActive && isSearchMatch) {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(80, 80, 120, 150));
-        }
-        else if (i % 2 == 0)
-        {
+        } else if (i % 2 == 0) {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
-        }
-        else
-        {
+        } else {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
         }
-
-        if (item.type == DisplayItem::Signal)
-        {
-            const VCDSignal &signal = item.signal.signal;
+        
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal& signal = item.signal.signal;
             QString value = getSignalValueAtTime(signal.identifier, cursorTime);
-
+            
             // Format the value based on signal type
             QString displayValue;
-            if (signal.width > 1)
-            {
+            if (signal.width > 1) {
                 displayValue = formatBusValue(value);
-            }
-            else
-            {
+            } else {
                 displayValue = value.toUpper();
             }
-
+            
             painter.setPen(QPen(Qt::white));
             painter.drawText(valuesColumnStart + 5, currentY + itemHeight / 2 + 4, displayValue);
         }
-
+        
         // Draw horizontal separator
         painter.setPen(QPen(QColor(80, 80, 80)));
-        painter.drawLine(valuesColumnStart, currentY + itemHeight,
-                         valuesColumnStart + valuesColumnWidth, currentY + itemHeight);
-
+        painter.drawLine(valuesColumnStart, currentY + itemHeight, 
+                        valuesColumnStart + valuesColumnWidth, currentY + itemHeight);
+        
         currentY += itemHeight;
     }
 }
 
-void WaveformWidget::drawWaveformArea(QPainter &painter)
-{
+void WaveformWidget::drawWaveformArea(QPainter &painter) {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
     painter.setClipRect(waveformStartX, 0, width() - waveformStartX, height());
-    painter.translate(waveformStartX, 0);
-    painter.fillRect(0, 0, width() - waveformStartX, height(), QColor(30, 30, 30));
-
-    if (!displayItems.isEmpty())
-    {
+    painter.translate(waveformStartX, -verticalOffset);  // Apply vertical offset
+    painter.fillRect(0, 0, width() - waveformStartX, calculateTotalHeight(), QColor(30, 30, 30));
+    
+    if (!displayItems.isEmpty()) {
         drawGrid(painter);
         drawSignals(painter);
     }
-
-    painter.translate(-waveformStartX, 0);
+    
+    painter.translate(-waveformStartX, verticalOffset);  // Reset translation
     painter.setClipping(false);
 }
 
@@ -351,9 +351,23 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     // Draw cursor time label at top
     painter.setPen(QPen(Qt::white));
     QString timeText = QString("Time: %1").arg(cursorTime);
-    QRect timeRect(waveformStartX + cursorX + 5, 5, 100, 20);
+    
+    // Calculate text width to make rectangle dynamic
+    int textWidth = painter.fontMetrics().horizontalAdvance(timeText) + 10; // +10 for padding
+    int textHeight = 20;
+    
+    // Ensure the rectangle doesn't go off-screen to the right
+    int maxX = width() - textWidth - 5; // 5px margin from right edge
+    int labelX = waveformStartX + cursorX + 5;
+    
+    // If the label would go off-screen, position it to the left of the cursor
+    if (labelX + textWidth > width()) {
+        labelX = waveformStartX + cursorX - textWidth - 5;
+    }
+    
+    QRect timeRect(labelX, 5, textWidth, textHeight);
     painter.fillRect(timeRect, QColor(0, 0, 0, 200));
-    painter.drawText(timeRect, Qt::AlignLeft | Qt::AlignVCenter, timeText);
+    painter.drawText(timeRect, Qt::AlignCenter, timeText);
 }
 
 void WaveformWidget::drawGrid(QPainter &painter)
@@ -398,30 +412,32 @@ void WaveformWidget::drawGrid(QPainter &painter)
     }
 }
 
-void WaveformWidget::drawSignals(QPainter &painter)
-{
+void WaveformWidget::drawSignals(QPainter &painter) {
     int currentY = topMargin + timeMarkersHeight;
-
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        const auto &item = displayItems[i];
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
         int itemHeight = item.getHeight();
+        
+        // Skip drawing if item is outside visible area (considering vertical offset)
+        int visibleY = currentY - verticalOffset;
+        if (visibleY + itemHeight < 0) {
+            currentY += itemHeight;
+            continue;
+        }
+        if (visibleY > height()) {
+            break;
+        }
 
-        if (item.type == DisplayItem::Signal)
-        {
-            const VCDSignal &signal = item.signal.signal;
-
-            // Draw as bus if width > 1, otherwise as single line
-            if (signal.width > 1)
-            {
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal& signal = item.signal.signal;
+            if (signal.width > 1) {
                 drawBusWaveform(painter, signal, currentY);
-            }
-            else
-            {
+            } else {
                 drawSignalWaveform(painter, signal, currentY);
             }
         }
-
+        
         currentY += itemHeight;
     }
 }
@@ -653,17 +669,35 @@ void WaveformWidget::updateScrollBar()
     if (!vcdParser)
     {
         horizontalScrollBar->setRange(0, 0);
+        verticalScrollBar->setRange(0, 0);
         return;
     }
 
+    // Horizontal scrollbar (existing code)
     int contentWidth = timeToX(vcdParser->getEndTime());
     int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
-
     horizontalScrollBar->setRange(0, qMax(0, contentWidth - viewportWidth));
     horizontalScrollBar->setPageStep(viewportWidth);
     horizontalScrollBar->setSingleStep(viewportWidth / 10);
 
-    horizontalScrollBar->setGeometry(signalNamesWidth + valuesColumnWidth, height() - 20, width() - signalNamesWidth - valuesColumnWidth, 20);
+    // Vertical scrollbar (new code)
+    int totalHeight = calculateTotalHeight();
+    int viewportHeight = height();
+    verticalScrollBar->setRange(0, qMax(0, totalHeight - viewportHeight));
+    verticalScrollBar->setPageStep(viewportHeight);
+    verticalScrollBar->setSingleStep(30); // Step by one signal height
+}
+
+int WaveformWidget::calculateTotalHeight() const
+{
+    if (displayItems.isEmpty())
+        return 0;
+
+    int totalHeight = topMargin + timeMarkersHeight;
+    for (const auto& item : displayItems) {
+        totalHeight += item.getHeight();
+    }
+    return totalHeight;
 }
 
 int WaveformWidget::timeToX(int time) const
@@ -941,68 +975,6 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
     }
 }
 
-
-// Check if click is in timeline area (top part of waveform area)
-int waveformStartX = signalNamesWidth + valuesColumnWidth;
-bool inTimelineArea = event->pos().x() >= waveformStartX &&
-                      event->pos().y() < timeMarkersHeight;
-
-if (event->button() == Qt::LeftButton && inTimelineArea)
-{
-    updateCursorTime(event->pos());
-    event->accept();
-    return;
-}
-
-// Check if click is in signal names column or waveform area
-bool inNamesColumn = event->pos().x() < signalNamesWidth;
-bool inWaveformArea = event->pos().x() >= waveformStartX;
-
-if (event->button() == Qt::MiddleButton)
-{
-    // Start middle button drag for horizontal scrolling (waveform area only)
-    if (!inNamesColumn && inWaveformArea)
-    {
-        isDragging = true;
-        dragStartX = event->pos().x() - waveformStartX;
-        dragStartOffset = timeOffset;
-        setCursor(Qt::ClosedHandCursor);
-    }
-}
-else if (event->button() == Qt::LeftButton)
-{
-    int itemIndex = getItemAtPosition(event->pos());
-
-    if (itemIndex >= 0)
-    {
-        // Handle multi-selection
-        handleMultiSelection(itemIndex, event);
-
-        // Prepare for drag
-        startDrag(itemIndex);
-        update();
-        emit itemSelected(itemIndex);
-    }
-    else if (!inNamesColumn && inWaveformArea)
-    {
-        // Clear selection when clicking empty space
-        if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
-        {
-            selectedItems.clear();
-            lastSelectedItem = -1;
-            update();
-            emit itemSelected(-1);
-        }
-
-        // Start timeline dragging with left button (waveform area only)
-        isDragging = true;
-        dragStartX = event->pos().x() - waveformStartX;
-        dragStartOffset = timeOffset;
-        setCursor(Qt::ClosedHandCursor);
-    }
-}
-}
-
 void WaveformWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
     int itemIndex = getItemAtPosition(event->pos());
@@ -1108,37 +1080,46 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
     {
         // Clear search on Escape and lose focus
         handleSearchInput("");
-        isSearchFocused = false;  // Lose focus
+        isSearchFocused = false; // Lose focus
         event->accept();
     }
     else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
     {
         // Keep search but lose focus on Enter
-        if (isSearchActive) {
+        if (isSearchActive)
+        {
             isSearchFocused = false;
             update();
             event->accept();
-        } else {
+        }
+        else
+        {
             QWidget::keyPressEvent(event);
         }
     }
     else if (event->key() == Qt::Key_Backspace)
     {
         // Handle backspace in search
-        if (isSearchActive) {
+        if (isSearchActive)
+        {
             handleSearchInput(searchText.left(searchText.length() - 1));
             event->accept();
-        } else {
+        }
+        else
+        {
             QWidget::keyPressEvent(event);
         }
     }
     else if (!event->text().isEmpty() && event->text().at(0).isPrint())
     {
         // Handle regular text input for search
-        if (!isSearchActive) {
+        if (!isSearchActive)
+        {
             // Start new search
             handleSearchInput(event->text());
-        } else {
+        }
+        else
+        {
             // Append to existing search
             handleSearchInput(searchText + event->text());
         }
@@ -1149,7 +1130,6 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
         QWidget::keyPressEvent(event);
     }
 }
-
 
 void WaveformWidget::wheelEvent(QWheelEvent *event)
 {
@@ -1175,7 +1155,12 @@ void WaveformWidget::wheelEvent(QWheelEvent *event)
     }
     else
     {
-        QWidget::wheelEvent(event);
+        // Regular wheel for vertical scrolling
+        int scrollAmount = event->angleDelta().y();
+        verticalOffset -= scrollAmount / 2;  // Invert for natural scrolling
+        verticalOffset = qMax(0, qMin(verticalOffset, verticalScrollBar->maximum()));
+        updateScrollBar();
+        update();
     }
 }
 
@@ -1189,6 +1174,24 @@ void WaveformWidget::resizeEvent(QResizeEvent *event)
 {
     Q_UNUSED(event)
     updateScrollBar();
+    
+    // Position the scrollbars
+    int scrollbarSize = 20;
+    int bottomRightCornerWidth = width() - signalNamesWidth - valuesColumnWidth;
+    
+    horizontalScrollBar->setGeometry(
+        signalNamesWidth + valuesColumnWidth, 
+        height() - scrollbarSize, 
+        bottomRightCornerWidth, 
+        scrollbarSize
+    );
+    
+    verticalScrollBar->setGeometry(
+        width() - scrollbarSize, 
+        0, 
+        scrollbarSize, 
+        height() - scrollbarSize
+    );
 }
 
 int WaveformWidget::getItemAtPosition(const QPoint &pos) const
@@ -1196,7 +1199,7 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
     if (displayItems.isEmpty())
         return -1;
 
-    int y = pos.y();
+    int y = pos.y() + verticalOffset;  // Add vertical offset to get actual position
     int signalAreaTop = topMargin + timeMarkersHeight;
 
     if (y < signalAreaTop)
@@ -1672,54 +1675,59 @@ QString WaveformWidget::binaryToDecimal(const QString &binaryValue) const
 void WaveformWidget::drawSearchBar(QPainter &painter)
 {
     int searchBarHeight = 25;
-    
+
     // Draw search bar background with focus indication
     QColor searchBgColor = isSearchFocused ? QColor(90, 90, 100) : QColor(70, 70, 80);
     painter.fillRect(0, timeMarkersHeight, signalNamesWidth, searchBarHeight, searchBgColor);
-    
+
     // Draw border when focused
-    if (isSearchFocused) {
+    if (isSearchFocused)
+    {
         painter.setPen(QPen(QColor(100, 150, 255), 2));
         painter.drawRect(1, timeMarkersHeight + 1, signalNamesWidth - 2, searchBarHeight - 2);
     }
-    
+
     // Draw search icon or label
     painter.setPen(QPen(Qt::white));
     painter.drawText(5, timeMarkersHeight + searchBarHeight - 8, "🔍");
-    
+
     // Draw search text with cursor
-    if (searchText.isEmpty()) {
+    if (searchText.isEmpty())
+    {
         painter.setPen(QPen(QColor(180, 180, 180)));
         painter.drawText(25, timeMarkersHeight + searchBarHeight - 8, "Search signals...");
-    } else {
+    }
+    else
+    {
         painter.setPen(QPen(Qt::white));
         painter.drawText(25, timeMarkersHeight + searchBarHeight - 8, searchText);
-        
+
         // Draw blinking cursor when focused (optional)
-        if (isSearchFocused) {
+        if (isSearchFocused)
+        {
             int textWidth = painter.fontMetrics().horizontalAdvance(searchText);
             int cursorX = 25 + textWidth + 2;
             painter.drawLine(cursorX, timeMarkersHeight + 5, cursorX, timeMarkersHeight + searchBarHeight - 5);
         }
-        
+
         // Draw result count
-        if (!searchResults.isEmpty()) {
+        if (!searchResults.isEmpty())
+        {
             QString resultText = QString("(%1)").arg(searchResults.size());
             int textWidth = painter.fontMetrics().horizontalAdvance(resultText);
             painter.drawText(signalNamesWidth - textWidth - 5, timeMarkersHeight + searchBarHeight - 8, resultText);
         }
     }
-    
+
     // Update top margin to account for search bar
     topMargin = searchBarHeight;
 }
-
 
 void WaveformWidget::handleSearchInput(const QString &text)
 {
     searchText = text;
     isSearchActive = !searchText.isEmpty();
-    isSearchFocused = true;  // Set focus when typing
+    isSearchFocused = true; // Set focus when typing
     updateSearchResults();
     update();
 }
@@ -1727,31 +1735,40 @@ void WaveformWidget::handleSearchInput(const QString &text)
 void WaveformWidget::updateSearchResults()
 {
     searchResults.clear();
-    
-    if (!isSearchActive || searchText.isEmpty()) {
+
+    if (!isSearchActive || searchText.isEmpty())
+    {
         // If no search, show all signals
-        for (int i = 0; i < displayItems.size(); i++) {
-            if (displayItems[i].type == DisplayItem::Signal) {
+        for (int i = 0; i < displayItems.size(); i++)
+        {
+            if (displayItems[i].type == DisplayItem::Signal)
+            {
                 searchResults.insert(i);
             }
         }
         // Clear focus when search is completely cleared
-        if (searchText.isEmpty()) {
+        if (searchText.isEmpty())
+        {
             isSearchFocused = false;
         }
-    } else {
+    }
+    else
+    {
         // Filter signals based on search text
         QString searchLower = searchText.toLower();
-        for (int i = 0; i < displayItems.size(); i++) {
-            if (displayItems[i].type == DisplayItem::Signal) {
+        for (int i = 0; i < displayItems.size(); i++)
+        {
+            if (displayItems[i].type == DisplayItem::Signal)
+            {
                 QString signalName = displayItems[i].getFullPath().toLower();
-                if (signalName.contains(searchLower)) {
+                if (signalName.contains(searchLower))
+                {
                     searchResults.insert(i);
                 }
             }
         }
     }
-    
+
     qDebug() << "Search results:" << searchResults;
     applySearchFilter();
 }
@@ -1801,75 +1818,92 @@ void WaveformWidget::applySearchFilter()
 #include "vcdparser.h"
 
 // Simple signal display structure
-struct DisplaySignal {
+struct DisplaySignal
+{
     VCDSignal signal;
 };
 
 // Space structure
-struct DisplaySpace {
+struct DisplaySpace
+{
     QString name;
 };
 
 // Unified display item
-struct DisplayItem {
-    enum Type { Signal, Space };
+struct DisplayItem
+{
+    enum Type
+    {
+        Signal,
+        Space
+    };
     Type type;
-    
+
     // Only one of these is valid based on type
     DisplaySignal signal;
     DisplaySpace space;
-    
+
     // Constructor for signal
-    static DisplayItem createSignal(const VCDSignal& sig) {
+    static DisplayItem createSignal(const VCDSignal &sig)
+    {
         DisplayItem item;
         item.type = Signal;
         item.signal = {sig};
         return item;
     }
-    
+
     // Constructor for space
-    static DisplayItem createSpace(const QString& name = "") {
+    static DisplayItem createSpace(const QString &name = "")
+    {
         DisplayItem item;
         item.type = Space;
         item.space = {name};
         return item;
     }
-    
-    QString getName() const {
-        switch(type) {
-            case Signal: {
-                QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
-                // Remove any width information like "[3:0]" from the name
-                int bracketPos = name.indexOf('[');
-                if (bracketPos != -1) {
-                    name = name.left(bracketPos).trimmed();
-                }
-                return name;
+
+    QString getName() const
+    {
+        switch (type)
+        {
+        case Signal:
+        {
+            QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+            // Remove any width information like "[3:0]" from the name
+            int bracketPos = name.indexOf('[');
+            if (bracketPos != -1)
+            {
+                name = name.left(bracketPos).trimmed();
             }
-            case Space: 
-                return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
+            return name;
+        }
+        case Space:
+            return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
         }
         return "";
     }
-    
+
     // Helper function to get full scope path for searching
-    QString getFullPath() const {
-        if (type == Signal) {
+    QString getFullPath() const
+    {
+        if (type == Signal)
+        {
             QString fullPath = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
             // Remove any width information for consistency
             int bracketPos = fullPath.indexOf('[');
-            if (bracketPos != -1) {
+            if (bracketPos != -1)
+            {
                 fullPath = fullPath.left(bracketPos).trimmed();
             }
             return fullPath;
         }
         return getName();
     }
-    
-    int getHeight() const {
+
+    int getHeight() const
+    {
         return 30; // Fixed height for all items
     }
-    
+
     bool isSelectable() const { return true; }
     bool isMovable() const { return true; }
 };
@@ -1879,8 +1913,14 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
-    enum BusFormat { Hex, Binary, Octal, Decimal };
-    
+    enum BusFormat
+    {
+        Hex,
+        Binary,
+        Octal,
+        Decimal
+    };
+
     explicit WaveformWidget(QWidget *parent = nullptr);
     void setVcdData(VCDParser *parser);
     void setVisibleSignals(const QList<VCDSignal> &visibleSignals);
@@ -1895,10 +1935,10 @@ public:
     BusFormat getBusDisplayFormat() const { return busDisplayFormat; }
     int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
     QList<int> getSelectedItemIndices() const { return selectedItems.values(); }
-    
+
     // Item management
     int getItemCount() const { return displayItems.size(); }
-    const DisplayItem* getItem(int index) const;
+    const DisplayItem *getItem(int index) const;
 
 signals:
     void timeChanged(int time);
@@ -1917,6 +1957,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    int calculateTotalHeight() const;
     void updateCursorTime(const QPoint &pos);
     void drawSignalNamesColumn(QPainter &painter);
     void drawSignalValuesColumn(QPainter &painter);
@@ -1939,51 +1980,54 @@ private:
     void addSpaceBelow(int index);
     void renameItem(int itemIndex);
     QString promptForName(const QString &title, const QString &defaultName = "");
-    
+
     // Color management
     void changeSignalColor(int itemIndex);
-    QColor getSignalColor(const QString& identifier) const;
-    
+    QColor getSignalColor(const QString &identifier) const;
+
     // Splitter handling
     bool isOverNamesSplitter(const QPoint &pos) const;
     bool isOverValuesSplitter(const QPoint &pos) const;
     void updateSplitterPositions();
-    
+
     // Search functionality
     QString searchText;
     bool isSearchActive = false;
-    bool isSearchFocused = false;  
+    bool isSearchFocused = false;
     QSet<int> searchResults;
     void drawSearchBar(QPainter &painter);
     void handleSearchInput(const QString &text);
     void updateSearchResults();
     void applySearchFilter();
-    
+
     // Drag and movement
     void startDrag(int itemIndex);
     void performDrag(int mouseY);
     void moveItem(int itemIndex, int newIndex);
-    
+
     // Selection
     void handleMultiSelection(int itemIndex, QMouseEvent *event);
-    
+
     // Helper methods
-    bool isSignalItem(int index) const { 
-        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Signal; 
+    bool isSignalItem(int index) const
+    {
+        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Signal;
     }
-    bool isSpaceItem(int index) const { 
-        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Space; 
+    bool isSpaceItem(int index) const
+    {
+        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Space;
     }
-    VCDSignal getSignalFromItem(int index) const {
+    VCDSignal getSignalFromItem(int index) const
+    {
         return isSignalItem(index) ? displayItems[index].signal.signal : VCDSignal();
     }
 
     // Bus display helpers
-    QString formatBusValue(const QString& binaryValue) const;
-    bool isValidBinary(const QString& value) const;
-    QString binaryToHex(const QString& binaryValue) const;
-    QString binaryToOctal(const QString& binaryValue) const;
-    QString binaryToDecimal(const QString& binaryValue) const;
+    QString formatBusValue(const QString &binaryValue) const;
+    bool isValidBinary(const QString &value) const;
+    QString binaryToHex(const QString &binaryValue) const;
+    QString binaryToOctal(const QString &binaryValue) const;
+    QString binaryToDecimal(const QString &binaryValue) const;
 
     VCDParser *vcdParser;
 
@@ -2025,6 +2069,8 @@ private:
     bool showCursor = true;
 
     QScrollBar *horizontalScrollBar;
+    QScrollBar *verticalScrollBar; 
+    int verticalOffset = 0;        
 };
 
 #endif // WAVEFORMWIDGET_H
