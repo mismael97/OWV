@@ -55,14 +55,22 @@ struct DisplayItem {
     }
     
     QString getName() const {
-        switch(type) {
-            case Signal: 
-                return signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
-            case Space: 
-                return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
+    switch(type) {
+        case Signal: {
+            QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+            // Remove any width information like "[3:0]" from the name
+            // This handles cases where the VCD file includes width in the signal name
+            int bracketPos = name.indexOf('[');
+            if (bracketPos != -1) {
+                name = name.left(bracketPos).trimmed();
+            }
+            return name;
         }
-        return "";
+        case Space: 
+            return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
     }
+    return "";
+}
     
     int getHeight() const {
         return 30; // Fixed height for all items
