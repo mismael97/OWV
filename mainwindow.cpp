@@ -67,6 +67,9 @@ void MainWindow::createActions()
     zoomInAction->setShortcut(QKeySequence::ZoomIn);
     connect(zoomInAction, &QAction::triggered, this, &MainWindow::zoomIn);
 
+    resetColorsAction = new QAction("Reset Colors", this);
+    connect(resetColorsAction, &QAction::triggered, this, &MainWindow::resetSignalColors);
+
     zoomOutAction = new QAction("Zoom Out", this);
     zoomOutAction->setShortcut(QKeySequence::ZoomOut);
     connect(zoomOutAction, &QAction::triggered, this, &MainWindow::zoomOut);
@@ -77,39 +80,74 @@ void MainWindow::createActions()
     aboutAction = new QAction("About", this);
     connect(aboutAction, &QAction::triggered, this, &MainWindow::about);
 
-    // Bus display actions
-    busHexAction = new QAction("Hex Bus Display", this);
+    // Wave menu actions
+    defaultColorsAction = new QAction("Default Colors", this);
+    connect(defaultColorsAction, &QAction::triggered, this, &MainWindow::resetSignalColors);
+
+    highlightBussesAction = new QAction("Highlight Busses", this);
+    highlightBussesAction->setCheckable(true);
+    connect(highlightBussesAction, &QAction::triggered, this, &MainWindow::toggleHighlightBusses);
+
+
+// Bus format actions
+    busHexAction = new QAction("Hexadecimal", this);
     busHexAction->setCheckable(true);
     busHexAction->setChecked(true);
-    connect(busHexAction, &QAction::triggered, this, &MainWindow::toggleBusDisplayFormat);
-    
-    busBinaryAction = new QAction("Binary Bus Display", this);
+    connect(busHexAction, &QAction::triggered, this, &MainWindow::setBusHexFormat);
+
+
+     busBinaryAction = new QAction("Binary", this);
     busBinaryAction->setCheckable(true);
-    busBinaryAction->setChecked(false);
-    connect(busBinaryAction, &QAction::triggered, this, &MainWindow::toggleBusDisplayFormat);
+    connect(busBinaryAction, &QAction::triggered, this, &MainWindow::setBusBinaryFormat);
+
+    busOctalAction = new QAction("Octal", this);
+    busOctalAction->setCheckable(true);
+    connect(busOctalAction, &QAction::triggered, this, &MainWindow::setBusOctalFormat);
+
+    busDecimalAction = new QAction("Decimal", this);
+    busDecimalAction->setCheckable(true);
+    connect(busDecimalAction, &QAction::triggered, this, &MainWindow::setBusDecimalFormat);
+}
+
+void MainWindow::resetSignalColors()
+{
+    waveformWidget->resetSignalColors();
 }
 
 void MainWindow::createToolBar()
 {
-     QToolBar *toolBar = addToolBar("Main Toolbar");
+    QToolBar *toolBar = addToolBar("Main Toolbar");
     toolBar->addAction(openAction);
+    toolBar->addSeparator();
+    
+    // Wave menu
+    waveMenu = new QMenu("Wave");
+    
+    // Signal colors submenu
+    QMenu *signalColorsMenu = new QMenu("Signal Colors");
+    signalColorsMenu->addAction(defaultColorsAction);
+    signalColorsMenu->addAction(highlightBussesAction);
+    
+    // Bus format submenu
+    busFormatMenu = new QMenu("Bus Format");
+    busFormatMenu->addAction(busHexAction);
+    busFormatMenu->addAction(busBinaryAction);
+    busFormatMenu->addAction(busOctalAction);
+    busFormatMenu->addAction(busDecimalAction);
+    
+    waveMenu->addMenu(signalColorsMenu);
+    waveMenu->addMenu(busFormatMenu);
+    
+    QToolButton *waveButton = new QToolButton();
+    waveButton->setMenu(waveMenu);
+    waveButton->setPopupMode(QToolButton::InstantPopup);
+    waveButton->setText("Wave");
+    toolBar->addWidget(waveButton);
+    
     toolBar->addSeparator();
     toolBar->addAction(zoomInAction);
     toolBar->addAction(zoomOutAction);
     toolBar->addAction(zoomFitAction);
-    toolBar->addSeparator();
-    
-    // Bus display format toggle
-    QMenu *busMenu = new QMenu("Bus Format");
-    busMenu->addAction(busHexAction);
-    busMenu->addAction(busBinaryAction);
-    
-    QToolButton *busButton = new QToolButton();
-    busButton->setMenu(busMenu);
-    busButton->setPopupMode(QToolButton::InstantPopup);
-    busButton->setText("Bus Format");
-    toolBar->addWidget(busButton);
-    
     toolBar->addSeparator();
     toolBar->addAction(aboutAction);
 }
@@ -305,12 +343,56 @@ void MainWindow::about()
 void MainWindow::toggleBusDisplayFormat()
 {
     if (sender() == busHexAction) {
-        waveformWidget->setBusDisplayFormat(true);
+        waveformWidget->setBusDisplayFormat(WaveformWidget::Hex);
         busHexAction->setChecked(true);
         busBinaryAction->setChecked(false);
     } else if (sender() == busBinaryAction) {
-        waveformWidget->setBusDisplayFormat(false);
+        waveformWidget->setBusDisplayFormat(WaveformWidget::Binary);
         busHexAction->setChecked(false);
         busBinaryAction->setChecked(true);
+    }
+}
+
+void MainWindow::toggleHighlightBusses()
+{
+    waveformWidget->setHighlightBusses(highlightBussesAction->isChecked());
+}
+
+void MainWindow::setBusHexFormat()
+{
+    waveformWidget->setBusDisplayFormat(WaveformWidget::Hex);
+    updateBusFormatActions();
+}
+
+void MainWindow::setBusBinaryFormat()
+{
+    waveformWidget->setBusDisplayFormat(WaveformWidget::Binary);
+    updateBusFormatActions();
+}
+
+void MainWindow::setBusOctalFormat()
+{
+    waveformWidget->setBusDisplayFormat(WaveformWidget::Octal);
+    updateBusFormatActions();
+}
+
+void MainWindow::setBusDecimalFormat()
+{
+    waveformWidget->setBusDisplayFormat(WaveformWidget::Decimal);
+    updateBusFormatActions();
+}
+
+void MainWindow::updateBusFormatActions()
+{
+    busHexAction->setChecked(false);
+    busBinaryAction->setChecked(false);
+    busOctalAction->setChecked(false);
+    busDecimalAction->setChecked(false);
+    
+    switch(waveformWidget->getBusDisplayFormat()) {
+        case WaveformWidget::Hex: busHexAction->setChecked(true); break;
+        case WaveformWidget::Binary: busBinaryAction->setChecked(true); break;
+        case WaveformWidget::Octal: busOctalAction->setChecked(true); break;
+        case WaveformWidget::Decimal: busDecimalAction->setChecked(true); break;
     }
 }

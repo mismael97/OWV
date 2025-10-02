@@ -1,5 +1,5 @@
 $date
-	Thu Oct  2 05:40:48 2025
+	Thu Oct  2 07:37:22 2025
 $end
 
 $version
@@ -19,6 +19,10 @@ $var reg 4 " b [3:0] $end
 $var reg 1 # cin $end
 $var wire 4 $ sum [3:0] $end
 $var wire 1 % cout $end
+$var wire 1 & unknown_single_w $end
+$var reg 1 ' unknown_single_l $end
+$var wire 11 ( unknown_z [10:0] $end
+$var reg 11 ) unknown_x [10:0] $end
 $upscope $end
 
 $enddefinitions $end
@@ -30,6 +34,10 @@ x%
 b0000 !
 b0000 "
 bxxxx $
+bxxxxxxxxxxx )
+bzzzzzzzzzzz (
+x'
+z&
 $end
 b0000 $
 0%

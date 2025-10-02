@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 #include <QSet>
 #include <QInputDialog>
+#include <QColorDialog>
 
 #include "vcdparser.h"
 
@@ -76,6 +77,10 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
+    QList<int> getSelectedItemIndices() const { return selectedItems.values(); }
+
+    enum BusFormat { Hex, Binary, Octal, Decimal };
     explicit WaveformWidget(QWidget *parent = nullptr);
     void setVcdData(VCDParser *parser);
     void setVisibleSignals(const QList<VCDSignal> &visibleSignals);
@@ -84,16 +89,15 @@ public:
     void zoomFit();
     void removeSelectedSignals();
     void selectAllSignals();
-    int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
-    QList<int> getSelectedItemIndices() const { return selectedItems.values(); }
+    void resetSignalColors();
+    void setHighlightBusses(bool highlight);
+    void setBusDisplayFormat(BusFormat format);
+    BusFormat getBusDisplayFormat() const { return busDisplayFormat; }
     
     // Item management
     int getItemCount() const { return displayItems.size(); }
     const DisplayItem* getItem(int index) const;
 
-    // Bus display settings
-    void setBusDisplayFormat(bool hexFormat) { busDisplayHex = hexFormat; update(); }
-    bool getBusDisplayFormat() const { return busDisplayHex; }
 
 signals:
     void timeChanged(int time);
@@ -131,6 +135,15 @@ private:
     void addSpaceBelow(int index);
     void renameItem(int itemIndex);
     QString promptForName(const QString &title, const QString &defaultName = "");
+    QMenu *waveMenu;
+    QAction *defaultColorsAction;
+    QAction *highlightBussesAction;
+    QMenu *busFormatMenu;
+    QAction *busHexAction;
+    QAction *busBinaryAction;
+    QAction *busOctalAction;
+    QAction *busDecimalAction;
+
     
     // Drag and movement
     void startDrag(int itemIndex);
@@ -151,11 +164,6 @@ private:
         return isSignalItem(index) ? displayItems[index].signal.signal : VCDSignal();
     }
 
-    // Bus display helpers
-    QString formatBusValue(const QString& binaryValue) const;
-    bool isValidBinary(const QString& value) const;
-    QString binaryToHex(const QString& binaryValue) const;
-
     VCDParser *vcdParser;
 
     // Layout parameters
@@ -167,6 +175,24 @@ private:
 
     // Display items
     QList<DisplayItem> displayItems;
+
+    // Signal colors
+     // Signal colors with X/Z handling
+    QMap<QString, QColor> signalColors;
+    bool highlightBusses = false;
+    BusFormat busDisplayFormat = Hex;
+    
+    // Color management
+    void changeSignalColor(int itemIndex);
+    QColor getSignalColor(const QString& identifier) const;
+    // QColor getDefaultSignalColor(const VCDSignal& signal) const;
+    
+    // Bus display helpers
+    QString formatBusValue(const QString& binaryValue) const;
+    bool isValidBinary(const QString& value) const;
+    QString binaryToHex(const QString& binaryValue) const;
+    QString binaryToOctal(const QString& binaryValue) const;
+    QString binaryToDecimal(const QString& binaryValue) const;
 
     // Drag state
     bool isDragging;

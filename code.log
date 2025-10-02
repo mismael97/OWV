@@ -46,8 +46,6 @@ private:
 #include <QWidget>
 #include <QListWidget>
 #include <QListWidgetItem>
-#include <QGroupBox>
-#include <QDockWidget>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QKeyEvent>
@@ -76,6 +74,7 @@ private slots:
     void about();
     void showAddSignalsDialog();
     void removeSelectedSignals();
+    void toggleBusDisplayFormat();
 
 private:
     void createActions();
@@ -84,6 +83,8 @@ private:
     void setupUI();
     void loadVcdFile(const QString &filename);
     void loadDefaultVcdFile();
+    QAction *busHexAction;
+    QAction *busBinaryAction;
 
     // UI Components
     WaveformWidget *waveformWidget;
@@ -190,71 +191,33 @@ private:
 #include <QVBoxLayout>
 #include <QSet>
 #include <QInputDialog>
-#include <memory>
 
 #include "vcdparser.h"
 
-// Simple data structures instead of complex inheritance
+// Simple signal display structure
 struct DisplaySignal {
     VCDSignal signal;
-    bool isInGroup = false;
-    QString groupName;
 };
 
-struct SignalGroup {
-    QString name;
-    QList<DisplaySignal> groupSignals;  // Changed from 'signals'
-    bool collapsed = false;
-    int displayIndex = -1;
-    
-    bool isEmpty() const { return groupSignals.isEmpty(); }
-    int getSignalCount() const { return groupSignals.size(); }
-    void addSignal(const DisplaySignal& signal) { groupSignals.append(signal); }
-    void removeSignal(const QString& identifier) {
-        for (int i = 0; i < groupSignals.size(); i++) {
-            if (groupSignals[i].signal.identifier == identifier) {
-                groupSignals.removeAt(i);
-                break;
-            }
-        }
-    }
-    bool containsSignal(const QString& identifier) const {
-        for (const auto& sig : groupSignals) {
-            if (sig.signal.identifier == identifier) {
-                return true;
-            }
-        }
-        return false;
-    }
-};
-
+// Space structure
 struct DisplaySpace {
     QString name;
 };
 
 // Unified display item
 struct DisplayItem {
-    enum Type { Signal, Group, Space };
+    enum Type { Signal, Space };
     Type type;
     
     // Only one of these is valid based on type
     DisplaySignal signal;
-    SignalGroup group;
     DisplaySpace space;
     
     // Constructor for signal
-    static DisplayItem createSignal(const VCDSignal& sig, bool inGroup = false, const QString& groupName = "") {
+    static DisplayItem createSignal(const VCDSignal& sig) {
         DisplayItem item;
         item.type = Signal;
-        item.signal = {sig, inGroup, groupName};
-        return item;
-    }
-    
-    // Constructor for group
-    static DisplayItem createGroup(const QString& name) {
-        DisplayItem item;
-        item.type = Group;
-        item.group = {name, {}, false, -1};
+        item.signal = {sig};
         return item;
     }
     
@@ -270,8 +233,6 @@ struct DisplayItem {
         switch(type) {
             case Signal: 
                 return signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
-            case Group: 
-                return "⫿ " + group.name;
             case Space: 
                 return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
         }
@@ -279,16 +240,11 @@ struct DisplayItem {
     }
     
     int getHeight() const {
-        switch(type) {
-            case Signal: return 30;
-            case Group: return group.collapsed ? 30 : (30 + group.groupSignals.size() * 30);
-            case Space: return 30;
-        }
-        return 30;
+        return 30; // Fixed height for all items
     }
     
     bool isSelectable() const { return true; }
-    bool isMovable() const { return type != Group; }
+    bool isMovable() const { return true; }
 };
 
 class WaveformWidget : public QWidget
@@ -307,15 +263,13 @@ public:
     int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
     QList<int> getSelectedItemIndices() const { return selectedItems.values(); }
     
-    // Group management
-    void createGroupFromSelection(const QString& name);
-    void addSignalsToGroup(const QList<int>& signalIndices, const QString& groupName);
-    void removeSignalsFromGroup(const QList<int>& signalIndices);
-    QList<QString> getGroupNames() const;
-    
     // Item management
     int getItemCount() const { return displayItems.size(); }
     const DisplayItem* getItem(int index) const;
+
+    // Bus display settings
+    void setBusDisplayFormat(bool hexFormat) { busDisplayHex = hexFormat; update(); }
+    bool getBusDisplayFormat() const { return busDisplayHex; }
 
 signals:
     void timeChanged(int time);
@@ -332,10 +286,6 @@ protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
-    
-
-private slots:
-    void onAddToGroupActionTriggered();
 
 private:
     void drawSignalNamesColumn(QPainter &painter);
@@ -343,11 +293,12 @@ private:
     void drawGrid(QPainter &painter);
     void drawSignals(QPainter &painter);
     void drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos);
-    void drawGroupWaveforms(QPainter &painter, const SignalGroup &group, int yPos);
+    void drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos);
     void updateScrollBar();
     int timeToX(int time) const;
     int xToTime(int x) const;
     QString getSignalValueAtTime(const QString &identifier, int time) const;
+    QString getBusValueAtTime(const QString &identifier, int time) const;
     int calculateTimeStep(int startTime, int endTime) const;
     int getItemAtPosition(const QPoint &pos) const;
     int getItemYPosition(int index) const;
@@ -356,26 +307,11 @@ private:
     void addSpaceBelow(int index);
     void renameItem(int itemIndex);
     QString promptForName(const QString &title, const QString &defaultName = "");
-     void updateAllGroupIndices();
-    void updateGroupIndicesAfterDeletion(const QList<int> &deletedIndices);
-    bool isSignalInGroup(int index) const;
-    int getGroupBottomIndex(int groupIndex) const;
-    void selectGroup(int groupIndex);
-        // Drag and movement
-    void moveFreeItem(int itemIndex, int newIndex);
-    void updateGroupDisplayIndices();
-    void updateSelection(int itemIndex, bool isMultiSelect);
-    void startDragSignal(int signalIndex);
-    void updateSignalGroupMembership(int signalIndex);
-    void debugGroupInfo();
-    void addGroup();
-    void addSignalToGroup(int signalIndex, const QString& groupName);
     
-    // Drag and drop
+    // Drag and movement
     void startDrag(int itemIndex);
     void performDrag(int mouseY);
-    void moveGroup(int groupIndex, int newIndex);
-
+    void moveItem(int itemIndex, int newIndex);
     
     // Selection
     void handleMultiSelection(int itemIndex, QMouseEvent *event);
@@ -387,15 +323,14 @@ private:
     bool isSpaceItem(int index) const { 
         return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Space; 
     }
-    bool isGroupItem(int index) const { 
-        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Group; 
-    }
     VCDSignal getSignalFromItem(int index) const {
         return isSignalItem(index) ? displayItems[index].signal.signal : VCDSignal();
     }
-    int findGroupIndexByName(const QString& name) const;
-    void convertToFreeSignal(int itemIndex);
-    void removeSignalFromAllGroups(const QString& identifier);
+
+    // Bus display helpers
+    QString formatBusValue(const QString& binaryValue) const;
+    bool isValidBinary(const QString& value) const;
+    QString binaryToHex(const QString& binaryValue) const;
 
     VCDParser *vcdParser;
 
@@ -422,15 +357,15 @@ private:
     QSet<int> selectedItems;
     int lastSelectedItem;
 
-    // Context menu state
-    QString lastContextGroupName;
-    int lastContextSignalIndex;
+    // Bus display settings
+    bool busDisplayHex = true; // true = hex, false = binary
 
     QScrollBar *horizontalScrollBar;
 };
 
 #endif // WAVEFORMWIDGET_H#include "SignalSelectionDialog.h"
 #include <QHeaderView>
+#include <QDebug>
 
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent)
@@ -442,12 +377,13 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
 
     // Signal tree
     signalTree = new QTreeWidget();
-    signalTree->setHeaderLabels({"Signal", "Width", "Type"});
+    signalTree->setHeaderLabels({"Signal", "Width", "Type", "Identifier"});
     signalTree->setAlternatingRowColors(true);
     signalTree->header()->setStretchLastSection(false);
     signalTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     signalTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     signalTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    signalTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
 
     // Controls
     QHBoxLayout *controlsLayout = new QHBoxLayout();
@@ -522,14 +458,29 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
         signalItem->setText(0, signal.name);
         signalItem->setText(1, QString::number(signal.width));
         signalItem->setText(2, signal.type);
+        signalItem->setText(3, signal.identifier); // Show identifier for debugging
         signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
         signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-        signalItem->setCheckState(0, Qt::Unchecked); // All signals start unchecked
+        signalItem->setCheckState(0, Qt::Unchecked);
 
         scopeItems[scopePath]->addChild(signalItem);
+        
+        qDebug() << "Adding signal to dialog:" << signal.name << "ID:" << signal.identifier;
     }
 
     signalTree->expandAll();
+    
+    // Debug: show how many signals were added
+    int signalCount = 0;
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it) {
+        QVariant data = (*it)->data(0, Qt::UserRole);
+        if (data.canConvert<VCDSignal>()) {
+            signalCount++;
+        }
+        ++it;
+    }
+    qDebug() << "Total signals in dialog:" << signalCount;
 }
 
 QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
@@ -541,7 +492,9 @@ QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
         if ((*it)->checkState(0) == Qt::Checked) {
             QVariant data = (*it)->data(0, Qt::UserRole);
             if (data.canConvert<VCDSignal>()) {
-                selectedSignals.append(data.value<VCDSignal>());
+                VCDSignal signal = data.value<VCDSignal>();
+                selectedSignals.append(signal);
+                qDebug() << "Selected signal:" << signal.name << "ID:" << signal.identifier;
             }
         }
         ++it;
@@ -572,8 +525,7 @@ void SignalSelectionDialog::deselectAll()
         }
         ++it;
     }
-}
-// file: main.cpp
+}// file: main.cpp
 #include "mainwindow.h"
 #include <QApplication>
 
@@ -607,6 +559,7 @@ int main(int argc, char *argv[])
 #include <QHBoxLayout>
 #include <QWidget>
 #include <QDir>
+#include <QToolButton>
 #include <QKeyEvent>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -668,16 +621,40 @@ void MainWindow::createActions()
 
     aboutAction = new QAction("About", this);
     connect(aboutAction, &QAction::triggered, this, &MainWindow::about);
+
+    // Bus display actions
+    busHexAction = new QAction("Hex Bus Display", this);
+    busHexAction->setCheckable(true);
+    busHexAction->setChecked(true);
+    connect(busHexAction, &QAction::triggered, this, &MainWindow::toggleBusDisplayFormat);
+    
+    busBinaryAction = new QAction("Binary Bus Display", this);
+    busBinaryAction->setCheckable(true);
+    busBinaryAction->setChecked(false);
+    connect(busBinaryAction, &QAction::triggered, this, &MainWindow::toggleBusDisplayFormat);
 }
 
 void MainWindow::createToolBar()
 {
-    QToolBar *toolBar = addToolBar("Main Toolbar");
+     QToolBar *toolBar = addToolBar("Main Toolbar");
     toolBar->addAction(openAction);
     toolBar->addSeparator();
     toolBar->addAction(zoomInAction);
     toolBar->addAction(zoomOutAction);
     toolBar->addAction(zoomFitAction);
+    toolBar->addSeparator();
+    
+    // Bus display format toggle
+    QMenu *busMenu = new QMenu("Bus Format");
+    busMenu->addAction(busHexAction);
+    busMenu->addAction(busBinaryAction);
+    
+    QToolButton *busButton = new QToolButton();
+    busButton->setMenu(busMenu);
+    busButton->setPopupMode(QToolButton::InstantPopup);
+    busButton->setText("Bus Format");
+    toolBar->addWidget(busButton);
+    
     toolBar->addSeparator();
     toolBar->addAction(aboutAction);
 }
@@ -785,7 +762,7 @@ void MainWindow::removeSelectedSignals()
         waveformWidget->removeSelectedSignals();
         removeSignalsButton->setEnabled(false);
 
-        // Count only signals for display (not spaces or groups)
+        // Count only signals for display (not spaces)
         int signalCount = 0;
         for (int i = 0; i < waveformWidget->getItemCount(); i++) {
             const DisplayItem* item = waveformWidget->getItem(i);
@@ -800,7 +777,7 @@ void MainWindow::removeSelectedSignals()
 
 void MainWindow::loadDefaultVcdFile()
 {
-    QString defaultPath = "C:/Users/mismael/Desktop/OWV/rtl.vcd";
+    QString defaultPath = "C:/Users/mismael/Desktop/OWV/test.vcd";
 
     if (QFile::exists(defaultPath)) {
         loadVcdFile(defaultPath);
@@ -869,8 +846,19 @@ void MainWindow::about()
                        "- Mouse wheel navigation");
 }
 
-// file: vcdparser.cpp
-#include "vcdparser.h"
+// Add the toggle method:
+void MainWindow::toggleBusDisplayFormat()
+{
+    if (sender() == busHexAction) {
+        waveformWidget->setBusDisplayFormat(true);
+        busHexAction->setChecked(true);
+        busBinaryAction->setChecked(false);
+    } else if (sender() == busBinaryAction) {
+        waveformWidget->setBusDisplayFormat(false);
+        busHexAction->setChecked(false);
+        busBinaryAction->setChecked(true);
+    }
+}#include "vcdparser.h"
 #include <QRegularExpression>
 #include <QDebug>
 
@@ -909,7 +897,11 @@ bool VCDParser::parseFile(const QString &filename)
     file.close();
 
     qDebug() << "VCD parsing completed";
-    qDebug() << "Signals:" << vcdSignals.size() << "End time:" << endTime;
+    qDebug() << "Signals found:" << vcdSignals.size();
+    for (const auto& signal : vcdSignals) {
+        qDebug() << "Signal:" << signal.name << "Identifier:" << signal.identifier << "Scope:" << signal.scope;
+    }
+    qDebug() << "End time:" << endTime;
 
     return true;
 }
@@ -917,19 +909,27 @@ bool VCDParser::parseFile(const QString &filename)
 bool VCDParser::parseHeader(QTextStream &stream)
 {
     QRegularExpression scopeRegex("^\\$scope\\s+(\\w+)\\s+(\\S+)\\s*\\$end$");
-    QRegularExpression varRegex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(\\S+)\\s*\\$end$");
+    QRegularExpression varRegex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(\\S+.*\\S+)\\s*\\$end$");
     QRegularExpression timescaleRegex("^\\$timescale\\s+(\\S+)\\s*\\$end$");
 
     while (!stream.atEnd()) {
         QString line = stream.readLine().trimmed();
 
         if (line.startsWith("$date")) {
-            while (!stream.atEnd() && !line.endsWith("$end")) {
+            // Skip date section
+            while (!stream.atEnd() && !line.contains("$end")) {
                 line = stream.readLine().trimmed();
             }
         }
         else if (line.startsWith("$version")) {
-            while (!stream.atEnd() && !line.endsWith("$end")) {
+            // Skip version section
+            while (!stream.atEnd() && !line.contains("$end")) {
+                line = stream.readLine().trimmed();
+            }
+        }
+        else if (line.startsWith("$comment")) {
+            // Skip comment section
+            while (!stream.atEnd() && !line.contains("$end")) {
                 line = stream.readLine().trimmed();
             }
         }
@@ -943,6 +943,7 @@ bool VCDParser::parseHeader(QTextStream &stream)
             parseVarLine(line);
         }
         else if (line.startsWith("$upscope")) {
+            // Move up one scope level
             int lastDot = currentScope.lastIndexOf('.');
             if (lastDot != -1) {
                 currentScope = currentScope.left(lastDot);
@@ -951,6 +952,7 @@ bool VCDParser::parseHeader(QTextStream &stream)
             }
         }
         else if (line.startsWith("$enddefinitions")) {
+            // End of header
             break;
         }
     }
@@ -964,6 +966,7 @@ void VCDParser::parseTimescale(const QString &line)
     QRegularExpressionMatch match = regex.match(line);
     if (match.hasMatch()) {
         timescale = match.captured(1);
+        qDebug() << "Timescale:" << timescale;
     }
 }
 
@@ -972,65 +975,99 @@ void VCDParser::parseScopeLine(const QString &line)
     QRegularExpression regex("^\\$scope\\s+(\\w+)\\s+(\\S+)\\s*\\$end$");
     QRegularExpressionMatch match = regex.match(line);
     if (match.hasMatch()) {
+        QString scopeType = match.captured(1);
         QString scopeName = match.captured(2);
+        
         if (!currentScope.isEmpty()) {
             currentScope += "." + scopeName;
         } else {
             currentScope = scopeName;
         }
+        qDebug() << "Entering scope:" << currentScope;
     }
 }
 
 void VCDParser::parseVarLine(const QString &line)
 {
-    QRegularExpression regex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(\\S+)\\s*\\$end$");
+    // Improved regex to handle signal names with spaces and special characters
+    QRegularExpression regex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(.+)\\s*\\$end$");
     QRegularExpressionMatch match = regex.match(line);
+    
     if (match.hasMatch()) {
         VCDSignal signal;
         signal.type = match.captured(1);
         signal.width = match.captured(2).toInt();
         signal.identifier = match.captured(3);
-        signal.name = match.captured(4);
+        
+        // The signal name might have trailing spaces before $end, so trim it
+        QString signalName = match.captured(4).trimmed();
+        signal.name = signalName;
         signal.scope = currentScope;
 
         vcdSignals.append(signal);
         identifierMap[signal.identifier] = signal;
+        
+        qDebug() << "Found signal:" << signal.name << "Identifier:" << signal.identifier 
+                 << "Type:" << signal.type << "Width:" << signal.width << "Scope:" << signal.scope;
+    } else {
+        qDebug() << "Failed to parse var line:" << line;
     }
 }
 
 bool VCDParser::parseValueChanges(QTextStream &stream)
 {
     QRegularExpression timestampRegex("^#(\\d+)$");
-    QRegularExpression valueChangeRegex("^([01xXzZ])(\\S+)$");
+    // Improved regex to handle all value change formats
+    QRegularExpression valueChangeRegex("^([01xXzZrb])(\\S+)$");
     QRegularExpression vectorValueRegex("^[bB]([01xXzZ]+)\\s+(\\S+)$");
 
     int currentTime = 0;
+    bool inDumpvars = false;
 
     while (!stream.atEnd()) {
         QString line = stream.readLine().trimmed();
 
         if (line.isEmpty()) continue;
 
+        // Check for timestamp
         QRegularExpressionMatch timestampMatch = timestampRegex.match(line);
         if (timestampMatch.hasMatch()) {
             currentTime = timestampMatch.captured(1).toInt();
             endTime = qMax(endTime, currentTime);
+            inDumpvars = false; // We're past the initial dumpvars section
             continue;
         }
 
+        // Check for $dumpvars section
+        if (line.startsWith("$dumpvars")) {
+            inDumpvars = true;
+            continue;
+        }
+
+        if (line.startsWith("$end") && inDumpvars) {
+            inDumpvars = false;
+            continue;
+        }
+
+        // Handle scalar value changes (0, 1, x, z)
         QRegularExpressionMatch valueMatch = valueChangeRegex.match(line);
         if (valueMatch.hasMatch()) {
             QString value = valueMatch.captured(1).toUpper();
             QString identifier = valueMatch.captured(2);
 
-            VCDValueChange change;
-            change.timestamp = currentTime;
-            change.value = value;
-
-            valueChanges[identifier].append(change);
+            // Handle special case where identifier might be just a single character
+            if (identifier.length() == 1) {
+                // This is a valid single-character identifier like #, %, etc.
+                VCDValueChange change;
+                change.timestamp = currentTime;
+                change.value = value;
+                valueChanges[identifier].append(change);
+                qDebug() << "Scalar change at time" << currentTime << ":" << value << "->" << identifier;
+            }
             continue;
         }
 
+        // Handle vector value changes (binary)
         QRegularExpressionMatch vectorMatch = vectorValueRegex.match(line);
         if (vectorMatch.hasMatch()) {
             QString value = vectorMatch.captured(1);
@@ -1039,14 +1076,37 @@ bool VCDParser::parseValueChanges(QTextStream &stream)
             VCDValueChange change;
             change.timestamp = currentTime;
             change.value = value;
-
             valueChanges[identifier].append(change);
+            qDebug() << "Vector change at time" << currentTime << ":" << value << "->" << identifier;
+            continue;
+        }
+
+        // Handle real value changes (if any)
+        if (line.startsWith("r")) {
+            // Real value change - format: r<value> <identifier>
+            QStringList parts = line.split(" ", Qt::SkipEmptyParts);
+            if (parts.size() >= 2) {
+                QString value = parts[0].mid(1); // Remove 'r' prefix
+                QString identifier = parts[1];
+                
+                VCDValueChange change;
+                change.timestamp = currentTime;
+                change.value = value;
+                valueChanges[identifier].append(change);
+                qDebug() << "Real change at time" << currentTime << ":" << value << "->" << identifier;
+            }
         }
     }
 
+    // Debug: print all signals found
+    qDebug() << "=== All parsed signals ===";
+    for (const auto& signal : vcdSignals) {
+        qDebug() << "Signal:" << signal.name << "ID:" << signal.identifier 
+                 << "Values:" << valueChanges[signal.identifier].size();
+    }
+
     return true;
-}
-#include "waveformwidget.h"
+}#include "waveformwidget.h"
 #include <QScrollBar>
 #include <QWheelEvent>
 #include <QMouseEvent>
@@ -1062,8 +1122,7 @@ bool VCDParser::parseValueChanges(QTextStream &stream)
 WaveformWidget::WaveformWidget(QWidget *parent)
     : QWidget(parent), vcdParser(nullptr), timeScale(1.0), timeOffset(0),
       timeMarkersHeight(30), topMargin(10),
-      isDragging(false), isDraggingItem(false), dragItemIndex(-1), lastSelectedItem(-1),
-      lastContextSignalIndex(-1)
+      isDragging(false), isDraggingItem(false), dragItemIndex(-1), lastSelectedItem(-1)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -1087,7 +1146,6 @@ void WaveformWidget::setVcdData(VCDParser *parser)
     update();
 }
 
-
 void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
 {
     displayItems.clear();
@@ -1100,70 +1158,6 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     emit itemSelected(-1);
 }
 
-// Group Management
-void WaveformWidget::createGroupFromSelection(const QString& name)
-{
-    if (selectedItems.size() < 2) return;
-    
-    // Collect all selected signals and their indices
-    QList<VCDSignal> signalsToGroup;
-    QList<int> indicesToRemove;
-    
-    for (int index : selectedItems) {
-        if (isSignalItem(index)) {
-            signalsToGroup.append(getSignalFromItem(index));
-            indicesToRemove.append(index);
-        }
-    }
-    
-    if (signalsToGroup.size() < 2) return;
-    
-    // Remove signals from display (in reverse order)
-    std::sort(indicesToRemove.begin(), indicesToRemove.end(), std::greater<int>());
-    for (int index : indicesToRemove) {
-        displayItems.removeAt(index);
-    }
-    
-    // Create group at the position of the first signal
-    int insertPosition = indicesToRemove.last();
-    DisplayItem groupItem = DisplayItem::createGroup(name);
-    
-    // Add signals to the group
-    for (const auto& signal : signalsToGroup) {
-        groupItem.group.addSignal(DisplayItem::createSignal(signal, true, name).signal);
-    }
-    
-    displayItems.insert(insertPosition, groupItem);
-    
-    // Clear selection and select the new group
-    selectedItems.clear();
-    selectedItems.insert(insertPosition);
-    lastSelectedItem = insertPosition;
-    
-    update();
-    emit itemSelected(insertPosition);
-}
-
-int WaveformWidget::findGroupIndexByName(const QString& name) const {
-    for (int i = 0; i < displayItems.size(); i++) {
-        if (displayItems[i].type == DisplayItem::Group && displayItems[i].group.name == name) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-QList<QString> WaveformWidget::getGroupNames() const
-{
-    QList<QString> names;
-    for (const auto& item : displayItems) {
-        if (item.type == DisplayItem::Group) {
-            names.append(item.group.name);
-        }
-    }
-    return names;
-}
-
 const DisplayItem* WaveformWidget::getItem(int index) const
 {
     if (index >= 0 && index < displayItems.size()) {
@@ -1172,88 +1166,8 @@ const DisplayItem* WaveformWidget::getItem(int index) const
     return nullptr;
 }
 
-
-void WaveformWidget::addSignalsToGroup(const QList<int>& signalIndices, const QString& groupName) {
-    int groupIndex = findGroupIndexByName(groupName);
-    if (groupIndex == -1) return;
-    
-    // Collect signals to add
-    QList<VCDSignal> signalsToAdd;
-    QList<int> indicesToRemove;
-    
-    for (int index : signalIndices) {
-        if (isSignalItem(index)) {
-            signalsToAdd.append(getSignalFromItem(index));
-            indicesToRemove.append(index);
-        }
-    }
-    
-    if (signalsToAdd.isEmpty()) return;
-    
-    // Remove signals from display (in reverse order)
-    std::sort(indicesToRemove.begin(), indicesToRemove.end(), std::greater<int>());
-    for (int index : indicesToRemove) {
-        displayItems.removeAt(index);
-    }
-    
-    // Add signals to group
-    DisplayItem& groupItem = displayItems[groupIndex];
-    for (const auto& signal : signalsToAdd) {
-        groupItem.group.addSignal(DisplayItem::createSignal(signal, true, groupName).signal);
-    }
-    
-    update();
-}
-
-void WaveformWidget::onAddToGroupActionTriggered()
-{
-    if (lastContextSignalIndex != -1 && !lastContextGroupName.isEmpty()) {
-        QList<int> indices = {lastContextSignalIndex};
-        addSignalsToGroup(indices, lastContextGroupName);
-    }
-}
-
-void WaveformWidget::convertToFreeSignal(int itemIndex) {
-    if (!isSignalItem(itemIndex)) return;
-    
-    DisplayItem& item = displayItems[itemIndex];
-    if (item.signal.isInGroup) {
-        // Remove from group
-        int groupIndex = findGroupIndexByName(item.signal.groupName);
-        if (groupIndex != -1) {
-            displayItems[groupIndex].group.removeSignal(item.signal.signal.identifier);
-        }
-        // Convert to free signal
-        item.signal.isInGroup = false;
-        item.signal.groupName.clear();
-    }
-}
-
-void WaveformWidget::removeSignalsFromGroup(const QList<int>& signalIndices)
-{
-    for (int index : signalIndices) {
-        convertToFreeSignal(index);
-    }
-    update();
-}
-
-void WaveformWidget::removeSignalFromAllGroups(const QString& identifier) {
-    for (int i = 0; i < displayItems.size(); i++) {
-        if (displayItems[i].type == DisplayItem::Group) {
-            displayItems[i].group.removeSignal(identifier);
-        }
-    }
-}
-
 void WaveformWidget::removeSelectedSignals() {
     if (selectedItems.isEmpty()) return;
-
-    // First remove signals from any groups they belong to
-    for (int index : selectedItems) {
-        if (isSignalItem(index)) {
-            removeSignalFromAllGroups(displayItems[index].signal.signal.identifier);
-        }
-    }
 
     // Remove items in reverse order
     QList<int> indices = selectedItems.values();
@@ -1271,35 +1185,6 @@ void WaveformWidget::removeSelectedSignals() {
     emit itemSelected(-1);
 }
 
-void WaveformWidget::updateAllGroupIndices()
-{
-    // Clear all group signal indices first
-    for (int i = 0; i < displayItems.size(); i++) {
-        if (isGroupItem(i)) {
-            displayItems[i].group.groupSignals.clear();
-        }
-    }
-    
-    // For each group, only add signals that were explicitly selected when creating the group
-    // Don't automatically add signals based on position
-    // Groups should only contain signals that were explicitly added to them
-    qDebug() << "Group system: Manual signal tracking - no automatic grouping";
-}
-
-void WaveformWidget::updateGroupIndicesAfterDeletion(const QList<int> &deletedIndices)
-{
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        if (isGroupItem(i))
-        {
-            // For the new architecture, we don't need to update indices
-            // because signals are stored by identifier, not by display index
-            Q_UNUSED(deletedIndices)
-        }
-    }
-}
-
-// Update the selectAllSignals method to select all item types:
 void WaveformWidget::selectAllSignals()
 {
     selectedItems.clear();
@@ -1361,45 +1246,6 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     drawWaveformArea(painter);
 }
 
-bool WaveformWidget::isSignalInGroup(int index) const
-{
-    if (!isSignalItem(index)) return false;
-
-    const DisplayItem& item = displayItems[index];
-    return item.signal.isInGroup;
-}
-
-int WaveformWidget::getGroupBottomIndex(int groupIndex) const
-{
-    if (!isGroupItem(groupIndex))
-        return -1;
-
-    const SignalGroup& group = displayItems[groupIndex].group;
-    if (group.groupSignals.isEmpty())
-        return -1;
-
-    // In the new architecture, signals are stored within the group object
-    // not as separate display items, so we don't have a "bottom index" concept
-    return -1;
-}
-
-
-void WaveformWidget::selectGroup(int groupIndex)
-{
-    if (!isGroupItem(groupIndex))
-        return;
-
-    selectedItems.clear();
-    const SignalGroup& group = displayItems[groupIndex].group;
-
-    // Select the group header
-    selectedItems.insert(groupIndex);
-
-    lastSelectedItem = groupIndex;
-    update();
-    emit itemSelected(groupIndex);
-}
-
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 {
     // Draw signal names column background
@@ -1429,32 +1275,21 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         // Draw background based on selection and type
         if (selectedItems.contains(i)) {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(60, 60, 90));
-        } else if (item.type == DisplayItem::Group) {
-            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 80, 160, 180));
         } else if (item.type == DisplayItem::Space) {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 160, 80, 120));
-        } else if (item.signal.isInGroup) {
-            // Grouped signal - indented background
-            painter.fillRect(20, currentY, signalNamesWidth - 20, itemHeight, 
-                           i % 2 == 0 ? QColor(50, 50, 80, 100) : QColor(45, 45, 70, 100));
         } else if (i % 2 == 0) {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(45, 45, 48));
         } else {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(40, 40, 43));
         }
 
-        // Draw item name with appropriate styling and indentation
+        // Draw item name with appropriate styling
         painter.setPen(QPen(Qt::white));
         QString displayName = item.getName();
         int textIndent = 5;
         
-        if (item.type == DisplayItem::Group) {
-            painter.setPen(QPen(QColor(200, 200, 255)));
-        } else if (item.type == DisplayItem::Space) {
+        if (item.type == DisplayItem::Space) {
             painter.setPen(QPen(QColor(150, 255, 150)));
-        } else if (item.signal.isInGroup) {
-            textIndent = 25;
-            displayName = "    " + displayName;
         }
         
         painter.drawText(textIndent, currentY + itemHeight / 2 + 4, displayName);
@@ -1464,9 +1299,6 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
             const VCDSignal& signal = item.signal.signal;
             painter.setPen(QPen(QColor(180, 180, 180)));
             int widthX = signalNamesWidth - 35;
-            if (item.signal.isInGroup) {
-                widthX -= 20; // Adjust for indentation
-            }
             painter.drawText(widthX, currentY + itemHeight / 2 + 4,
                             QString("[%1:0]").arg(signal.width - 1));
         }
@@ -1480,7 +1312,6 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 }
 
 void WaveformWidget::drawWaveformArea(QPainter &painter) {
-    // Implementation similar to previous version
     painter.setClipRect(signalNamesWidth, 0, width() - signalNamesWidth, height());
     painter.translate(signalNamesWidth, 0);
     painter.fillRect(0, 0, width() - signalNamesWidth, height(), QColor(30, 30, 30));
@@ -1557,99 +1388,9 @@ int WaveformWidget::calculateTimeStep(int startTime, int endTime) const
         return static_cast<int>(10 * power);
 }
 
-void WaveformWidget::drawSignals(QPainter &painter) {
-    int currentY = topMargin + timeMarkersHeight;
-    
-    for (int i = 0; i < displayItems.size(); i++) {
-        const auto& item = displayItems[i];
-        
-        if (item.type == DisplayItem::Signal) {
-            drawSignalWaveform(painter, item.signal.signal, currentY);
-        } else if (item.type == DisplayItem::Group && !item.group.collapsed) {
-            // Draw all signals in the group
-            int signalY = currentY + 30;
-            for (const auto& groupSignal : item.group.groupSignals) {
-                drawSignalWaveform(painter, groupSignal.signal, signalY);
-                signalY += 30;
-            }
-        }
-        
-        currentY += item.getHeight();
-    }
-}
-
-void WaveformWidget::drawGroupWaveforms(QPainter &painter, const SignalGroup &group, int groupY) {
-    int signalY = groupY + 30; // Start below group header
-    
-    for (const auto& groupSignal : group.groupSignals) {
-        drawSignalWaveform(painter, groupSignal.signal, signalY);
-        signalY += 30;
-    }
-}
-
-void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
-    // Keep existing waveform drawing implementation
-    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
-    if (changes.isEmpty()) return;
-
-    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
-    painter.setPen(QPen(signalColor, 2));
-
-    int signalMidY = yPos + 15;
-    int highLevel = yPos + 5;
-    int lowLevel = yPos + 25;
-
-    int prevTime = 0;
-    QString prevValue = "0";
-    int prevX = timeToX(prevTime);
-
-    for (const auto &change : changes) {
-        int currentX = timeToX(change.timestamp);
-
-        if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
-            painter.drawLine(prevX, highLevel, currentX, highLevel);
-        } else {
-            painter.drawLine(prevX, lowLevel, currentX, lowLevel);
-        }
-
-        if (prevValue != change.value) {
-            painter.drawLine(currentX, highLevel, currentX, lowLevel);
-        }
-
-        prevTime = change.timestamp;
-        prevValue = change.value;
-        prevX = currentX;
-    }
-
-    int endX = timeToX(vcdParser->getEndTime());
-    if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
-        painter.drawLine(prevX, highLevel, endX, highLevel);
-    } else {
-        painter.drawLine(prevX, lowLevel, endX, lowLevel);
-    }
-}
-
-
-
 void WaveformWidget::handleMultiSelection(int itemIndex, QMouseEvent *event)
 {
     if (itemIndex < 0 || itemIndex >= displayItems.size()) return;
-
-    // Allow selection of all item types (signals, spaces, groups)
-    bool allowSelection = true;
-
-    // Handle group header clicks - select only the header by default
-    if (isGroupItem(itemIndex)) {
-        if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
-            // Single click on group header selects only the header
-            selectedItems.clear();
-            selectedItems.insert(itemIndex);
-            lastSelectedItem = itemIndex;
-            update();
-            emit itemSelected(itemIndex);
-            return;
-        }
-    }
 
     if (event->modifiers() & Qt::ShiftModifier && lastSelectedItem != -1) {
         // Shift-click: select range from last selected to current
@@ -1660,7 +1401,7 @@ void WaveformWidget::handleMultiSelection(int itemIndex, QMouseEvent *event)
             selectedItems.insert(i);
         }
     } else if (event->modifiers() & Qt::ControlModifier) {
-        // Ctrl-click: toggle selection (all item types)
+        // Ctrl-click: toggle selection
         if (selectedItems.contains(itemIndex)) {
             selectedItems.remove(itemIndex);
         } else {
@@ -1668,27 +1409,12 @@ void WaveformWidget::handleMultiSelection(int itemIndex, QMouseEvent *event)
         }
         lastSelectedItem = itemIndex;
     } else {
-        // Regular click: single selection (all item types)
+        // Regular click: single selection
         selectedItems.clear();
         selectedItems.insert(itemIndex);
         lastSelectedItem = itemIndex;
     }
     
-    update();
-    emit itemSelected(itemIndex);
-}
-
-void WaveformWidget::updateSelection(int itemIndex, bool isMultiSelect)
-{
-    if (!isMultiSelect)
-    {
-        selectedItems.clear();
-        if (isSignalItem(itemIndex))
-        {
-            selectedItems.insert(itemIndex);
-        }
-        lastSelectedItem = itemIndex;
-    }
     update();
     emit itemSelected(itemIndex);
 }
@@ -1715,53 +1441,6 @@ void WaveformWidget::startDrag(int itemIndex)
     setCursor(Qt::ClosedHandCursor);
 }
 
-void WaveformWidget::updateSignalGroupMembership(int signalIndex)
-{
-    if (!isSignalItem(signalIndex)) return;
-    
-    // Remove signal from all groups first
-    for (int i = 0; i < displayItems.size(); i++) {
-        if (isGroupItem(i)) {
-            displayItems[i].group.removeSignal(displayItems[signalIndex].signal.signal.identifier);
-        }
-    }
-    
-    // Find if this signal is now within a group
-    // Look for the nearest group header above this signal
-    int groupHeaderIndex = -1;
-    for (int i = signalIndex - 1; i >= 0; i--) {
-        if (isGroupItem(i)) {
-            groupHeaderIndex = i;
-            break;
-        } else if (isSpaceItem(i) || (i > 0 && isSignalItem(i) && !isSignalInGroup(i))) {
-            // Reached a space or regular signal, stop searching
-            break;
-        }
-    }
-    
-    // If found a group header above, add this signal to that group
-    if (groupHeaderIndex != -1) {
-        SignalGroup& group = displayItems[groupHeaderIndex].group;
-        // Check if this signal is below the group header and above the next group/space
-        bool shouldBeInGroup = true;
-        for (int i = groupHeaderIndex + 1; i < signalIndex; i++) {
-            if (isGroupItem(i) || isSpaceItem(i)) {
-                shouldBeInGroup = false;
-                break;
-            }
-        }
-        
-        if (shouldBeInGroup && !group.containsSignal(displayItems[signalIndex].signal.signal.identifier)) {
-            DisplaySignal displaySignal;
-            displaySignal.signal = displayItems[signalIndex].signal.signal;
-            displaySignal.isInGroup = true;
-            displaySignal.groupName = group.name;
-            group.addSignal(displaySignal);
-            qDebug() << "Added signal" << signalIndex << "to group at" << groupHeaderIndex;
-        }
-    }
-}
-
 void WaveformWidget::performDrag(int mouseY)
 {
     if (!isDraggingItem || dragItemIndex < 0) return;
@@ -1782,15 +1461,10 @@ void WaveformWidget::performDrag(int mouseY)
     if (newIndex == -1) newIndex = displayItems.size() - 1;
     if (newIndex == dragItemIndex) return;
 
-    // Handle group drag - move all signals together
-    if (isGroupItem(dragItemIndex)) {
-        moveGroup(dragItemIndex, newIndex);
-    } else {
-        moveFreeItem(dragItemIndex, newIndex);
-    }
+    moveItem(dragItemIndex, newIndex);
 }
 
-void WaveformWidget::moveFreeItem(int itemIndex, int newIndex)
+void WaveformWidget::moveItem(int itemIndex, int newIndex)
 {
     DisplayItem item = displayItems[itemIndex];
     displayItems.removeAt(itemIndex);
@@ -1804,34 +1478,6 @@ void WaveformWidget::moveFreeItem(int itemIndex, int newIndex)
     // Update selection
     if (selectedItems.contains(itemIndex)) {
         selectedItems.remove(itemIndex);
-        selectedItems.insert(newIndex);
-        lastSelectedItem = newIndex;
-    }
-    
-    update();
-}
-
-void WaveformWidget::updateGroupDisplayIndices()
-{
-    // In the new architecture, groups store signals by identifier
-    // so we don't need to update display indices
-    // This method is kept for compatibility with older code
-}
-
-void WaveformWidget::moveGroup(int groupIndex, int newIndex)
-{
-    auto group = displayItems[groupIndex];
-    displayItems.removeAt(groupIndex);
-    
-    // Adjust new index if we're moving past the original position
-    if (newIndex > groupIndex) newIndex--;
-    
-    displayItems.insert(newIndex, group);
-    dragItemIndex = newIndex;
-    
-    // Update selection
-    if (selectedItems.contains(groupIndex)) {
-        selectedItems.remove(groupIndex);
         selectedItems.insert(newIndex);
         lastSelectedItem = newIndex;
     }
@@ -1864,7 +1510,7 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
             // Handle multi-selection
             handleMultiSelection(itemIndex, event);
 
-            // Prepare for drag (all item types)
+            // Prepare for drag
             startDrag(itemIndex);
             update();
             emit itemSelected(itemIndex);
@@ -1893,7 +1539,7 @@ void WaveformWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
     int itemIndex = getItemAtPosition(event->pos());
     if (itemIndex >= 0) {
-        if (isGroupItem(itemIndex) || isSpaceItem(itemIndex)) {
+        if (isSpaceItem(itemIndex)) {
             renameItem(itemIndex);
             event->accept();
             return;
@@ -1951,7 +1597,6 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
     }
     else if (event->key() == Qt::Key_Delete)
     {
-        // Delete any selected items (signals, spaces, or groups)
         removeSelectedSignals();
         event->accept();
     }
@@ -1960,7 +1605,6 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
         QWidget::keyPressEvent(event);
     }
 }
-
 
 void WaveformWidget::wheelEvent(QWheelEvent *event)
 {
@@ -1986,7 +1630,6 @@ void WaveformWidget::wheelEvent(QWheelEvent *event)
     }
     else
     {
-        // Regular wheel for vertical scrolling (if implemented) or default behavior
         QWidget::wheelEvent(event);
     }
 }
@@ -2049,43 +1692,266 @@ void WaveformWidget::resizeEvent(QResizeEvent *event)
 int WaveformWidget::getItemAtPosition(const QPoint &pos) const
 {
     if (displayItems.isEmpty())
-    {
-        qDebug() << "No display items";
         return -1;
-    }
 
     int y = pos.y();
     int signalAreaTop = topMargin + timeMarkersHeight;
 
     if (y < signalAreaTop)
-    {
-        qDebug() << "Click above signal area";
         return -1;
-    }
 
     int currentY = signalAreaTop;
     for (int i = 0; i < displayItems.size(); i++)
     {
         int itemHeight = displayItems[i].getHeight();
         if (y >= currentY && y < currentY + itemHeight)
-        {
-            qDebug() << "Found item at index:" << i;
             return i;
-        }
         currentY += itemHeight;
     }
 
-    qDebug() << "Click below all items";
     return -1;
 }
 
+QString WaveformWidget::promptForName(const QString &title, const QString &defaultName)
+{
+    bool ok;
+    QString name = QInputDialog::getText(this, title, "Name:", QLineEdit::Normal, defaultName, &ok);
+    if (ok) {
+        return name;
+    }
+    return defaultName;
+}
+
+void WaveformWidget::addSpaceAbove(int index)
+{
+    if (index < 0 || index >= displayItems.size()) return;
+    
+    QString name = promptForName("Add Space", "");
+    displayItems.insert(index, DisplayItem::createSpace(name));
+    update();
+}
+
+void WaveformWidget::addSpaceBelow(int index)
+{
+    if (index < 0 || index >= displayItems.size()) return;
+    
+    QString name = promptForName("Add Space", "");
+    int insertIndex = index + 1;
+    if (insertIndex > displayItems.size()) {
+        insertIndex = displayItems.size();
+    }
+    
+    displayItems.insert(insertIndex, DisplayItem::createSpace(name));
+    update();
+}
+
+void WaveformWidget::renameItem(int itemIndex)
+{
+    if (itemIndex < 0 || itemIndex >= displayItems.size())
+        return;
+
+    DisplayItem &item = displayItems[itemIndex];
+    QString currentName = item.getName();
+    QString newName = promptForName("Rename", currentName);
+
+    if (!newName.isEmpty() && newName != currentName && item.type == DisplayItem::Space)
+    {
+        item.space.name = newName;
+        update();
+    }
+}
+
+void WaveformWidget::drawSignals(QPainter &painter) {
+    int currentY = topMargin + timeMarkersHeight;
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
+        
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal& signal = item.signal.signal;
+            
+            // Draw as bus if width > 1, otherwise as single line
+            if (signal.width > 1) {
+                drawBusWaveform(painter, signal, currentY);
+            } else {
+                drawSignalWaveform(painter, signal, currentY);
+            }
+        }
+        
+        currentY += item.getHeight();
+    }
+}
+
+void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
+    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
+    if (changes.isEmpty()) return;
+
+    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
+    painter.setPen(QPen(signalColor, 2));
+
+    int signalHeight = 25;
+    int signalTop = yPos + 2;
+    int signalBottom = yPos + signalHeight;
+    int textY = yPos + 17; // Position for text
+
+    int prevTime = 0;
+    QString prevValue = getBusValueAtTime(signal.identifier, 0);
+    int prevX = timeToX(prevTime);
+
+    // Draw the bus background
+    painter.fillRect(prevX, signalTop, width() - signalNamesWidth, signalHeight, QColor(40, 40, 40, 128));
+
+    // Draw value regions and labels
+    for (int i = 0; i < changes.size(); i++) {
+        const auto &change = changes[i];
+        int currentX = timeToX(change.timestamp);
+        
+        // Draw the value region
+        painter.fillRect(prevX, signalTop, currentX - prevX, signalHeight, QColor(50, 50, 50, 180));
+        
+        // Draw the value text centered in this region
+        if (currentX - prevX > 30) { // Only draw text if region is wide enough
+            QString displayValue = formatBusValue(prevValue);
+            int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
+            int centerX = prevX + (currentX - prevX) / 2;
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(centerX - textWidth/2, textY, displayValue);
+            painter.setPen(QPen(signalColor, 2));
+        }
+        
+        // Draw vertical separator at value change
+        painter.drawLine(currentX, signalTop, currentX, signalBottom);
+        
+        prevTime = change.timestamp;
+        prevValue = change.value;
+        prevX = currentX;
+    }
+
+    // Draw the final region
+    int endX = timeToX(vcdParser->getEndTime());
+    if (endX > prevX) {
+        painter.fillRect(prevX, signalTop, endX - prevX, signalHeight, QColor(50, 50, 50, 180));
+        
+        if (endX - prevX > 30) {
+            QString displayValue = formatBusValue(prevValue);
+            int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
+            int centerX = prevX + (endX - prevX) / 2;
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(centerX - textWidth/2, textY, displayValue);
+            painter.setPen(QPen(signalColor, 2));
+        }
+    }
+
+    // Draw bus outline
+    painter.drawRect(timeToX(0), signalTop, endX - timeToX(0), signalHeight);
+}
+
+void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
+    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
+    if (changes.isEmpty()) return;
+
+    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
+    painter.setPen(QPen(signalColor, 2));
+
+    int signalMidY = yPos + 15;
+    int highLevel = yPos + 5;
+    int lowLevel = yPos + 25;
+
+    int prevTime = 0;
+    QString prevValue = "0";
+    int prevX = timeToX(prevTime);
+
+    for (const auto &change : changes) {
+        int currentX = timeToX(change.timestamp);
+
+        if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
+            painter.drawLine(prevX, highLevel, currentX, highLevel);
+        } else {
+            painter.drawLine(prevX, lowLevel, currentX, lowLevel);
+        }
+
+        if (prevValue != change.value) {
+            painter.drawLine(currentX, highLevel, currentX, lowLevel);
+        }
+
+        prevTime = change.timestamp;
+        prevValue = change.value;
+        prevX = currentX;
+    }
+
+    int endX = timeToX(vcdParser->getEndTime());
+    if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
+        painter.drawLine(prevX, highLevel, endX, highLevel);
+    } else {
+        painter.drawLine(prevX, lowLevel, endX, lowLevel);
+    }
+}
+
+QString WaveformWidget::getBusValueAtTime(const QString &identifier, int time) const {
+    const auto &changes = vcdParser->getValueChanges().value(identifier);
+    QString value = "0"; // Default value
+
+    for (const auto &change : changes) {
+        if (change.timestamp > time)
+            break;
+        value = change.value;
+    }
+
+    return value;
+}
+
+QString WaveformWidget::formatBusValue(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "x";
+    
+    // Handle special cases
+    if (binaryValue == "x" || binaryValue == "X") return "x";
+    if (binaryValue == "z" || binaryValue == "Z") return "z";
+    
+    // Check if it's a valid binary string
+    if (!isValidBinary(binaryValue)) {
+        return binaryValue; // Return as-is if not pure binary
+    }
+    
+    if (busDisplayHex) {
+        return binaryToHex(binaryValue);
+    } else {
+        return binaryValue;
+    }
+}
+
+bool WaveformWidget::isValidBinary(const QString& value) const {
+    for (QChar ch : value) {
+        if (ch != '0' && ch != '1') {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString WaveformWidget::binaryToHex(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "0";
+    
+    // Convert binary string to integer
+    bool ok;
+    unsigned long long value = binaryValue.toULongLong(&ok, 2);
+    
+    if (!ok) {
+        return "x"; // Conversion failed
+    }
+    
+    // Calculate number of hex digits needed
+    int bitCount = binaryValue.length();
+    int hexDigits = (bitCount + 3) / 4; // ceil(bitCount / 4)
+    
+    // Format as hex with appropriate number of digits
+    return "0x" + QString::number(value, 16).rightJustified(hexDigits, '0').toUpper();
+}
+
+// Update the context menu to include bus display options
 void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
     QMenu contextMenu(this);
-
-    bool hasSelection = !selectedItems.isEmpty();
-    bool isSignal = isSignalItem(itemIndex);
-    bool isSpace = isSpaceItem(itemIndex);
-    bool isGroup = isGroupItem(itemIndex);
 
     if (itemIndex >= 0) {
         // Ensure the clicked item is selected
@@ -2098,68 +1964,69 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
 
         // Remove option
         QString removeText = "Remove";
-        if (isSignal) removeText = "Remove Signal";
-        else if (isSpace) removeText = "Remove Space";
-        else if (isGroup) removeText = "Remove Group";
+        if (isSignalItem(itemIndex)) removeText = "Remove Signal";
+        else if (isSpaceItem(itemIndex)) removeText = "Remove Space";
         
         contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
         contextMenu.addSeparator();
 
-        // Rename for spaces and groups
-        if (isSpace || isGroup) {
+        // Rename for spaces
+        if (isSpaceItem(itemIndex)) {
             contextMenu.addAction("Rename", this, [this, itemIndex]() {
                 renameItem(itemIndex);
             });
             contextMenu.addSeparator();
         }
 
-        // Group management
-        if (isSignal) {
-            QMenu* addToGroupMenu = contextMenu.addMenu("Add to Group");
-            QList<QString> groupNames = getGroupNames();
-            
-            for (const QString& groupName : groupNames) {
-                addToGroupMenu->addAction(groupName, this, [this, itemIndex, groupName]() {
-                    QList<int> indices = {itemIndex};
-                    addSignalsToGroup(indices, groupName);
-                });
+        // Bus display options (only show if any multi-bit signals are selected)
+        bool hasMultiBitSignals = false;
+        for (int index : selectedItems) {
+            if (isSignalItem(index) && getSignalFromItem(index).width > 1) {
+                hasMultiBitSignals = true;
+                break;
             }
+        }
+        
+        if (hasMultiBitSignals) {
+            QMenu* busFormatMenu = contextMenu.addMenu("Bus Display Format");
             
-            if (groupNames.isEmpty()) {
-                addToGroupMenu->setEnabled(false);
-            }
+            QAction* hexAction = busFormatMenu->addAction("Hexadecimal", [this]() {
+                setBusDisplayFormat(true);
+            });
+            QAction* binAction = busFormatMenu->addAction("Binary", [this]() {
+                setBusDisplayFormat(false);
+            });
+            
+            hexAction->setCheckable(true);
+            binAction->setCheckable(true);
+            hexAction->setChecked(busDisplayHex);
+            binAction->setChecked(!busDisplayHex);
+            
             contextMenu.addSeparator();
         }
 
         // Space management
-        if (isSignal || isSpace) {
-            contextMenu.addAction("Add Space Above", this, [this, itemIndex]() {
-                addSpaceAbove(itemIndex);
-            });
-            contextMenu.addAction("Add Space Below", this, [this, itemIndex]() {
-                addSpaceBelow(itemIndex);
-            });
-            contextMenu.addSeparator();
-        }
-
-        // Group creation
-        if (selectedItems.size() > 1) {
-            bool allSignals = true;
-            for (int index : selectedItems) {
-                if (!isSignalItem(index)) {
-                    allSignals = false;
-                    break;
-                }
-            }
-            if (allSignals) {
-                contextMenu.addAction("Create Group", this, [this]() {
-                    QString name = promptForName("Create Group", "Group");
-                    if (!name.isEmpty()) {
-                        createGroupFromSelection(name);
-                    }
-                });
-            }
-        }
+        contextMenu.addAction("Add Space Above", this, [this, itemIndex]() {
+            addSpaceAbove(itemIndex);
+        });
+        contextMenu.addAction("Add Space Below", this, [this, itemIndex]() {
+            addSpaceBelow(itemIndex);
+        });
+    } else {
+        // Global bus display options when clicking empty space
+        QMenu* busFormatMenu = contextMenu.addMenu("Bus Display Format");
+        
+        QAction* hexAction = busFormatMenu->addAction("Hexadecimal", [this]() {
+            setBusDisplayFormat(true);
+        });
+        QAction* binAction = busFormatMenu->addAction("Binary", [this]() {
+            setBusDisplayFormat(false);
+        });
+        
+        hexAction->setCheckable(true);
+        binAction->setCheckable(true);
+        hexAction->setChecked(busDisplayHex);
+        binAction->setChecked(!busDisplayHex);
     }
 
     QAction* selectedAction = contextMenu.exec(pos);
@@ -2171,142 +2038,7 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
     }
 
     emit contextMenuRequested(pos, itemIndex);
-}
-
-// In waveformwidget.cpp, update the promptForName method to allow empty names:
-QString WaveformWidget::promptForName(const QString &title, const QString &defaultName)
-{
-    bool ok;
-    QString name = QInputDialog::getText(this, title, "Name:", QLineEdit::Normal, defaultName, &ok);
-    if (ok) {
-        return name; // Allow empty names
-    }
-    return defaultName;
-}
-
-void WaveformWidget::addSpaceAbove(int index)
-{
-    if (index < 0 || index >= displayItems.size()) return;
-    
-    QString name = promptForName("Add Space", "");
-    DisplaySpace space;
-    space.name = name;
-    
-    displayItems.insert(index, DisplayItem::createSpace(name));
-    update();
-}
-
-void WaveformWidget::addSpaceBelow(int index)
-{
-    if (index < 0 || index >= displayItems.size()) return;
-    
-    QString name = promptForName("Add Space", "");
-    DisplaySpace space;
-    space.name = name;
-    
-    int insertIndex = index + 1;
-    if (insertIndex > displayItems.size()) {
-        insertIndex = displayItems.size();
-    }
-    
-    displayItems.insert(insertIndex, DisplayItem::createSpace(name));
-    update();
-}
-
-// In waveformwidget.cpp, replace the addGroup method with this corrected version:
-void WaveformWidget::renameItem(int itemIndex)
-{
-    if (itemIndex < 0 || itemIndex >= displayItems.size())
-        return;
-
-    DisplayItem &item = displayItems[itemIndex];
-    QString currentName = item.getName();
-    QString newName = promptForName("Rename", currentName);
-
-    if (!newName.isEmpty() && newName != currentName)
-    {
-        switch (item.type)
-        {
-        case DisplayItem::Space:
-            item.space.name = newName;
-            break;
-        case DisplayItem::Group:
-            item.group.name = newName;
-            break;
-        case DisplayItem::Signal:
-            // Don't rename signals for now
-            break;
-        }
-        update();
-    }
-}
-
-// Add this debug method to help see what's happening:
-void WaveformWidget::debugGroupInfo()
-{
-    qDebug() << "=== GROUP DEBUG INFO ===";
-    qDebug() << "Total display items:" << displayItems.size();
-
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        if (isGroupItem(i))
-        {
-            const SignalGroup &group = displayItems[i].group;
-            qDebug() << "Group at index" << i << "name:" << group.name;
-            qDebug() << "  Contains signals:" << group.groupSignals.size();
-
-            // Verify each signal exists
-            for (const auto& groupSignal : group.groupSignals)
-            {
-                qDebug() << "    Signal:" << groupSignal.signal.name << "identifier:" << groupSignal.signal.identifier;
-            }
-        }
-    }
-    qDebug() << "=== END DEBUG INFO ===";
-}
-
-// Call this in addGroup after creating the group:
-void WaveformWidget::addGroup()
-{
-    if (selectedItems.size() < 2) return;
-    
-    QString name = promptForName("Create Group", "Group");
-    if (name.isEmpty()) return;
-    
-    // Get selected signal indices and sort them
-    QList<int> signalIndices = selectedItems.values();
-    std::sort(signalIndices.begin(), signalIndices.end());
-    
-    qDebug() << "Creating group with explicitly selected signals:" << signalIndices;
-    
-    // Create group header above the first signal
-    SignalGroup group;
-    group.name = name;
-    
-    // Only add the explicitly selected signals to the group
-    // Don't automatically add other signals
-    for (int sigIndex : signalIndices) {
-        if (isSignalItem(sigIndex)) {
-            DisplaySignal displaySignal;
-            displaySignal.signal = getSignalFromItem(sigIndex);
-            displaySignal.isInGroup = true;
-            displaySignal.groupName = name;
-            group.groupSignals.append(displaySignal);
-        }
-    }
-    
-    // Insert group header at the position of the first selected signal
-    int groupHeaderIndex = signalIndices.first();
-    displayItems.insert(groupHeaderIndex, DisplayItem::createGroup(name));
-    
-    // Update the group with the signals
-    displayItems[groupHeaderIndex].group = group;
-    
-    qDebug() << "Group created at index" << groupHeaderIndex << "with" << group.groupSignals.size() << "explicitly selected signals";
-    
-    update();
-}
-# File: CMakeLists.txt
+}# File: CMakeLists.txt
 cmake_minimum_required(VERSION 3.16)
 
 project(OWV VERSION 0.1 LANGUAGES CXX)

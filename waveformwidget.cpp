@@ -7,6 +7,7 @@
 #include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QInputDialog>
+#include <QColorDialog>
 #include <QApplication>
 #include <cmath>
 #include <stdexcept>
@@ -678,13 +679,12 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
     if (changes.isEmpty()) return;
 
-    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
-    painter.setPen(QPen(signalColor, 2));
+    QColor signalColor = getSignalColor(signal.identifier);
 
     int signalHeight = 25;
     int signalTop = yPos + 2;
     int signalBottom = yPos + signalHeight;
-    int textY = yPos + 17; // Position for text
+    int textY = yPos + 17;
 
     int prevTime = 0;
     QString prevValue = getBusValueAtTime(signal.identifier, 0);
@@ -698,21 +698,31 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         const auto &change = changes[i];
         int currentX = timeToX(change.timestamp);
         
+        // Handle X and Z values with special colors for the region
+        QColor regionColor = QColor(50, 50, 50, 180);
+        QColor textColor = Qt::white;
+        
+        if (prevValue.contains('x') || prevValue.contains('X')) {
+            regionColor = QColor(255, 0, 0, 100); // Red background for X
+        } else if (prevValue.contains('z') || prevValue.contains('Z')) {
+            regionColor = QColor(255, 165, 0, 100); // Orange background for Z
+        }
+        
         // Draw the value region
-        painter.fillRect(prevX, signalTop, currentX - prevX, signalHeight, QColor(50, 50, 50, 180));
+        painter.fillRect(prevX, signalTop, currentX - prevX, signalHeight, regionColor);
         
         // Draw the value text centered in this region
-        if (currentX - prevX > 30) { // Only draw text if region is wide enough
+        if (currentX - prevX > 30) {
             QString displayValue = formatBusValue(prevValue);
             int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
             int centerX = prevX + (currentX - prevX) / 2;
             
-            painter.setPen(QPen(Qt::white));
+            painter.setPen(QPen(textColor));
             painter.drawText(centerX - textWidth/2, textY, displayValue);
-            painter.setPen(QPen(signalColor, 2));
         }
         
         // Draw vertical separator at value change
+        painter.setPen(QPen(signalColor, 2));
         painter.drawLine(currentX, signalTop, currentX, signalBottom);
         
         prevTime = change.timestamp;
@@ -723,7 +733,14 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     // Draw the final region
     int endX = timeToX(vcdParser->getEndTime());
     if (endX > prevX) {
-        painter.fillRect(prevX, signalTop, endX - prevX, signalHeight, QColor(50, 50, 50, 180));
+        QColor finalRegionColor = QColor(50, 50, 50, 180);
+        if (prevValue.contains('x') || prevValue.contains('X')) {
+            finalRegionColor = QColor(255, 0, 0, 100);
+        } else if (prevValue.contains('z') || prevValue.contains('Z')) {
+            finalRegionColor = QColor(255, 165, 0, 100);
+        }
+        
+        painter.fillRect(prevX, signalTop, endX - prevX, signalHeight, finalRegionColor);
         
         if (endX - prevX > 30) {
             QString displayValue = formatBusValue(prevValue);
@@ -732,11 +749,11 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
             
             painter.setPen(QPen(Qt::white));
             painter.drawText(centerX - textWidth/2, textY, displayValue);
-            painter.setPen(QPen(signalColor, 2));
         }
     }
 
-    // Draw bus outline
+    // Draw bus outline with signal color
+    painter.setPen(QPen(signalColor, 2));
     painter.drawRect(timeToX(0), signalTop, endX - timeToX(0), signalHeight);
 }
 
@@ -744,9 +761,8 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
     if (changes.isEmpty()) return;
 
-    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
-    painter.setPen(QPen(signalColor, 2));
-
+    QColor signalColor = getSignalColor(signal.identifier);
+    
     int signalMidY = yPos + 15;
     int highLevel = yPos + 5;
     int lowLevel = yPos + 25;
@@ -757,6 +773,16 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
 
     for (const auto &change : changes) {
         int currentX = timeToX(change.timestamp);
+        
+        // Handle X and Z values with special colors
+        QColor drawColor = signalColor;
+        if (change.value == "x" || change.value == "X") {
+            drawColor = QColor(255, 0, 0); // Red for X
+        } else if (change.value == "z" || change.value == "Z") {
+            drawColor = QColor(255, 165, 0); // Orange for Z
+        }
+        
+        painter.setPen(QPen(drawColor, 2));
 
         if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
             painter.drawLine(prevX, highLevel, currentX, highLevel);
@@ -773,6 +799,15 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         prevX = currentX;
     }
 
+    // Draw the final segment
+    QColor finalColor = signalColor;
+    if (prevValue == "x" || prevValue == "X") {
+        finalColor = QColor(255, 0, 0);
+    } else if (prevValue == "z" || prevValue == "Z") {
+        finalColor = QColor(255, 165, 0);
+    }
+    painter.setPen(QPen(finalColor, 2));
+    
     int endX = timeToX(vcdParser->getEndTime());
     if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
         painter.drawLine(prevX, highLevel, endX, highLevel);
@@ -806,11 +841,47 @@ QString WaveformWidget::formatBusValue(const QString& binaryValue) const {
         return binaryValue; // Return as-is if not pure binary
     }
     
-    if (busDisplayHex) {
-        return binaryToHex(binaryValue);
-    } else {
-        return binaryValue;
+    switch(busDisplayFormat) {
+        case Hex: return binaryToHex(binaryValue);
+        case Binary: return binaryValue;
+        case Octal: return binaryToOctal(binaryValue);
+        case Decimal: return binaryToDecimal(binaryValue);
+        default: return binaryToHex(binaryValue);
     }
+}
+
+QString WaveformWidget::binaryToOctal(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "0";
+    
+    // Convert binary to octal
+    QString octal;
+    QString paddedBinary = binaryValue;
+    
+    // Pad with zeros to make length multiple of 3
+    while (paddedBinary.length() % 3 != 0) {
+        paddedBinary = "0" + paddedBinary;
+    }
+    
+    for (int i = 0; i < paddedBinary.length(); i += 3) {
+        QString chunk = paddedBinary.mid(i, 3);
+        int decimal = chunk.toInt(nullptr, 2);
+        octal += QString::number(decimal);
+    }
+    
+    return "0" + octal;
+}
+
+QString WaveformWidget::binaryToDecimal(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "0";
+    
+    bool ok;
+    unsigned long long value = binaryValue.toULongLong(&ok, 2);
+    
+    if (!ok) {
+        return "x"; // Conversion failed
+    }
+    
+    return QString::number(value);
 }
 
 bool WaveformWidget::isValidBinary(const QString& value) const {
@@ -846,21 +917,15 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
     QMenu contextMenu(this);
 
     if (itemIndex >= 0) {
-        // Ensure the clicked item is selected
-        if (!selectedItems.contains(itemIndex)) {
-            selectedItems.clear();
-            selectedItems.insert(itemIndex);
-            lastSelectedItem = itemIndex;
-            update();
-        }
+        // ... existing context menu code ...
 
-        // Remove option
-        QString removeText = "Remove";
-        if (isSignalItem(itemIndex)) removeText = "Remove Signal";
-        else if (isSpaceItem(itemIndex)) removeText = "Remove Space";
-        
-        contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
-        contextMenu.addSeparator();
+        // Add color change option for signals
+        if (isSignalItem(itemIndex)) {
+            contextMenu.addAction("Change Color", this, [this, itemIndex]() {
+                changeSignalColor(itemIndex);
+            });
+            contextMenu.addSeparator();
+        }
 
         // Rename for spaces
         if (isSpaceItem(itemIndex)) {
@@ -883,10 +948,10 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
             QMenu* busFormatMenu = contextMenu.addMenu("Bus Display Format");
             
             QAction* hexAction = busFormatMenu->addAction("Hexadecimal", [this]() {
-                setBusDisplayFormat(true);
+                setBusDisplayFormat(WaveformWidget::Hex);
             });
             QAction* binAction = busFormatMenu->addAction("Binary", [this]() {
-                setBusDisplayFormat(false);
+                setBusDisplayFormat(WaveformWidget::Binary);
             });
             
             hexAction->setCheckable(true);
@@ -909,10 +974,10 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
         QMenu* busFormatMenu = contextMenu.addMenu("Bus Display Format");
         
         QAction* hexAction = busFormatMenu->addAction("Hexadecimal", [this]() {
-            setBusDisplayFormat(true);
+            setBusDisplayFormat(WaveformWidget::Hex);
         });
         QAction* binAction = busFormatMenu->addAction("Binary", [this]() {
-            setBusDisplayFormat(false);
+            setBusDisplayFormat(WaveformWidget::Binary);
         });
         
         hexAction->setCheckable(true);
@@ -930,4 +995,100 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
     }
 
     emit contextMenuRequested(pos, itemIndex);
+}
+
+void WaveformWidget::resetSignalColors()
+{
+    signalColors.clear();
+    update();
+}
+
+void WaveformWidget::changeSignalColor(int itemIndex)
+{
+    if (itemIndex < 0 || itemIndex >= displayItems.size()) return;
+    
+    const DisplayItem& item = displayItems[itemIndex];
+    if (item.type != DisplayItem::Signal) return;
+    
+    const VCDSignal& signal = item.signal.signal;
+    QColor currentColor = getSignalColor(signal.identifier);
+    
+    QMenu colorMenu(this);
+    
+    // Predefined colors
+    QList<QPair<QString, QColor>> predefinedColors = {
+        {"Red", QColor(255, 0, 0)},
+        {"Green", QColor(0, 255, 0)},
+        {"Blue", QColor(0, 0, 255)},
+        {"Yellow", QColor(255, 255, 0)},
+        {"Cyan", QColor(0, 255, 255)},
+        {"Magenta", QColor(255, 0, 255)},
+        {"Orange", QColor(255, 165, 0)},
+        {"Purple", QColor(128, 0, 128)},
+        {"Pink", QColor(255, 192, 203)},
+        {"White", QColor(255, 255, 255)}
+    };
+    
+    for (const auto& colorPair : predefinedColors) {
+        QAction *colorAction = colorMenu.addAction(colorPair.first);
+        colorAction->setData(colorPair.second);
+        
+        // Create color icon
+        QPixmap pixmap(16, 16);
+        pixmap.fill(colorPair.second);
+        colorAction->setIcon(QIcon(pixmap));
+    }
+    
+    colorMenu.addSeparator();
+    colorMenu.addAction("Custom Color...");
+    
+    QAction *selectedAction = colorMenu.exec(QCursor::pos());
+    
+    if (selectedAction) {
+        if (selectedAction->text() == "Custom Color...") {
+            QColor newColor = QColorDialog::getColor(currentColor, this, 
+                                                   "Choose color for " + signal.name);
+            if (newColor.isValid()) {
+                signalColors[signal.identifier] = newColor;
+                update();
+            }
+        } else {
+            QColor newColor = selectedAction->data().value<QColor>();
+            signalColors[signal.identifier] = newColor;
+            update();
+        }
+    }
+}
+
+void WaveformWidget::setHighlightBusses(bool highlight)
+{
+    highlightBusses = highlight;
+    update();
+}
+
+void WaveformWidget::setBusDisplayFormat(BusFormat format)
+{
+    busDisplayFormat = format;
+    update();
+}
+
+// QColor WaveformWidget::getDefaultSignalColor(const VCDSignal& signal) const
+// {
+//     if (highlightBusses && signal.width > 1) {
+//         return QColor(255, 215, 0); // Gold color for busses
+//     }
+    
+//     // Default to green for regular signals
+//     return QColor(0, 255, 0);
+// }
+
+QColor WaveformWidget::getSignalColor(const QString& identifier) const
+{
+    // If user has set a custom color, use it
+    if (signalColors.contains(identifier)) {
+        return signalColors[identifier];
+    }
+    
+    // Default to green for all signals
+    return QColor(0, 255, 0);
 }

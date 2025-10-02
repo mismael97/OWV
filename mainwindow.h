@@ -44,16 +44,31 @@ private slots:
     void showAddSignalsDialog();
     void removeSelectedSignals();
     void toggleBusDisplayFormat();
+    void resetSignalColors();
+    void toggleHighlightBusses();
+    void setBusHexFormat();
+    void setBusBinaryFormat();
+    void setBusOctalFormat();
+    void setBusDecimalFormat();
+    void updateBusFormatActions();
 
 private:
+    // Wave menu actions
+    QMenu *waveMenu;
+    QAction *defaultColorsAction;
+    QAction *highlightBussesAction;
+    QMenu *busFormatMenu;
+    QAction *busHexAction;
+    QAction *busBinaryAction;
+    QAction *busOctalAction;
+    QAction *busDecimalAction;
+    QAction *resetColorsAction;
     void createActions();
     void createToolBar();
     void createStatusBar();
     void setupUI();
     void loadVcdFile(const QString &filename);
     void loadDefaultVcdFile();
-    QAction *busHexAction;
-    QAction *busBinaryAction;
 
     // UI Components
     WaveformWidget *waveformWidget;
