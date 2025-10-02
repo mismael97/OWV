@@ -14,18 +14,17 @@
 WaveformWidget::WaveformWidget(QWidget *parent)
     : QWidget(parent), vcdParser(nullptr), timeScale(1.0), timeOffset(0),
       timeMarkersHeight(30), topMargin(10),
-      isDragging(false), isDraggingSignal(false), dragSignalIndex(-1), lastSelectedSignal(-1)
+      isDragging(false), isDraggingItem(false), dragItemIndex(-1), lastSelectedItem(-1),
+      lastContextSignalIndex(-1)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
-    // Remove or comment out the line below, or change to Qt::DefaultContextMenu
-    // setContextMenuPolicy(Qt::CustomContextMenu);  // ← Remove or change this line
 
     horizontalScrollBar = new QScrollBar(Qt::Horizontal, this);
-    connect(horizontalScrollBar, &QScrollBar::valueChanged, [this](int value)
-            {
+    connect(horizontalScrollBar, &QScrollBar::valueChanged, [this](int value) {
         timeOffset = value;
-        update(); });
+        update();
+    });
 }
 
 void WaveformWidget::setVcdData(VCDParser *parser)
@@ -34,48 +33,182 @@ void WaveformWidget::setVcdData(VCDParser *parser)
     displayItems.clear();
     timeScale = 1.0;
     timeOffset = 0;
-    selectedSignals.clear();
-    lastSelectedSignal = -1;
+    selectedItems.clear();
+    lastSelectedItem = -1;
     updateScrollBar();
     update();
 }
 
+
 void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
 {
     displayItems.clear();
-    for (const auto &signal : visibleSignals)
-    {
-        displayItems.append(DisplayItem(signal));
+    for (const auto &signal : visibleSignals) {
+        displayItems.append(DisplayItem::createSignal(signal));
     }
-    selectedSignals.clear();
-    lastSelectedSignal = -1;
+    selectedItems.clear();
+    lastSelectedItem = -1;
     update();
-    emit signalSelected(-1);
+    emit itemSelected(-1);
 }
 
-// In waveformwidget.cpp, update the removeSelectedSignals method:
-// In waveformwidget.cpp, update the removeSelectedSignals method with debug output:
-void WaveformWidget::removeSelectedSignals()
+// Group Management
+void WaveformWidget::createGroupFromSelection(const QString& name)
 {
-    if (selectedSignals.isEmpty()) return;
-
-    // First, identify all items to delete (including group signals)
-    QSet<int> itemsToDelete;
+    if (selectedItems.size() < 2) return;
     
-    for (int index : selectedSignals) {
-        itemsToDelete.insert(index);
-        
-        // If this is a group, add all its signals to deletion
-        if (isGroupItem(index)) {
-            const GroupItem& group = displayItems[index].getGroup();
-            for (int sigIndex : group.signalIndices) {
-                itemsToDelete.insert(sigIndex);
-            }
+    // Collect all selected signals and their indices
+    QList<VCDSignal> signalsToGroup;
+    QList<int> indicesToRemove;
+    
+    for (int index : selectedItems) {
+        if (isSignalItem(index)) {
+            signalsToGroup.append(getSignalFromItem(index));
+            indicesToRemove.append(index);
+        }
+    }
+    
+    if (signalsToGroup.size() < 2) return;
+    
+    // Remove signals from display (in reverse order)
+    std::sort(indicesToRemove.begin(), indicesToRemove.end(), std::greater<int>());
+    for (int index : indicesToRemove) {
+        displayItems.removeAt(index);
+    }
+    
+    // Create group at the position of the first signal
+    int insertPosition = indicesToRemove.last();
+    DisplayItem groupItem = DisplayItem::createGroup(name);
+    
+    // Add signals to the group
+    for (const auto& signal : signalsToGroup) {
+        groupItem.group.addSignal(DisplayItem::createSignal(signal, true, name).signal);
+    }
+    
+    displayItems.insert(insertPosition, groupItem);
+    
+    // Clear selection and select the new group
+    selectedItems.clear();
+    selectedItems.insert(insertPosition);
+    lastSelectedItem = insertPosition;
+    
+    update();
+    emit itemSelected(insertPosition);
+}
+
+int WaveformWidget::findGroupIndexByName(const QString& name) const {
+    for (int i = 0; i < displayItems.size(); i++) {
+        if (displayItems[i].type == DisplayItem::Group && displayItems[i].group.name == name) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+QList<QString> WaveformWidget::getGroupNames() const
+{
+    QList<QString> names;
+    for (const auto& item : displayItems) {
+        if (item.type == DisplayItem::Group) {
+            names.append(item.group.name);
+        }
+    }
+    return names;
+}
+
+const DisplayItem* WaveformWidget::getItem(int index) const
+{
+    if (index >= 0 && index < displayItems.size()) {
+        return &displayItems[index];
+    }
+    return nullptr;
+}
+
+
+void WaveformWidget::addSignalsToGroup(const QList<int>& signalIndices, const QString& groupName) {
+    int groupIndex = findGroupIndexByName(groupName);
+    if (groupIndex == -1) return;
+    
+    // Collect signals to add
+    QList<VCDSignal> signalsToAdd;
+    QList<int> indicesToRemove;
+    
+    for (int index : signalIndices) {
+        if (isSignalItem(index)) {
+            signalsToAdd.append(getSignalFromItem(index));
+            indicesToRemove.append(index);
+        }
+    }
+    
+    if (signalsToAdd.isEmpty()) return;
+    
+    // Remove signals from display (in reverse order)
+    std::sort(indicesToRemove.begin(), indicesToRemove.end(), std::greater<int>());
+    for (int index : indicesToRemove) {
+        displayItems.removeAt(index);
+    }
+    
+    // Add signals to group
+    DisplayItem& groupItem = displayItems[groupIndex];
+    for (const auto& signal : signalsToAdd) {
+        groupItem.group.addSignal(DisplayItem::createSignal(signal, true, groupName).signal);
+    }
+    
+    update();
+}
+
+void WaveformWidget::onAddToGroupActionTriggered()
+{
+    if (lastContextSignalIndex != -1 && !lastContextGroupName.isEmpty()) {
+        QList<int> indices = {lastContextSignalIndex};
+        addSignalsToGroup(indices, lastContextGroupName);
+    }
+}
+
+void WaveformWidget::convertToFreeSignal(int itemIndex) {
+    if (!isSignalItem(itemIndex)) return;
+    
+    DisplayItem& item = displayItems[itemIndex];
+    if (item.signal.isInGroup) {
+        // Remove from group
+        int groupIndex = findGroupIndexByName(item.signal.groupName);
+        if (groupIndex != -1) {
+            displayItems[groupIndex].group.removeSignal(item.signal.signal.identifier);
+        }
+        // Convert to free signal
+        item.signal.isInGroup = false;
+        item.signal.groupName.clear();
+    }
+}
+
+void WaveformWidget::removeSignalsFromGroup(const QList<int>& signalIndices)
+{
+    for (int index : signalIndices) {
+        convertToFreeSignal(index);
+    }
+    update();
+}
+
+void WaveformWidget::removeSignalFromAllGroups(const QString& identifier) {
+    for (int i = 0; i < displayItems.size(); i++) {
+        if (displayItems[i].type == DisplayItem::Group) {
+            displayItems[i].group.removeSignal(identifier);
+        }
+    }
+}
+
+void WaveformWidget::removeSelectedSignals() {
+    if (selectedItems.isEmpty()) return;
+
+    // First remove signals from any groups they belong to
+    for (int index : selectedItems) {
+        if (isSignalItem(index)) {
+            removeSignalFromAllGroups(displayItems[index].signal.signal.identifier);
         }
     }
 
     // Remove items in reverse order
-    QList<int> indices = itemsToDelete.values();
+    QList<int> indices = selectedItems.values();
     std::sort(indices.begin(), indices.end(), std::greater<int>());
     
     for (int index : indices) {
@@ -84,21 +217,18 @@ void WaveformWidget::removeSelectedSignals()
         }
     }
     
-    // Rebuild all group relationships
-    updateAllGroupIndices();
-    
-    selectedSignals.clear();
-    lastSelectedSignal = -1;
+    selectedItems.clear();
+    lastSelectedItem = -1;
     update();
-    emit signalSelected(-1);
+    emit itemSelected(-1);
 }
+
 void WaveformWidget::updateAllGroupIndices()
 {
     // Clear all group signal indices first
     for (int i = 0; i < displayItems.size(); i++) {
         if (isGroupItem(i)) {
-            GroupItem& group = displayItems[i].getGroup();
-            group.signalIndices.clear();
+            displayItems[i].group.groupSignals.clear();
         }
     }
     
@@ -108,34 +238,15 @@ void WaveformWidget::updateAllGroupIndices()
     qDebug() << "Group system: Manual signal tracking - no automatic grouping";
 }
 
-// Helper method to update group indices after deletion
 void WaveformWidget::updateGroupIndicesAfterDeletion(const QList<int> &deletedIndices)
 {
     for (int i = 0; i < displayItems.size(); i++)
     {
         if (isGroupItem(i))
         {
-            GroupItem &group = displayItems[i].getGroup();
-            QList<int> updatedIndices;
-
-            for (int sigIndex : group.signalIndices)
-            {
-                int adjustment = 0;
-                for (int deletedIndex : deletedIndices)
-                {
-                    if (sigIndex > deletedIndex)
-                    {
-                        adjustment++;
-                    }
-                }
-                int newIndex = sigIndex - adjustment;
-                if (newIndex >= 0 && newIndex < displayItems.size() && isSignalItem(newIndex))
-                {
-                    updatedIndices.append(newIndex);
-                }
-            }
-
-            group.signalIndices = updatedIndices;
+            // For the new architecture, we don't need to update indices
+            // because signals are stored by identifier, not by display index
+            Q_UNUSED(deletedIndices)
         }
     }
 }
@@ -143,14 +254,14 @@ void WaveformWidget::updateGroupIndicesAfterDeletion(const QList<int> &deletedIn
 // Update the selectAllSignals method to select all item types:
 void WaveformWidget::selectAllSignals()
 {
-    selectedSignals.clear();
+    selectedItems.clear();
     for (int i = 0; i < displayItems.size(); i++)
     {
-        selectedSignals.insert(i);
+        selectedItems.insert(i);
     }
-    lastSelectedSignal = displayItems.size() - 1;
+    lastSelectedItem = displayItems.size() - 1;
     update();
-    emit signalSelected(selectedSignals.isEmpty() ? -1 : *selectedSignals.begin());
+    emit itemSelected(selectedItems.isEmpty() ? -1 : *selectedItems.begin());
 }
 
 void WaveformWidget::zoomIn()
@@ -181,6 +292,7 @@ void WaveformWidget::zoomFit()
     update();
 }
 
+// Painting
 void WaveformWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
@@ -191,17 +303,13 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     // Fill entire background with dark theme
     painter.fillRect(rect(), QColor(45, 45, 48));
 
-    if (!vcdParser || displayItems.isEmpty())
-    {
+    if (!vcdParser || displayItems.isEmpty()) {
         painter.setPen(QPen(Qt::white));
         painter.drawText(rect(), Qt::AlignCenter, "No signals selected");
         return;
     }
 
-    // Draw signal names column
     drawSignalNamesColumn(painter);
-
-    // Draw waveform area
     drawWaveformArea(painter);
 }
 
@@ -209,15 +317,8 @@ bool WaveformWidget::isSignalInGroup(int index) const
 {
     if (!isSignalItem(index)) return false;
 
-    for (int i = 0; i < displayItems.size(); i++) {
-        if (isGroupItem(i)) {
-            const GroupItem &group = displayItems[i].getGroup();
-            if (group.signalIndices.contains(index)) {
-                return true;
-            }
-        }
-    }
-    return false;
+    const DisplayItem& item = displayItems[index];
+    return item.signal.isInGroup;
 }
 
 int WaveformWidget::getGroupBottomIndex(int groupIndex) const
@@ -225,64 +326,32 @@ int WaveformWidget::getGroupBottomIndex(int groupIndex) const
     if (!isGroupItem(groupIndex))
         return -1;
 
-    const GroupItem &group = displayItems[groupIndex].getGroup();
-    if (group.signalIndices.isEmpty())
+    const SignalGroup& group = displayItems[groupIndex].group;
+    if (group.groupSignals.isEmpty())
         return -1;
 
-    // Find the maximum index in the group's signal indices
-    int maxIndex = -1;
-    for (int sigIndex : group.signalIndices)
-    {
-        if (sigIndex > maxIndex)
-            maxIndex = sigIndex;
-    }
-    return maxIndex;
+    // In the new architecture, signals are stored within the group object
+    // not as separate display items, so we don't have a "bottom index" concept
+    return -1;
 }
 
-// Check if an index is a group header or group bottom
-bool WaveformWidget::isGroupBoundary(int index) const
-{
-    if (isGroupItem(index))
-        return true;
 
-    // Check if this is the last signal in any group
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        if (isGroupItem(i))
-        {
-            const GroupItem &group = displayItems[i].getGroup();
-            int bottomIndex = getGroupBottomIndex(i);
-            if (index == bottomIndex)
-            {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-// Select entire group when group header or bottom is clicked
 void WaveformWidget::selectGroup(int groupIndex)
 {
     if (!isGroupItem(groupIndex))
         return;
 
-    selectedSignals.clear();
-    const GroupItem &group = displayItems[groupIndex].getGroup();
+    selectedItems.clear();
+    const SignalGroup& group = displayItems[groupIndex].group;
 
-    // Select the group header and all signals in the group
-    selectedSignals.insert(groupIndex);
-    for (int sigIndex : group.signalIndices)
-    {
-        selectedSignals.insert(sigIndex);
-    }
+    // Select the group header
+    selectedItems.insert(groupIndex);
 
-    lastSelectedSignal = groupIndex;
+    lastSelectedItem = groupIndex;
     update();
-    emit signalSelected(groupIndex);
+    emit itemSelected(groupIndex);
 }
 
-// In waveformwidget.cpp, update the drawSignalNamesColumn method:
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 {
     // Draw signal names column background
@@ -297,124 +366,82 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     painter.setPen(QPen(Qt::white));
     painter.drawText(5, timeMarkersHeight - 8, "Signal Name");
 
-    // Draw selection count if multiple signals selected
-    if (selectedSignals.size() > 1) {
+    // Draw selection count if multiple items selected
+    if (selectedItems.size() > 1) {
         painter.drawText(signalNamesWidth - 50, timeMarkersHeight - 8, 
-                        QString("(%1 selected)").arg(selectedSignals.size()));
+                        QString("(%1 selected)").arg(selectedItems.size()));
     }
     
+    int currentY = topMargin + timeMarkersHeight;
+    
     for (int i = 0; i < displayItems.size(); i++) {
-        const DisplayItem &item = displayItems[i];
-        int yPos = topMargin + timeMarkersHeight + i * signalHeight;
-
-        // Determine if this signal is in a group
-        bool inGroup = false;
-        for (int j = 0; j < displayItems.size(); j++) {
-            if (isGroupItem(j)) {
-                const GroupItem& group = displayItems[j].getGroup();
-                if (group.signalIndices.contains(i)) {
-                    inGroup = true;
-                    break;
-                }
-            }
-        }
-
-        // Draw different backgrounds based on item type and group membership
-        if (selectedSignals.contains(i)) {
-            painter.fillRect(0, yPos, signalNamesWidth, signalHeight, QColor(60, 60, 90));
-        } else if (isSpaceItem(i)) {
-            painter.fillRect(0, yPos, signalNamesWidth, signalHeight, QColor(80, 160, 80, 120));
-        } else if (isGroupItem(i)) {
-            painter.fillRect(0, yPos, signalNamesWidth, signalHeight, QColor(160, 80, 80, 120));
-        } else if (inGroup) {
-            // Signal within a group - indented background
-            painter.fillRect(20, yPos, signalNamesWidth - 20, signalHeight, 
-                           i % 2 == 0 ? QColor(45, 45, 48) : QColor(40, 40, 43));
+        const auto& item = displayItems[i];
+        int itemHeight = item.getHeight();
+        
+        // Draw background based on selection and type
+        if (selectedItems.contains(i)) {
+            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(60, 60, 90));
+        } else if (item.type == DisplayItem::Group) {
+            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 80, 160, 180));
+        } else if (item.type == DisplayItem::Space) {
+            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 160, 80, 120));
+        } else if (item.signal.isInGroup) {
+            // Grouped signal - indented background
+            painter.fillRect(20, currentY, signalNamesWidth - 20, itemHeight, 
+                           i % 2 == 0 ? QColor(50, 50, 80, 100) : QColor(45, 45, 70, 100));
         } else if (i % 2 == 0) {
-            painter.fillRect(0, yPos, signalNamesWidth, signalHeight, QColor(45, 45, 48));
+            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(45, 45, 48));
         } else {
-            painter.fillRect(0, yPos, signalNamesWidth, signalHeight, QColor(40, 40, 43));
+            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(40, 40, 43));
         }
 
-        // Draw item name with appropriate indentation
+        // Draw item name with appropriate styling and indentation
         painter.setPen(QPen(Qt::white));
-        QString displayName;
+        QString displayName = item.getName();
         int textIndent = 5;
         
-        if (isSpaceItem(i)) {
-            QString spaceName = item.getName();
-            displayName = spaceName.isEmpty() ? "⏐" : "⏐ " + spaceName;
-        } else if (isGroupItem(i)) {
-            displayName = "⫿ " + item.getName();
-        } else if (inGroup) {
-            // Indent signals within groups
+        if (item.type == DisplayItem::Group) {
+            painter.setPen(QPen(QColor(200, 200, 255)));
+        } else if (item.type == DisplayItem::Space) {
+            painter.setPen(QPen(QColor(150, 255, 150)));
+        } else if (item.signal.isInGroup) {
             textIndent = 25;
-            try {
-                const VCDSignal &signal = item.getSignal();
-                displayName = "    " + (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name);
-            } catch (const std::runtime_error&) {
-                displayName = "    Invalid Signal";
-            }
-        } else {
-            try {
-                const VCDSignal &signal = item.getSignal();
-                displayName = signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name;
-            } catch (const std::runtime_error&) {
-                displayName = "Invalid Signal";
-            }
+            displayName = "    " + displayName;
         }
         
-        painter.drawText(textIndent, yPos + signalHeight / 2 + 4, displayName);
+        painter.drawText(textIndent, currentY + itemHeight / 2 + 4, displayName);
 
-        // Draw signal width for regular signals
-        if (isSignalItem(i)) {
-            try {
-                const VCDSignal &signal = item.getSignal();
-                painter.setPen(QPen(QColor(180, 180, 180)));
-                // Adjust width position for indented signals
-                int widthX = signalNamesWidth - 35;
-                if (isSignalInGroup(i)) {
-                    widthX -= 20; // Adjust for indentation
-                }
-                painter.drawText(widthX, yPos + signalHeight / 2 + 4,
-                                QString("[%1:0]").arg(signal.width - 1));
-            } catch (const std::runtime_error&) {
-                // Skip width for invalid signals
+        // Draw signal width for signals
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal& signal = item.signal.signal;
+            painter.setPen(QPen(QColor(180, 180, 180)));
+            int widthX = signalNamesWidth - 35;
+            if (item.signal.isInGroup) {
+                widthX -= 20; // Adjust for indentation
             }
+            painter.drawText(widthX, currentY + itemHeight / 2 + 4,
+                            QString("[%1:0]").arg(signal.width - 1));
         }
 
         // Draw horizontal separator
         painter.setPen(QPen(QColor(80, 80, 80)));
-        painter.drawLine(0, yPos + signalHeight, signalNamesWidth, yPos + signalHeight);
+        painter.drawLine(0, currentY + itemHeight, signalNamesWidth, currentY + itemHeight);
+        
+        currentY += itemHeight;
     }
 }
 
-void WaveformWidget::drawWaveformArea(QPainter &painter)
-{
+void WaveformWidget::drawWaveformArea(QPainter &painter) {
+    // Implementation similar to previous version
     painter.setClipRect(signalNamesWidth, 0, width() - signalNamesWidth, height());
     painter.translate(signalNamesWidth, 0);
-
     painter.fillRect(0, 0, width() - signalNamesWidth, height(), QColor(30, 30, 30));
-
-    if (!displayItems.isEmpty())
-    {
+    
+    if (!displayItems.isEmpty()) {
         drawGrid(painter);
-
-        // Draw black backgrounds for spaces and groups in waveform area
-        for (int i = 0; i < displayItems.size(); i++) {
-                const DisplayItem &item = displayItems[i];
-                int yPos = topMargin + timeMarkersHeight + i * signalHeight;
-
-            if (isSpaceItem(i) || isGroupItem(i))
-            {
-                // Black background for spaces and groups in waveform area
-                painter.fillRect(0, yPos, width() - signalNamesWidth, signalHeight, QColor(0, 0, 0));
-            }
-        }
-
         drawSignals(painter);
     }
-
+    
     painter.translate(-signalNamesWidth, 0);
     painter.setClipping(false);
 }
@@ -437,17 +464,26 @@ void WaveformWidget::drawGrid(QPainter &painter)
         painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
     }
 
+    // Draw horizontal lines for items
+    int currentY = topMargin + timeMarkersHeight;
     for (int i = 0; i <= displayItems.size(); i++)
     {
-        int y = topMargin + timeMarkersHeight + i * signalHeight;
-        painter.drawLine(0, y, width() - signalNamesWidth, y);
+        painter.drawLine(0, currentY, width() - signalNamesWidth, currentY);
+        if (i < displayItems.size()) {
+            currentY += displayItems[i].getHeight();
+        }
     }
 
-    // Draw selection highlight for all selected signals
-    for (int index : selectedSignals)
+    // Draw selection highlight for all selected items
+    currentY = topMargin + timeMarkersHeight;
+    for (int i = 0; i < displayItems.size(); i++)
     {
-        int y = topMargin + timeMarkersHeight + index * signalHeight;
-        painter.fillRect(0, y, width() - signalNamesWidth, signalHeight, QColor(60, 60, 90));
+        int itemHeight = displayItems[i].getHeight();
+        if (selectedItems.contains(i))
+        {
+            painter.fillRect(0, currentY, width() - signalNamesWidth, itemHeight, QColor(60, 60, 90));
+        }
+        currentY += itemHeight;
     }
 }
 
@@ -473,67 +509,62 @@ int WaveformWidget::calculateTimeStep(int startTime, int endTime) const
         return static_cast<int>(10 * power);
 }
 
-void WaveformWidget::drawSignals(QPainter &painter)
-{
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        const DisplayItem &item = displayItems[i];
-        if (isSignalItem(i))
-        {
-            try
-            {
-                int yPos = topMargin + timeMarkersHeight + i * signalHeight;
-                drawSignalWaveform(painter, item.getSignal(), yPos);
-            }
-            catch (const std::runtime_error &)
-            {
-                // Skip invalid signals
+void WaveformWidget::drawSignals(QPainter &painter) {
+    int currentY = topMargin + timeMarkersHeight;
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
+        
+        if (item.type == DisplayItem::Signal) {
+            drawSignalWaveform(painter, item.signal.signal, currentY);
+        } else if (item.type == DisplayItem::Group && !item.group.collapsed) {
+            // Draw all signals in the group
+            int signalY = currentY + 30;
+            for (const auto& groupSignal : item.group.groupSignals) {
+                drawSignalWaveform(painter, groupSignal.signal, signalY);
+                signalY += 30;
             }
         }
-    }
-
-    // Draw drag preview if dragging
-    if (isDraggingSignal && dragSignalIndex >= 0 && dragSignalIndex < displayItems.size())
-    {
-        int currentY = topMargin + timeMarkersHeight + dragSignalIndex * signalHeight;
-        painter.setPen(QPen(Qt::red, 2, Qt::DashLine));
-        painter.drawLine(0, currentY, width() - signalNamesWidth, currentY);
+        
+        currentY += item.getHeight();
     }
 }
 
-void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
-{
-    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
-    if (changes.isEmpty())
-        return;
+void WaveformWidget::drawGroupWaveforms(QPainter &painter, const SignalGroup &group, int groupY) {
+    int signalY = groupY + 30; // Start below group header
+    
+    for (const auto& groupSignal : group.groupSignals) {
+        drawSignalWaveform(painter, groupSignal.signal, signalY);
+        signalY += 30;
+    }
+}
 
-    // Use brighter colors for dark theme
+void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
+    // Keep existing waveform drawing implementation
+    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
+    if (changes.isEmpty()) return;
+
     QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
     painter.setPen(QPen(signalColor, 2));
 
-    int signalMidY = yPos + signalHeight / 2;
+    int signalMidY = yPos + 15;
     int highLevel = yPos + 5;
-    int lowLevel = yPos + signalHeight - 5;
+    int lowLevel = yPos + 25;
 
     int prevTime = 0;
     QString prevValue = "0";
     int prevX = timeToX(prevTime);
 
-    for (const auto &change : changes)
-    {
+    for (const auto &change : changes) {
         int currentX = timeToX(change.timestamp);
 
-        if (prevValue == "1" || prevValue == "X" || prevValue == "Z")
-        {
+        if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
             painter.drawLine(prevX, highLevel, currentX, highLevel);
-        }
-        else
-        {
+        } else {
             painter.drawLine(prevX, lowLevel, currentX, lowLevel);
         }
 
-        if (prevValue != change.value)
-        {
+        if (prevValue != change.value) {
             painter.drawLine(currentX, highLevel, currentX, lowLevel);
         }
 
@@ -543,42 +574,14 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     }
 
     int endX = timeToX(vcdParser->getEndTime());
-    if (prevValue == "1" || prevValue == "X" || prevValue == "Z")
-    {
+    if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
         painter.drawLine(prevX, highLevel, endX, highLevel);
-    }
-    else
-    {
+    } else {
         painter.drawLine(prevX, lowLevel, endX, lowLevel);
     }
-
-    // Draw value labels for special states
-    for (const auto &change : changes)
-    {
-        if (change.value == "X" || change.value == "Z")
-        {
-            int x = timeToX(change.timestamp);
-            painter.setPen(QPen(QColor(255, 100, 100)));
-            painter.drawText(x + 2, signalMidY, change.value);
-            painter.setPen(QPen(signalColor, 2));
-        }
-    }
 }
 
-bool WaveformWidget::isSignalItem(int index) const
-{
-    return index >= 0 && index < displayItems.size() && displayItems[index].getType() == DisplayItem::Signal;
-}
 
-bool WaveformWidget::isSpaceItem(int index) const
-{
-    return index >= 0 && index < displayItems.size() && displayItems[index].getType() == DisplayItem::Space;
-}
-
-bool WaveformWidget::isGroupItem(int index) const
-{
-    return index >= 0 && index < displayItems.size() && displayItems[index].getType() == DisplayItem::Group;
-}
 
 void WaveformWidget::handleMultiSelection(int itemIndex, QMouseEvent *event)
 {
@@ -591,64 +594,76 @@ void WaveformWidget::handleMultiSelection(int itemIndex, QMouseEvent *event)
     if (isGroupItem(itemIndex)) {
         if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
             // Single click on group header selects only the header
-            selectedSignals.clear();
-            selectedSignals.insert(itemIndex);
-            lastSelectedSignal = itemIndex;
+            selectedItems.clear();
+            selectedItems.insert(itemIndex);
+            lastSelectedItem = itemIndex;
             update();
-            emit signalSelected(itemIndex);
+            emit itemSelected(itemIndex);
             return;
         }
     }
 
-    if (event->modifiers() & Qt::ShiftModifier && lastSelectedSignal != -1) {
+    if (event->modifiers() & Qt::ShiftModifier && lastSelectedItem != -1) {
         // Shift-click: select range from last selected to current
-        selectedSignals.clear();
-        int start = qMin(lastSelectedSignal, itemIndex);
-        int end = qMax(lastSelectedSignal, itemIndex);
+        selectedItems.clear();
+        int start = qMin(lastSelectedItem, itemIndex);
+        int end = qMax(lastSelectedItem, itemIndex);
         for (int i = start; i <= end; i++) {
-            selectedSignals.insert(i);
+            selectedItems.insert(i);
         }
     } else if (event->modifiers() & Qt::ControlModifier) {
         // Ctrl-click: toggle selection (all item types)
-        if (selectedSignals.contains(itemIndex)) {
-            selectedSignals.remove(itemIndex);
+        if (selectedItems.contains(itemIndex)) {
+            selectedItems.remove(itemIndex);
         } else {
-            selectedSignals.insert(itemIndex);
+            selectedItems.insert(itemIndex);
         }
-        lastSelectedSignal = itemIndex;
+        lastSelectedItem = itemIndex;
     } else {
         // Regular click: single selection (all item types)
-        selectedSignals.clear();
-        selectedSignals.insert(itemIndex);
-        lastSelectedSignal = itemIndex;
+        selectedItems.clear();
+        selectedItems.insert(itemIndex);
+        lastSelectedItem = itemIndex;
     }
     
     update();
-    emit signalSelected(itemIndex);
+    emit itemSelected(itemIndex);
 }
 
 void WaveformWidget::updateSelection(int itemIndex, bool isMultiSelect)
 {
     if (!isMultiSelect)
     {
-        selectedSignals.clear();
+        selectedItems.clear();
         if (isSignalItem(itemIndex))
         {
-            selectedSignals.insert(itemIndex);
+            selectedItems.insert(itemIndex);
         }
-        lastSelectedSignal = itemIndex;
+        lastSelectedItem = itemIndex;
     }
     update();
-    emit signalSelected(itemIndex);
+    emit itemSelected(itemIndex);
 }
 
-// In waveformwidget.cpp, update the drag methods:
-void WaveformWidget::startDragSignal(int signalIndex)
+int WaveformWidget::getItemYPosition(int index) const
 {
-    // Allow dragging of all item types
-    isDraggingSignal = true;
-    dragSignalIndex = signalIndex;
-    dragStartY = topMargin + timeMarkersHeight + signalIndex * signalHeight;
+    if (index < 0 || index >= displayItems.size()) return -1;
+    
+    int yPos = topMargin + timeMarkersHeight;
+    for (int i = 0; i < index; i++) {
+        yPos += displayItems[i].getHeight();
+    }
+    return yPos;
+}
+
+void WaveformWidget::startDrag(int itemIndex)
+{
+    if (itemIndex < 0 || itemIndex >= displayItems.size()) return;
+    
+    isDraggingItem = true;
+    dragItemIndex = itemIndex;
+    dragStartPos = QCursor::pos();
+    dragStartY = getItemYPosition(itemIndex);
     setCursor(Qt::ClosedHandCursor);
 }
 
@@ -659,8 +674,7 @@ void WaveformWidget::updateSignalGroupMembership(int signalIndex)
     // Remove signal from all groups first
     for (int i = 0; i < displayItems.size(); i++) {
         if (isGroupItem(i)) {
-            GroupItem& group = displayItems[i].getGroup();
-            group.signalIndices.removeAll(signalIndex);
+            displayItems[i].group.removeSignal(displayItems[signalIndex].signal.signal.identifier);
         }
     }
     
@@ -679,7 +693,7 @@ void WaveformWidget::updateSignalGroupMembership(int signalIndex)
     
     // If found a group header above, add this signal to that group
     if (groupHeaderIndex != -1) {
-        GroupItem& group = displayItems[groupHeaderIndex].getGroup();
+        SignalGroup& group = displayItems[groupHeaderIndex].group;
         // Check if this signal is below the group header and above the next group/space
         bool shouldBeInGroup = true;
         for (int i = groupHeaderIndex + 1; i < signalIndex; i++) {
@@ -689,8 +703,12 @@ void WaveformWidget::updateSignalGroupMembership(int signalIndex)
             }
         }
         
-        if (shouldBeInGroup && !group.signalIndices.contains(signalIndex)) {
-            group.signalIndices.append(signalIndex);
+        if (shouldBeInGroup && !group.containsSignal(displayItems[signalIndex].signal.signal.identifier)) {
+            DisplaySignal displaySignal;
+            displaySignal.signal = displayItems[signalIndex].signal.signal;
+            displaySignal.isInGroup = true;
+            displaySignal.groupName = group.name;
+            group.addSignal(displaySignal);
             qDebug() << "Added signal" << signalIndex << "to group at" << groupHeaderIndex;
         }
     }
@@ -698,38 +716,81 @@ void WaveformWidget::updateSignalGroupMembership(int signalIndex)
 
 void WaveformWidget::performDrag(int mouseY)
 {
-    if (!isDraggingSignal || dragSignalIndex < 0) return;
+    if (!isDraggingItem || dragItemIndex < 0) return;
 
-    int signalAreaTop = topMargin + timeMarkersHeight;
-    int newIndex = (mouseY - signalAreaTop) / signalHeight;
-    newIndex = qMax(0, qMin(newIndex, displayItems.size() - 1));
-
-    if (newIndex != dragSignalIndex) {
-        // Store the item being moved
-        DisplayItem movedItem = displayItems[dragSignalIndex];
-        
-        // Remove from current position
-        displayItems.removeAt(dragSignalIndex);
-        
-        // Insert at new position
-        displayItems.insert(newIndex, movedItem);
-        
-        // Update group membership based on new position
-        updateSignalGroupMembership(newIndex);
-        
-        // Update selection if dragging a selected item
-        if (selectedSignals.contains(dragSignalIndex)) {
-            selectedSignals.remove(dragSignalIndex);
-            selectedSignals.insert(newIndex);
-            lastSelectedSignal = newIndex;
+    int newIndex = -1;
+    int currentY = topMargin + timeMarkersHeight;
+    
+    // Find new position based on mouse Y
+    for (int i = 0; i < displayItems.size(); i++) {
+        int itemHeight = displayItems[i].getHeight();
+        if (mouseY >= currentY && mouseY < currentY + itemHeight) {
+            newIndex = i;
+            break;
         }
+        currentY += itemHeight;
+    }
+    
+    if (newIndex == -1) newIndex = displayItems.size() - 1;
+    if (newIndex == dragItemIndex) return;
 
-        dragSignalIndex = newIndex;
-        update();
+    // Handle group drag - move all signals together
+    if (isGroupItem(dragItemIndex)) {
+        moveGroup(dragItemIndex, newIndex);
+    } else {
+        moveFreeItem(dragItemIndex, newIndex);
     }
 }
 
-// Update mousePressEvent to allow dragging of all item types:
+void WaveformWidget::moveFreeItem(int itemIndex, int newIndex)
+{
+    DisplayItem item = displayItems[itemIndex];
+    displayItems.removeAt(itemIndex);
+    
+    // Adjust new index if we're moving past the original position
+    if (newIndex > itemIndex) newIndex--;
+    
+    displayItems.insert(newIndex, item);
+    dragItemIndex = newIndex;
+    
+    // Update selection
+    if (selectedItems.contains(itemIndex)) {
+        selectedItems.remove(itemIndex);
+        selectedItems.insert(newIndex);
+        lastSelectedItem = newIndex;
+    }
+    
+    update();
+}
+
+void WaveformWidget::updateGroupDisplayIndices()
+{
+    // In the new architecture, groups store signals by identifier
+    // so we don't need to update display indices
+    // This method is kept for compatibility with older code
+}
+
+void WaveformWidget::moveGroup(int groupIndex, int newIndex)
+{
+    auto group = displayItems[groupIndex];
+    displayItems.removeAt(groupIndex);
+    
+    // Adjust new index if we're moving past the original position
+    if (newIndex > groupIndex) newIndex--;
+    
+    displayItems.insert(newIndex, group);
+    dragItemIndex = newIndex;
+    
+    // Update selection
+    if (selectedItems.contains(groupIndex)) {
+        selectedItems.remove(groupIndex);
+        selectedItems.insert(newIndex);
+        lastSelectedItem = newIndex;
+    }
+    
+    update();
+}
+
 void WaveformWidget::mousePressEvent(QMouseEvent *event)
 {
     // Check if click is in signal names column or waveform area
@@ -756,19 +817,19 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
             handleMultiSelection(itemIndex, event);
 
             // Prepare for drag (all item types)
-            startDragSignal(itemIndex);
+            startDrag(itemIndex);
             update();
-            emit signalSelected(itemIndex);
+            emit itemSelected(itemIndex);
         }
         else if (!inNamesColumn)
         {
             // Clear selection when clicking empty space
             if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
             {
-                selectedSignals.clear();
-                lastSelectedSignal = -1;
+                selectedItems.clear();
+                lastSelectedItem = -1;
                 update();
-                emit signalSelected(-1);
+                emit itemSelected(-1);
             }
 
             // Start timeline dragging with left button (waveform area only)
@@ -795,7 +856,7 @@ void WaveformWidget::mouseDoubleClickEvent(QMouseEvent *event)
 
 void WaveformWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (isDraggingSignal)
+    if (isDraggingItem)
     {
         performDrag(event->pos().y());
     }
@@ -819,10 +880,10 @@ void WaveformWidget::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::MiddleButton || event->button() == Qt::LeftButton)
     {
-        if (isDraggingSignal)
+        if (isDraggingItem)
         {
-            isDraggingSignal = false;
-            dragSignalIndex = -1;
+            isDraggingItem = false;
+            dragItemIndex = -1;
             setCursor(Qt::ArrowCursor);
         }
         else if (isDragging)
@@ -833,7 +894,6 @@ void WaveformWidget::mouseReleaseEvent(QMouseEvent *event)
     }
 }
 
-// In waveformwidget.cpp, update the keyPressEvent method:
 void WaveformWidget::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier)
@@ -852,6 +912,7 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
         QWidget::keyPressEvent(event);
     }
 }
+
 
 void WaveformWidget::wheelEvent(QWheelEvent *event)
 {
@@ -937,8 +998,6 @@ void WaveformWidget::resizeEvent(QResizeEvent *event)
     updateScrollBar();
 }
 
-// In waveformwidget.cpp, update the contextMenuEvent:
-// In waveformwidget.cpp, update getItemAtPosition with debug if needed:
 int WaveformWidget::getItemAtPosition(const QPoint &pos) const
 {
     if (displayItems.isEmpty())
@@ -956,129 +1015,111 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
         return -1;
     }
 
-    int itemIndex = (y - signalAreaTop) / signalHeight;
-
-    if (itemIndex >= 0 && itemIndex < displayItems.size())
+    int currentY = signalAreaTop;
+    for (int i = 0; i < displayItems.size(); i++)
     {
-        qDebug() << "Found item at index:" << itemIndex;
-        return itemIndex;
+        int itemHeight = displayItems[i].getHeight();
+        if (y >= currentY && y < currentY + itemHeight)
+        {
+            qDebug() << "Found item at index:" << i;
+            return i;
+        }
+        currentY += itemHeight;
     }
 
-    qDebug() << "Item index out of range:" << itemIndex << "display items count:" << displayItems.size();
+    qDebug() << "Click below all items";
     return -1;
 }
 
-// In waveformwidget.cpp, update the showContextMenu method to ensure the item is selected:
-void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex)
-{
+void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
     QMenu contextMenu(this);
 
-    bool hasSelection = !selectedSignals.isEmpty();
+    bool hasSelection = !selectedItems.isEmpty();
     bool isSignal = isSignalItem(itemIndex);
     bool isSpace = isSpaceItem(itemIndex);
     bool isGroup = isGroupItem(itemIndex);
 
-    // If right-clicking on a specific item, handle selection
-    if (itemIndex >= 0)
-    {
-        // Store the current selection temporarily
-        QSet<int> previousSelection = selectedSignals;
-        int previousLastSelected = lastSelectedSignal;
-
-        // If the clicked item is not in selection, select only it
-        if (!selectedSignals.contains(itemIndex))
-        {
-            selectedSignals.clear();
-            selectedSignals.insert(itemIndex);
-            lastSelectedSignal = itemIndex;
+    if (itemIndex >= 0) {
+        // Ensure the clicked item is selected
+        if (!selectedItems.contains(itemIndex)) {
+            selectedItems.clear();
+            selectedItems.insert(itemIndex);
+            lastSelectedItem = itemIndex;
             update();
         }
 
-        // Create the context menu
-        if (!selectedSignals.isEmpty())
-        {
-            QString removeText = "Remove Selected";
-            contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
+        // Remove option
+        QString removeText = "Remove";
+        if (isSignal) removeText = "Remove Signal";
+        else if (isSpace) removeText = "Remove Space";
+        else if (isGroup) removeText = "Remove Group";
+        
+        contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
+        contextMenu.addSeparator();
+
+        // Rename for spaces and groups
+        if (isSpace || isGroup) {
+            contextMenu.addAction("Rename", this, [this, itemIndex]() {
+                renameItem(itemIndex);
+            });
             contextMenu.addSeparator();
         }
 
-        // Add rename option for spaces and groups
-        if (isSpace || isGroup)
-        {
-            contextMenu.addAction("Rename", this, [this, itemIndex]()
-                                  { renameItem(itemIndex); });
+        // Group management
+        if (isSignal) {
+            QMenu* addToGroupMenu = contextMenu.addMenu("Add to Group");
+            QList<QString> groupNames = getGroupNames();
+            
+            for (const QString& groupName : groupNames) {
+                addToGroupMenu->addAction(groupName, this, [this, itemIndex, groupName]() {
+                    QList<int> indices = {itemIndex};
+                    addSignalsToGroup(indices, groupName);
+                });
+            }
+            
+            if (groupNames.isEmpty()) {
+                addToGroupMenu->setEnabled(false);
+            }
             contextMenu.addSeparator();
         }
 
-        if (isSignal || isSpace)
-        {
-            contextMenu.addAction("Add Space Above", this, [this, itemIndex]()
-                                  { addSpaceAbove(itemIndex); });
-            contextMenu.addAction("Add Space Below", this, [this, itemIndex]()
-                                  { addSpaceBelow(itemIndex); });
+        // Space management
+        if (isSignal || isSpace) {
+            contextMenu.addAction("Add Space Above", this, [this, itemIndex]() {
+                addSpaceAbove(itemIndex);
+            });
+            contextMenu.addAction("Add Space Below", this, [this, itemIndex]() {
+                addSpaceBelow(itemIndex);
+            });
             contextMenu.addSeparator();
         }
 
-        if (selectedSignals.size() > 1)
-        {
-            // Only allow grouping if all selected items are signals
+        // Group creation
+        if (selectedItems.size() > 1) {
             bool allSignals = true;
-            for (int index : selectedSignals)
-            {
-                if (!isSignalItem(index))
-                {
+            for (int index : selectedItems) {
+                if (!isSignalItem(index)) {
                     allSignals = false;
-                    qDebug() << "Cannot group - item" << index << "is not a signal";
                     break;
                 }
             }
-            if (allSignals)
-            {
-                contextMenu.addAction("Group Signals", this, &WaveformWidget::addGroup);
-                contextMenu.addSeparator();
+            if (allSignals) {
+                contextMenu.addAction("Create Group", this, [this]() {
+                    QString name = promptForName("Create Group", "Group");
+                    if (!name.isEmpty()) {
+                        createGroupFromSelection(name);
+                    }
+                });
             }
-            else
-            {
-                qDebug() << "Grouping disabled - selection contains non-signal items";
-            }
         }
+    }
 
-        if (isSignal || isSpace || isGroup)
-        {
-            QString removeText = "Remove";
-            if (isSignal)
-                removeText = "Remove Signal";
-            else if (isSpace)
-                removeText = "Remove Space";
-            else if (isGroup)
-                removeText = "Remove Group";
-
-            contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
-        }
-
-        // Execute the context menu
-        QAction *selectedAction = contextMenu.exec(pos);
-
-        // If no action was taken (user clicked away), restore previous selection
-        if (!selectedAction)
-        {
-            selectedSignals = previousSelection;
-            lastSelectedSignal = previousLastSelected;
-            update();
-        }
-    } else {
-        // Right-click on empty area
-        if (hasSelection) {
-            contextMenu.addAction("Remove Selected", this, &WaveformWidget::removeSelectedSignals);
-            contextMenu.addSeparator();
-        }
-        contextMenu.addAction("Add Space", this, [this]() {
-            // Add space at the end with empty name
-            SpaceItem space;
-            space.name = ""; // Empty name
-            displayItems.append(DisplayItem(space));
-            update();
-        });
+    QAction* selectedAction = contextMenu.exec(pos);
+    if (!selectedAction && itemIndex >= 0) {
+        // Restore selection if menu was cancelled
+        selectedItems.clear();
+        selectedItems.insert(itemIndex);
+        update();
     }
 
     emit contextMenuRequested(pos, itemIndex);
@@ -1100,10 +1141,10 @@ void WaveformWidget::addSpaceAbove(int index)
     if (index < 0 || index >= displayItems.size()) return;
     
     QString name = promptForName("Add Space", "");
-    SpaceItem space;
-    space.name = name; // Can be empty
+    DisplaySpace space;
+    space.name = name;
     
-    displayItems.insert(index, DisplayItem(space));
+    displayItems.insert(index, DisplayItem::createSpace(name));
     update();
 }
 
@@ -1112,15 +1153,15 @@ void WaveformWidget::addSpaceBelow(int index)
     if (index < 0 || index >= displayItems.size()) return;
     
     QString name = promptForName("Add Space", "");
-    SpaceItem space;
-    space.name = name; // Can be empty
+    DisplaySpace space;
+    space.name = name;
     
     int insertIndex = index + 1;
     if (insertIndex > displayItems.size()) {
         insertIndex = displayItems.size();
     }
     
-    displayItems.insert(insertIndex, DisplayItem(space));
+    displayItems.insert(insertIndex, DisplayItem::createSpace(name));
     update();
 }
 
@@ -1136,13 +1177,13 @@ void WaveformWidget::renameItem(int itemIndex)
 
     if (!newName.isEmpty() && newName != currentName)
     {
-        switch (item.getType())
+        switch (item.type)
         {
         case DisplayItem::Space:
-            item.getSpace().name = newName;
+            item.space.name = newName;
             break;
         case DisplayItem::Group:
-            item.getGroup().name = newName;
+            item.group.name = newName;
             break;
         case DisplayItem::Signal:
             // Don't rename signals for now
@@ -1162,28 +1203,14 @@ void WaveformWidget::debugGroupInfo()
     {
         if (isGroupItem(i))
         {
-            const GroupItem &group = displayItems[i].getGroup();
+            const SignalGroup &group = displayItems[i].group;
             qDebug() << "Group at index" << i << "name:" << group.name;
-            qDebug() << "  Contains signals at indices:" << group.signalIndices;
+            qDebug() << "  Contains signals:" << group.groupSignals.size();
 
-            // Verify each signal exists and is a signal
-            for (int sigIndex : group.signalIndices)
+            // Verify each signal exists
+            for (const auto& groupSignal : group.groupSignals)
             {
-                if (sigIndex >= 0 && sigIndex < displayItems.size())
-                {
-                    if (isSignalItem(sigIndex))
-                    {
-                        qDebug() << "    Signal" << sigIndex << "exists and is valid";
-                    }
-                    else
-                    {
-                        qDebug() << "    ERROR: Signal" << sigIndex << "is not a signal! Type:" << displayItems[sigIndex].getType();
-                    }
-                }
-                else
-                {
-                    qDebug() << "    ERROR: Signal" << sigIndex << "is out of range!";
-                }
+                qDebug() << "    Signal:" << groupSignal.signal.name << "identifier:" << groupSignal.signal.identifier;
             }
         }
     }
@@ -1193,34 +1220,41 @@ void WaveformWidget::debugGroupInfo()
 // Call this in addGroup after creating the group:
 void WaveformWidget::addGroup()
 {
-    if (selectedSignals.size() < 2) return;
+    if (selectedItems.size() < 2) return;
     
     QString name = promptForName("Create Group", "Group");
     if (name.isEmpty()) return;
     
     // Get selected signal indices and sort them
-    QList<int> signalIndices = selectedSignals.values();
+    QList<int> signalIndices = selectedItems.values();
     std::sort(signalIndices.begin(), signalIndices.end());
     
     qDebug() << "Creating group with explicitly selected signals:" << signalIndices;
     
     // Create group header above the first signal
-    GroupItem group;
+    SignalGroup group;
     group.name = name;
     
     // Only add the explicitly selected signals to the group
     // Don't automatically add other signals
     for (int sigIndex : signalIndices) {
         if (isSignalItem(sigIndex)) {
-            group.signalIndices.append(sigIndex);
+            DisplaySignal displaySignal;
+            displaySignal.signal = getSignalFromItem(sigIndex);
+            displaySignal.isInGroup = true;
+            displaySignal.groupName = name;
+            group.groupSignals.append(displaySignal);
         }
     }
     
     // Insert group header at the position of the first selected signal
     int groupHeaderIndex = signalIndices.first();
-    displayItems.insert(groupHeaderIndex, DisplayItem(group));
+    displayItems.insert(groupHeaderIndex, DisplayItem::createGroup(name));
     
-    qDebug() << "Group created at index" << groupHeaderIndex << "with" << group.signalIndices.size() << "explicitly selected signals";
+    // Update the group with the signals
+    displayItems[groupHeaderIndex].group = group;
+    
+    qDebug() << "Group created at index" << groupHeaderIndex << "with" << group.groupSignals.size() << "explicitly selected signals";
     
     update();
 }

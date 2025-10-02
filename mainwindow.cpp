@@ -39,7 +39,7 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Delete) {
         // Let the waveform widget handle deletion if it has focus
-        if (waveformWidget->hasFocus() && !waveformWidget->getSelectedSignalIndices().isEmpty()) {
+        if (waveformWidget->hasFocus() && !waveformWidget->getSelectedItemIndices().isEmpty()) {
             waveformWidget->removeSelectedSignals();
             event->accept();
         } else {
@@ -110,10 +110,10 @@ void MainWindow::setupUI()
     waveformWidget = new WaveformWidget();
     connect(waveformWidget, &WaveformWidget::timeChanged,
             this, &MainWindow::updateTimeDisplay);
-    connect(waveformWidget, &WaveformWidget::signalSelected, this, [this](int index) {
-        // Enable/disable remove button based on selection
-        removeSignalsButton->setEnabled(index >= 0);
-    });
+    connect(waveformWidget, &WaveformWidget::itemSelected, this, [this](int index) {
+    // Enable/disable remove button based on selection
+    removeSignalsButton->setEnabled(index >= 0);
+});
 
     // === BOTTOM CONTROLS ===
     QWidget *bottomControls = new QWidget();
@@ -147,11 +147,12 @@ void MainWindow::showAddSignalsDialog()
 
     SignalSelectionDialog dialog(this);
     
-    // Convert display items back to VCDSignals for the dialog
+    // Get current signals using public method
     QList<VCDSignal> currentSignals;
-    for (const auto& item : waveformWidget->displayItems) {
-        if (item.getType() == DisplayItem::Signal) {
-            currentSignals.append(item.getSignal());
+    for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+        const DisplayItem* item = waveformWidget->getItem(i);
+        if (item && item->type == DisplayItem::Signal) {
+            currentSignals.append(item->signal.signal);
         }
     }
     
@@ -160,35 +161,44 @@ void MainWindow::showAddSignalsDialog()
     if (dialog.exec() == QDialog::Accepted) {
         QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
         if (!newSignalsToAdd.isEmpty()) {
-            // Add new signals to display items
+            // Add new signals to display using public method
             for (const auto& signal : newSignalsToAdd) {
-                waveformWidget->displayItems.append(DisplayItem(signal));
+                // We need to add this through a public method in WaveformWidget
+                // For now, we'll use setVisibleSignals which replaces all signals
+                // In the future, we should add an addSignals method to WaveformWidget
+                currentSignals.append(signal);
             }
             
+            waveformWidget->setVisibleSignals(currentSignals);
+            
             int signalCount = 0;
-            for (const auto& item : waveformWidget->displayItems) {
-                if (item.getType() == DisplayItem::Signal) signalCount++;
+            for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+                const DisplayItem* item = waveformWidget->getItem(i);
+                if (item && item->type == DisplayItem::Signal) {
+                    signalCount++;
+                }
             }
             
             statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
             removeSignalsButton->setEnabled(false); // Clear selection
-            waveformWidget->update();
         }
     }
 }
-
 // In mainwindow.cpp, update the removeSelectedSignals method:
 void MainWindow::removeSelectedSignals()
 {
     // Check if there are any selected items in the waveform widget
-    if (!waveformWidget->getSelectedSignalIndices().isEmpty()) {
+    if (!waveformWidget->getSelectedItemIndices().isEmpty()) {
         waveformWidget->removeSelectedSignals();
         removeSignalsButton->setEnabled(false);
 
         // Count only signals for display (not spaces or groups)
         int signalCount = 0;
-        for (const auto& item : waveformWidget->displayItems) {
-            if (item.getType() == DisplayItem::Signal) signalCount++;
+        for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+            const DisplayItem* item = waveformWidget->getItem(i);
+            if (item && item->type == DisplayItem::Signal) {
+                signalCount++;
+            }
         }
 
         statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
@@ -265,3 +275,4 @@ void MainWindow::about()
                        "- Professional signal selection dialog\n"
                        "- Mouse wheel navigation");
 }
+
