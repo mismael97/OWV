@@ -241,8 +241,8 @@ bool VCDParser::parseValueChanges(QTextStream &stream)
     // Debug: print all signals found
     qDebug() << "=== All parsed signals ===";
     for (const auto& signal : vcdSignals) {
-        qDebug() << "Signal:" << signal.name << "ID:" << signal.identifier 
-                 << "Values:" << valueChanges[signal.identifier].size();
+        // qDebug() << "Signal:" << signal.name << "ID:" << signal.identifier 
+        //          << "Values:" << valueChanges[signal.identifier].size();
     }
 
     return true;

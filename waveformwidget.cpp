@@ -157,6 +157,7 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     drawTimeCursor(painter);
 }
 
+
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 {
     // Draw signal names column background
@@ -170,11 +171,8 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     painter.setPen(QPen(Qt::white));
     painter.drawText(5, timeMarkersHeight - 8, "Signal Name");
 
-    // Draw selection count if multiple items selected
-    if (selectedItems.size() > 1) {
-        painter.drawText(signalNamesWidth - 50, timeMarkersHeight - 8, 
-                        QString("(%1 selected)").arg(selectedItems.size()));
-    }
+    // Draw search bar
+    drawSearchBar(painter);
     
     int currentY = topMargin + timeMarkersHeight;
     
@@ -183,8 +181,14 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         int itemHeight = item.getHeight();
         
         // Draw background based on selection and type
-        if (selectedItems.contains(i)) {
+        bool isSelected = selectedItems.contains(i);
+        bool isSearchMatch = searchResults.contains(i);
+        
+        if (isSelected) {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(60, 60, 90));
+        } else if (isSearchActive && isSearchMatch) {
+            // Highlight search matches with a different color
+            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 80, 120, 150));
         } else if (item.type == DisplayItem::Space) {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 160, 80, 120));
         } else if (i % 2 == 0) {
@@ -194,24 +198,20 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         }
 
         // Draw item name with appropriate styling
-        painter.setPen(QPen(Qt::white));
+        if (isSelected) {
+            painter.setPen(QPen(Qt::white));
+        } else if (isSearchActive && isSearchMatch) {
+            painter.setPen(QPen(QColor(200, 200, 255))); // Light blue for search matches
+        } else if (item.type == DisplayItem::Space) {
+            painter.setPen(QPen(QColor(150, 255, 150)));
+        } else {
+            painter.setPen(QPen(Qt::white));
+        }
+        
         QString displayName = item.getName();
         int textIndent = 5;
         
-        if (item.type == DisplayItem::Space) {
-            painter.setPen(QPen(QColor(150, 255, 150)));
-        }
-        
         painter.drawText(textIndent, currentY + itemHeight / 2 + 4, displayName);
-
-        // Draw signal width for signals
-        if (item.type == DisplayItem::Signal) {
-            const VCDSignal& signal = item.signal.signal;
-            painter.setPen(QPen(QColor(180, 180, 180)));
-            int widthX = signalNamesWidth - 35;
-            painter.drawText(widthX, currentY + itemHeight / 2 + 4,
-                            QString("[%1:0]").arg(signal.width - 1));
-        }
 
         // Draw horizontal separator
         painter.setPen(QPen(QColor(80, 80, 80)));
@@ -220,6 +220,8 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         currentY += itemHeight;
     }
 }
+
+
 
 void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
 {
@@ -245,8 +247,13 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
         int itemHeight = item.getHeight();
         
         // Draw background for this row
-        if (selectedItems.contains(i)) {
+        bool isSelected = selectedItems.contains(i);
+        bool isSearchMatch = searchResults.contains(i);
+        
+        if (isSelected) {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
+        } else if (isSearchActive && isSearchMatch) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(80, 80, 120, 150));
         } else if (i % 2 == 0) {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
         } else {
@@ -277,6 +284,8 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
         currentY += itemHeight;
     }
 }
+
+
 
 void WaveformWidget::drawWaveformArea(QPainter &painter) {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
@@ -353,11 +362,13 @@ void WaveformWidget::drawGrid(QPainter &painter)
     }
 }
 
+
 void WaveformWidget::drawSignals(QPainter &painter) {
     int currentY = topMargin + timeMarkersHeight;
     
     for (int i = 0; i < displayItems.size(); i++) {
         const auto& item = displayItems[i];
+        int itemHeight = item.getHeight();
         
         if (item.type == DisplayItem::Signal) {
             const VCDSignal& signal = item.signal.signal;
@@ -370,9 +381,12 @@ void WaveformWidget::drawSignals(QPainter &painter) {
             }
         }
         
-        currentY += item.getHeight();
+        currentY += itemHeight;
     }
 }
+
+
+
 
 void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
     const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
@@ -892,11 +906,40 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
         removeSelectedSignals();
         event->accept();
     }
+    else if (event->key() == Qt::Key_Escape && isSearchActive)
+    {
+        // Clear search on Escape
+        handleSearchInput("");
+        event->accept();
+    }
+    else if (event->key() == Qt::Key_Backspace)
+    {
+        // Handle backspace in search
+        if (isSearchActive) {
+            handleSearchInput(searchText.left(searchText.length() - 1));
+            event->accept();
+        } else {
+            QWidget::keyPressEvent(event);
+        }
+    }
+    else if (!event->text().isEmpty() && event->text().at(0).isPrint())
+    {
+        // Handle regular text input for search
+        if (!isSearchActive) {
+            // Start new search
+            handleSearchInput(event->text());
+        } else {
+            // Append to existing search
+            handleSearchInput(searchText + event->text());
+        }
+        event->accept();
+    }
     else
     {
         QWidget::keyPressEvent(event);
     }
 }
+
 
 void WaveformWidget::wheelEvent(QWheelEvent *event)
 {
@@ -1362,4 +1405,91 @@ QString WaveformWidget::binaryToDecimal(const QString& binaryValue) const {
     }
     
     return QString::number(value);
+}
+
+void WaveformWidget::drawSearchBar(QPainter &painter)
+{
+    int searchBarHeight = 25;
+    
+    // Draw search bar background
+    painter.fillRect(0, timeMarkersHeight, signalNamesWidth, searchBarHeight, QColor(70, 70, 80));
+    
+    // Draw search icon or label
+    painter.setPen(QPen(Qt::white));
+    painter.drawText(5, timeMarkersHeight + searchBarHeight - 8, "🔍");
+    
+    // Draw search text
+    if (searchText.isEmpty()) {
+        painter.setPen(QPen(QColor(180, 180, 180)));
+        painter.drawText(25, timeMarkersHeight + searchBarHeight - 8, "Search signals...");
+    } else {
+        painter.setPen(QPen(Qt::white));
+        painter.drawText(25, timeMarkersHeight + searchBarHeight - 8, searchText);
+        
+        // Draw result count
+        if (!searchResults.isEmpty()) {
+            QString resultText = QString("(%1)").arg(searchResults.size());
+            int textWidth = painter.fontMetrics().horizontalAdvance(resultText);
+            painter.drawText(signalNamesWidth - textWidth - 5, timeMarkersHeight + searchBarHeight - 8, resultText);
+        }
+    }
+    
+    // Update top margin to account for search bar
+    topMargin = searchBarHeight;
+}
+
+void WaveformWidget::handleSearchInput(const QString &text)
+{
+    searchText = text;
+    isSearchActive = !searchText.isEmpty();
+    updateSearchResults();
+    update();
+}
+
+void WaveformWidget::updateSearchResults()
+{
+    searchResults.clear();
+    
+    if (!isSearchActive || searchText.isEmpty()) {
+        // If no search, show all signals
+        for (int i = 0; i < displayItems.size(); i++) {
+            if (displayItems[i].type == DisplayItem::Signal) {
+                searchResults.insert(i);
+            }
+        }
+    } else {
+        // Filter signals based on search text
+        QString searchLower = searchText.toLower();
+        for (int i = 0; i < displayItems.size(); i++) {
+            if (displayItems[i].type == DisplayItem::Signal) {
+                QString signalName = displayItems[i].getFullPath().toLower();
+                if (signalName.contains(searchLower)) {
+                    searchResults.insert(i);
+                }
+            }
+        }
+    }
+    
+    qDebug() << "Search results:" << searchResults;
+    applySearchFilter();
+}
+
+
+void WaveformWidget::applySearchFilter()
+{
+    if (isSearchActive) {
+        // Only select search results, don't filter them out
+        selectedItems = searchResults;
+        if (!selectedItems.isEmpty()) {
+            lastSelectedItem = *selectedItems.begin();
+        } else {
+            lastSelectedItem = -1;
+        }
+    } else {
+        // Clear selection when search is inactive
+        selectedItems.clear();
+        lastSelectedItem = -1;
+    }
+    update();
+    emit itemSelected(lastSelectedItem);
 }

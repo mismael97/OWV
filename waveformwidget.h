@@ -55,22 +55,35 @@ struct DisplayItem {
     }
     
     QString getName() const {
-    switch(type) {
-        case Signal: {
-            QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
-            // Remove any width information like "[3:0]" from the name
-            // This handles cases where the VCD file includes width in the signal name
-            int bracketPos = name.indexOf('[');
-            if (bracketPos != -1) {
-                name = name.left(bracketPos).trimmed();
+        switch(type) {
+            case Signal: {
+                QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+                // Remove any width information like "[3:0]" from the name
+                int bracketPos = name.indexOf('[');
+                if (bracketPos != -1) {
+                    name = name.left(bracketPos).trimmed();
+                }
+                return name;
             }
-            return name;
+            case Space: 
+                return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
         }
-        case Space: 
-            return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
+        return "";
     }
-    return "";
-}
+    
+    // Helper function to get full scope path for searching
+    QString getFullPath() const {
+        if (type == Signal) {
+            QString fullPath = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+            // Remove any width information for consistency
+            int bracketPos = fullPath.indexOf('[');
+            if (bracketPos != -1) {
+                fullPath = fullPath.left(bracketPos).trimmed();
+            }
+            return fullPath;
+        }
+        return getName();
+    }
     
     int getHeight() const {
         return 30; // Fixed height for all items
@@ -123,7 +136,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
-void updateCursorTime(const QPoint &pos);
+    void updateCursorTime(const QPoint &pos);
     void drawSignalNamesColumn(QPainter &painter);
     void drawSignalValuesColumn(QPainter &painter);
     void drawWaveformArea(QPainter &painter);
@@ -154,6 +167,15 @@ void updateCursorTime(const QPoint &pos);
     bool isOverNamesSplitter(const QPoint &pos) const;
     bool isOverValuesSplitter(const QPoint &pos) const;
     void updateSplitterPositions();
+    
+    // Search functionality
+    QString searchText;
+    bool isSearchActive = false;
+    QSet<int> searchResults;
+    void drawSearchBar(QPainter &painter);
+    void handleSearchInput(const QString &text);
+    void updateSearchResults();
+    void applySearchFilter();
     
     // Drag and movement
     void startDrag(int itemIndex);
