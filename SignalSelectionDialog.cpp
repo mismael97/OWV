@@ -100,7 +100,7 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
 
         scopeItems[scopePath]->addChild(signalItem);
         
-        qDebug() << "Adding signal to dialog:" << signal.name << "ID:" << signal.identifier;
+        // qDebug() << "Adding signal to dialog:" << signal.name << "ID:" << signal.identifier;
     }
 
     signalTree->expandAll();

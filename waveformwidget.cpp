@@ -766,6 +766,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     int signalMidY = yPos + 15;
     int highLevel = yPos + 5;
     int lowLevel = yPos + 25;
+    int middleLevel = yPos + 15; // Middle level for X/Z values
 
     int prevTime = 0;
     QString prevValue = "0";
@@ -774,24 +775,54 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     for (const auto &change : changes) {
         int currentX = timeToX(change.timestamp);
         
-        // Handle X and Z values with special colors
+        // Handle X and Z values with special colors and levels
         QColor drawColor = signalColor;
-        if (change.value == "x" || change.value == "X") {
+        bool isX = (change.value == "x" || change.value == "X");
+        bool isZ = (change.value == "z" || change.value == "Z");
+        bool prevIsX = (prevValue == "x" || prevValue == "X");
+        bool prevIsZ = (prevValue == "z" || prevValue == "Z");
+        
+        if (isX) {
             drawColor = QColor(255, 0, 0); // Red for X
-        } else if (change.value == "z" || change.value == "Z") {
+        } else if (isZ) {
             drawColor = QColor(255, 165, 0); // Orange for Z
         }
         
         painter.setPen(QPen(drawColor, 2));
 
-        if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
+        // Draw the segment based on previous value
+        if (prevIsX || prevIsZ) {
+            // Previous value was X or Z - draw at middle level
+            painter.drawLine(prevX, middleLevel, currentX, middleLevel);
+        } else if (prevValue == "1") {
             painter.drawLine(prevX, highLevel, currentX, highLevel);
         } else {
             painter.drawLine(prevX, lowLevel, currentX, lowLevel);
         }
 
+        // Draw transition line if value changed
         if (prevValue != change.value) {
-            painter.drawLine(currentX, highLevel, currentX, lowLevel);
+            int fromY, toY;
+            
+            // Determine starting Y position
+            if (prevIsX || prevIsZ) {
+                fromY = middleLevel;
+            } else if (prevValue == "1") {
+                fromY = highLevel;
+            } else {
+                fromY = lowLevel;
+            }
+            
+            // Determine ending Y position  
+            if (isX || isZ) {
+                toY = middleLevel;
+            } else if (change.value == "1") {
+                toY = highLevel;
+            } else {
+                toY = lowLevel;
+            }
+            
+            painter.drawLine(currentX, fromY, currentX, toY);
         }
 
         prevTime = change.timestamp;
@@ -801,15 +832,22 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
 
     // Draw the final segment
     QColor finalColor = signalColor;
-    if (prevValue == "x" || prevValue == "X") {
+    bool finalIsX = (prevValue == "x" || prevValue == "X");
+    bool finalIsZ = (prevValue == "z" || prevValue == "Z");
+    
+    if (finalIsX) {
         finalColor = QColor(255, 0, 0);
-    } else if (prevValue == "z" || prevValue == "Z") {
+    } else if (finalIsZ) {
         finalColor = QColor(255, 165, 0);
     }
+    
     painter.setPen(QPen(finalColor, 2));
     
     int endX = timeToX(vcdParser->getEndTime());
-    if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
+    
+    if (finalIsX || finalIsZ) {
+        painter.drawLine(prevX, middleLevel, endX, middleLevel);
+    } else if (prevValue == "1") {
         painter.drawLine(prevX, highLevel, endX, highLevel);
     } else {
         painter.drawLine(prevX, lowLevel, endX, lowLevel);

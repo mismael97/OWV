@@ -147,8 +147,8 @@ void VCDParser::parseVarLine(const QString &line)
         vcdSignals.append(signal);
         identifierMap[signal.identifier] = signal;
         
-        qDebug() << "Found signal:" << signal.name << "Identifier:" << signal.identifier 
-                 << "Type:" << signal.type << "Width:" << signal.width << "Scope:" << signal.scope;
+        // qDebug() << "Found signal:" << signal.name << "Identifier:" << signal.identifier 
+        //          << "Type:" << signal.type << "Width:" << signal.width << "Scope:" << signal.scope;
     } else {
         qDebug() << "Failed to parse var line:" << line;
     }
@@ -217,7 +217,7 @@ bool VCDParser::parseValueChanges(QTextStream &stream)
             change.timestamp = currentTime;
             change.value = value;
             valueChanges[identifier].append(change);
-            qDebug() << "Vector change at time" << currentTime << ":" << value << "->" << identifier;
+            // qDebug() << "Vector change at time" << currentTime << ":" << value << "->" << identifier;
             continue;
         }
 
