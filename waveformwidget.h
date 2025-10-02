@@ -103,7 +103,16 @@ struct DisplayItem
 
     int getHeight() const
     {
-        return 30; // Fixed height for all items
+        // Use reasonable default heights - these will be overridden by the actual drawing functions
+        // The actual drawing will use the configurable heights from WaveformWidget
+        switch (type)
+        {
+        case Signal:
+            return 30; // Default height for signals
+        case Space:
+            return 30; // Fixed height for spaces
+        }
+        return 30;
     }
 
     bool isSelectable() const { return true; }
@@ -115,6 +124,25 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    // Add these to the public section of WaveformWidget class
+    int getSignalHeight() const { return signalHeight; }
+    int getBusHeight() const { return busHeight; }
+    int getLineWidth() const { return lineWidth; }
+    void setSignalHeight(int height)
+    {
+        signalHeight = qMax(5, qMin(50, height)); // Clamp between 5 and 50
+        update();
+    }
+    void setBusHeight(int height)
+    {
+        busHeight = qMax(5, qMin(50, height)); // Clamp between 5 and 50
+        update();
+    }
+    void setLineWidth(int width)
+    {
+        lineWidth = qMax(1, qMin(5, width)); // Clamp between 1 and 5 (was 1 and 1)
+        update();
+    }
     enum BusFormat
     {
         Hex,
@@ -159,6 +187,11 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+
+    // Add these to the private section of WaveformWidget class
+    int signalHeight = 24; // Configurable signal height
+    int busHeight = 30;    // Configurable bus height
+    int lineWidth = 2;     // Configurable line width
     // Virtual rendering optimization
     int visibleSignalBuffer = 50;    // Number of signals to render above/below viewport
     QList<int> visibleSignalIndices; // Indices of currently visible signals

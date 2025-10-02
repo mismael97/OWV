@@ -35,6 +35,9 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
 
 private slots:
+    void setLineThicknessThin();
+    void setLineThicknessMedium();
+    void setLineThicknessThick();
     void openFile();
     void zoomIn();
     void zoomOut();
@@ -51,8 +54,19 @@ private slots:
     void setBusOctalFormat();
     void setBusDecimalFormat();
     void updateBusFormatActions();
+    void increaseSignalHeight();
+    void decreaseSignalHeight();
 
 private:
+    void updateLineThicknessActions();
+     QAction *increaseHeightAction;
+    QAction *decreaseHeightAction;
+
+
+    QMenu *lineThicknessMenu;
+    QAction *lineThinAction;
+    QAction *lineMediumAction;
+    QAction *lineThickAction;
     // Wave menu actions
     QMenu *waveMenu;
     QAction *defaultColorsAction;

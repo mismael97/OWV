@@ -88,15 +88,13 @@ void MainWindow::createActions()
     highlightBussesAction->setCheckable(true);
     connect(highlightBussesAction, &QAction::triggered, this, &MainWindow::toggleHighlightBusses);
 
-
-// Bus format actions
+    // Bus format actions
     busHexAction = new QAction("Hexadecimal", this);
     busHexAction->setCheckable(true);
     busHexAction->setChecked(true);
     connect(busHexAction, &QAction::triggered, this, &MainWindow::setBusHexFormat);
 
-
-     busBinaryAction = new QAction("Binary", this);
+    busBinaryAction = new QAction("Binary", this);
     busBinaryAction->setCheckable(true);
     connect(busBinaryAction, &QAction::triggered, this, &MainWindow::setBusBinaryFormat);
 
@@ -107,6 +105,44 @@ void MainWindow::createActions()
     busDecimalAction = new QAction("Decimal", this);
     busDecimalAction->setCheckable(true);
     connect(busDecimalAction, &QAction::triggered, this, &MainWindow::setBusDecimalFormat);
+
+    // Line thickness actions
+    lineThinAction = new QAction("Thin (1px)", this);
+    lineThinAction->setCheckable(true);
+    connect(lineThinAction, &QAction::triggered, this, &MainWindow::setLineThicknessThin);
+
+    lineMediumAction = new QAction("Medium (2px)", this);
+    lineMediumAction->setCheckable(true);
+    lineMediumAction->setChecked(true);
+    connect(lineMediumAction, &QAction::triggered, this, &MainWindow::setLineThicknessMedium);
+
+    lineThickAction = new QAction("Thick (3px)", this);
+    lineThickAction->setCheckable(true);
+    connect(lineThickAction, &QAction::triggered, this, &MainWindow::setLineThicknessThick);
+
+    // Signal height adjustment actions
+    increaseHeightAction = new QAction("Increase Signal Height", this);
+    increaseHeightAction->setShortcut(QKeySequence("Ctrl+Up")); // Changed from Ctrl+Shift++
+    connect(increaseHeightAction, &QAction::triggered, this, &MainWindow::increaseSignalHeight);
+
+    decreaseHeightAction = new QAction("Decrease Signal Height", this);
+    decreaseHeightAction->setShortcut(QKeySequence("Ctrl+Down")); // Changed from Ctrl+Shift+-
+    connect(decreaseHeightAction, &QAction::triggered, this, &MainWindow::decreaseSignalHeight);
+}
+
+
+void MainWindow::increaseSignalHeight()
+{
+    waveformWidget->setSignalHeight(waveformWidget->getSignalHeight() + 2);
+    waveformWidget->setBusHeight(waveformWidget->getBusHeight() + 2);
+    statusLabel->setText(QString("Signal height increased to %1").arg(waveformWidget->getSignalHeight()));
+}
+
+void MainWindow::decreaseSignalHeight()
+{
+    waveformWidget->setSignalHeight(waveformWidget->getSignalHeight() - 2);
+    waveformWidget->setBusHeight(waveformWidget->getBusHeight() - 2);
+    statusLabel->setText(QString("Signal height decreased to %1").arg(waveformWidget->getSignalHeight()));
 }
 
 void MainWindow::resetSignalColors()
@@ -120,7 +156,7 @@ void MainWindow::createToolBar()
     toolBar->addAction(openAction);
     toolBar->addSeparator();
     
-    // Wave menu
+    // Wave menu - CREATE THIS FIRST
     waveMenu = new QMenu("Wave");
     
     // Signal colors submenu
@@ -135,8 +171,20 @@ void MainWindow::createToolBar()
     busFormatMenu->addAction(busOctalAction);
     busFormatMenu->addAction(busDecimalAction);
     
+    // Line thickness submenu
+    lineThicknessMenu = new QMenu("Line Thickness");
+    lineThicknessMenu->addAction(lineThinAction);
+    lineThicknessMenu->addAction(lineMediumAction);
+    lineThicknessMenu->addAction(lineThickAction);
+    
+    // Add signal height actions to wave menu - NOW THIS WILL WORK
+    waveMenu->addAction(increaseHeightAction);
+    waveMenu->addAction(decreaseHeightAction);
+    waveMenu->addSeparator();
+    
     waveMenu->addMenu(signalColorsMenu);
     waveMenu->addMenu(busFormatMenu);
+    waveMenu->addMenu(lineThicknessMenu);
     
     QToolButton *waveButton = new QToolButton();
     waveButton->setMenu(waveMenu);
@@ -151,6 +199,38 @@ void MainWindow::createToolBar()
     toolBar->addSeparator();
     toolBar->addAction(aboutAction);
 }
+
+
+void MainWindow::setLineThicknessThin()
+{
+    waveformWidget->setLineWidth(1);
+    updateLineThicknessActions();
+}
+
+void MainWindow::setLineThicknessMedium()
+{
+    waveformWidget->setLineWidth(2);
+    updateLineThicknessActions();
+}
+
+void MainWindow::setLineThicknessThick()
+{
+    waveformWidget->setLineWidth(3);
+    updateLineThicknessActions();
+}
+
+void MainWindow::updateLineThicknessActions()
+{
+    lineThinAction->setChecked(false);
+    lineMediumAction->setChecked(false);
+    lineThickAction->setChecked(false);
+    
+    int currentWidth = waveformWidget->getLineWidth();
+    if (currentWidth == 1) lineThinAction->setChecked(true);
+    else if (currentWidth == 2) lineMediumAction->setChecked(true);
+    else if (currentWidth == 3) lineThickAction->setChecked(true);
+}
+
 
 void MainWindow::createStatusBar()
 {
