@@ -91,6 +91,10 @@ public:
     int getItemCount() const { return displayItems.size(); }
     const DisplayItem* getItem(int index) const;
 
+    // Bus display settings
+    void setBusDisplayFormat(bool hexFormat) { busDisplayHex = hexFormat; update(); }
+    bool getBusDisplayFormat() const { return busDisplayHex; }
+
 signals:
     void timeChanged(int time);
     void itemSelected(int itemIndex);
@@ -113,10 +117,12 @@ private:
     void drawGrid(QPainter &painter);
     void drawSignals(QPainter &painter);
     void drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos);
+    void drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos);
     void updateScrollBar();
     int timeToX(int time) const;
     int xToTime(int x) const;
     QString getSignalValueAtTime(const QString &identifier, int time) const;
+    QString getBusValueAtTime(const QString &identifier, int time) const;
     int calculateTimeStep(int startTime, int endTime) const;
     int getItemAtPosition(const QPoint &pos) const;
     int getItemYPosition(int index) const;
@@ -145,6 +151,11 @@ private:
         return isSignalItem(index) ? displayItems[index].signal.signal : VCDSignal();
     }
 
+    // Bus display helpers
+    QString formatBusValue(const QString& binaryValue) const;
+    bool isValidBinary(const QString& value) const;
+    QString binaryToHex(const QString& binaryValue) const;
+
     VCDParser *vcdParser;
 
     // Layout parameters
@@ -169,6 +180,9 @@ private:
     // Selection state
     QSet<int> selectedItems;
     int lastSelectedItem;
+
+    // Bus display settings
+    bool busDisplayHex = true; // true = hex, false = binary
 
     QScrollBar *horizontalScrollBar;
 };

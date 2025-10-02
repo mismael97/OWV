@@ -1,5 +1,6 @@
 #include "SignalSelectionDialog.h"
 #include <QHeaderView>
+#include <QDebug>
 
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent)
@@ -11,12 +12,13 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
 
     // Signal tree
     signalTree = new QTreeWidget();
-    signalTree->setHeaderLabels({"Signal", "Width", "Type"});
+    signalTree->setHeaderLabels({"Signal", "Width", "Type", "Identifier"});
     signalTree->setAlternatingRowColors(true);
     signalTree->header()->setStretchLastSection(false);
     signalTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     signalTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     signalTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    signalTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
 
     // Controls
     QHBoxLayout *controlsLayout = new QHBoxLayout();
@@ -91,14 +93,29 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
         signalItem->setText(0, signal.name);
         signalItem->setText(1, QString::number(signal.width));
         signalItem->setText(2, signal.type);
+        signalItem->setText(3, signal.identifier); // Show identifier for debugging
         signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
         signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-        signalItem->setCheckState(0, Qt::Unchecked); // All signals start unchecked
+        signalItem->setCheckState(0, Qt::Unchecked);
 
         scopeItems[scopePath]->addChild(signalItem);
+        
+        qDebug() << "Adding signal to dialog:" << signal.name << "ID:" << signal.identifier;
     }
 
     signalTree->expandAll();
+    
+    // Debug: show how many signals were added
+    int signalCount = 0;
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it) {
+        QVariant data = (*it)->data(0, Qt::UserRole);
+        if (data.canConvert<VCDSignal>()) {
+            signalCount++;
+        }
+        ++it;
+    }
+    qDebug() << "Total signals in dialog:" << signalCount;
 }
 
 QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
@@ -110,7 +127,9 @@ QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
         if ((*it)->checkState(0) == Qt::Checked) {
             QVariant data = (*it)->data(0, Qt::UserRole);
             if (data.canConvert<VCDSignal>()) {
-                selectedSignals.append(data.value<VCDSignal>());
+                VCDSignal signal = data.value<VCDSignal>();
+                selectedSignals.append(signal);
+                qDebug() << "Selected signal:" << signal.name << "ID:" << signal.identifier;
             }
         }
         ++it;

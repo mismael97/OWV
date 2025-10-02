@@ -280,61 +280,6 @@ int WaveformWidget::calculateTimeStep(int startTime, int endTime) const
         return static_cast<int>(10 * power);
 }
 
-void WaveformWidget::drawSignals(QPainter &painter) {
-    int currentY = topMargin + timeMarkersHeight;
-    
-    for (int i = 0; i < displayItems.size(); i++) {
-        const auto& item = displayItems[i];
-        
-        if (item.type == DisplayItem::Signal) {
-            drawSignalWaveform(painter, item.signal.signal, currentY);
-        }
-        
-        currentY += item.getHeight();
-    }
-}
-
-void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
-    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
-    if (changes.isEmpty()) return;
-
-    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
-    painter.setPen(QPen(signalColor, 2));
-
-    int signalMidY = yPos + 15;
-    int highLevel = yPos + 5;
-    int lowLevel = yPos + 25;
-
-    int prevTime = 0;
-    QString prevValue = "0";
-    int prevX = timeToX(prevTime);
-
-    for (const auto &change : changes) {
-        int currentX = timeToX(change.timestamp);
-
-        if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
-            painter.drawLine(prevX, highLevel, currentX, highLevel);
-        } else {
-            painter.drawLine(prevX, lowLevel, currentX, lowLevel);
-        }
-
-        if (prevValue != change.value) {
-            painter.drawLine(currentX, highLevel, currentX, lowLevel);
-        }
-
-        prevTime = change.timestamp;
-        prevValue = change.value;
-        prevX = currentX;
-    }
-
-    int endX = timeToX(vcdParser->getEndTime());
-    if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
-        painter.drawLine(prevX, highLevel, endX, highLevel);
-    } else {
-        painter.drawLine(prevX, lowLevel, endX, lowLevel);
-    }
-}
-
 void WaveformWidget::handleMultiSelection(int itemIndex, QMouseEvent *event)
 {
     if (itemIndex < 0 || itemIndex >= displayItems.size()) return;
@@ -659,54 +604,6 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
     return -1;
 }
 
-void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
-    QMenu contextMenu(this);
-
-    if (itemIndex >= 0) {
-        // Ensure the clicked item is selected
-        if (!selectedItems.contains(itemIndex)) {
-            selectedItems.clear();
-            selectedItems.insert(itemIndex);
-            lastSelectedItem = itemIndex;
-            update();
-        }
-
-        // Remove option
-        QString removeText = "Remove";
-        if (isSignalItem(itemIndex)) removeText = "Remove Signal";
-        else if (isSpaceItem(itemIndex)) removeText = "Remove Space";
-        
-        contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
-        contextMenu.addSeparator();
-
-        // Rename for spaces
-        if (isSpaceItem(itemIndex)) {
-            contextMenu.addAction("Rename", this, [this, itemIndex]() {
-                renameItem(itemIndex);
-            });
-            contextMenu.addSeparator();
-        }
-
-        // Space management
-        contextMenu.addAction("Add Space Above", this, [this, itemIndex]() {
-            addSpaceAbove(itemIndex);
-        });
-        contextMenu.addAction("Add Space Below", this, [this, itemIndex]() {
-            addSpaceBelow(itemIndex);
-        });
-    }
-
-    QAction* selectedAction = contextMenu.exec(pos);
-    if (!selectedAction && itemIndex >= 0) {
-        // Restore selection if menu was cancelled
-        selectedItems.clear();
-        selectedItems.insert(itemIndex);
-        update();
-    }
-
-    emit contextMenuRequested(pos, itemIndex);
-}
-
 QString WaveformWidget::promptForName(const QString &title, const QString &defaultName)
 {
     bool ok;
@@ -754,4 +651,283 @@ void WaveformWidget::renameItem(int itemIndex)
         item.space.name = newName;
         update();
     }
+}
+
+void WaveformWidget::drawSignals(QPainter &painter) {
+    int currentY = topMargin + timeMarkersHeight;
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto& item = displayItems[i];
+        
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal& signal = item.signal.signal;
+            
+            // Draw as bus if width > 1, otherwise as single line
+            if (signal.width > 1) {
+                drawBusWaveform(painter, signal, currentY);
+            } else {
+                drawSignalWaveform(painter, signal, currentY);
+            }
+        }
+        
+        currentY += item.getHeight();
+    }
+}
+
+void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
+    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
+    if (changes.isEmpty()) return;
+
+    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
+    painter.setPen(QPen(signalColor, 2));
+
+    int signalHeight = 25;
+    int signalTop = yPos + 2;
+    int signalBottom = yPos + signalHeight;
+    int textY = yPos + 17; // Position for text
+
+    int prevTime = 0;
+    QString prevValue = getBusValueAtTime(signal.identifier, 0);
+    int prevX = timeToX(prevTime);
+
+    // Draw the bus background
+    painter.fillRect(prevX, signalTop, width() - signalNamesWidth, signalHeight, QColor(40, 40, 40, 128));
+
+    // Draw value regions and labels
+    for (int i = 0; i < changes.size(); i++) {
+        const auto &change = changes[i];
+        int currentX = timeToX(change.timestamp);
+        
+        // Draw the value region
+        painter.fillRect(prevX, signalTop, currentX - prevX, signalHeight, QColor(50, 50, 50, 180));
+        
+        // Draw the value text centered in this region
+        if (currentX - prevX > 30) { // Only draw text if region is wide enough
+            QString displayValue = formatBusValue(prevValue);
+            int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
+            int centerX = prevX + (currentX - prevX) / 2;
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(centerX - textWidth/2, textY, displayValue);
+            painter.setPen(QPen(signalColor, 2));
+        }
+        
+        // Draw vertical separator at value change
+        painter.drawLine(currentX, signalTop, currentX, signalBottom);
+        
+        prevTime = change.timestamp;
+        prevValue = change.value;
+        prevX = currentX;
+    }
+
+    // Draw the final region
+    int endX = timeToX(vcdParser->getEndTime());
+    if (endX > prevX) {
+        painter.fillRect(prevX, signalTop, endX - prevX, signalHeight, QColor(50, 50, 50, 180));
+        
+        if (endX - prevX > 30) {
+            QString displayValue = formatBusValue(prevValue);
+            int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
+            int centerX = prevX + (endX - prevX) / 2;
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(centerX - textWidth/2, textY, displayValue);
+            painter.setPen(QPen(signalColor, 2));
+        }
+    }
+
+    // Draw bus outline
+    painter.drawRect(timeToX(0), signalTop, endX - timeToX(0), signalHeight);
+}
+
+void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos) {
+    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
+    if (changes.isEmpty()) return;
+
+    QColor signalColor = QColor::fromHsv((qHash(signal.identifier) % 360), 180, 220);
+    painter.setPen(QPen(signalColor, 2));
+
+    int signalMidY = yPos + 15;
+    int highLevel = yPos + 5;
+    int lowLevel = yPos + 25;
+
+    int prevTime = 0;
+    QString prevValue = "0";
+    int prevX = timeToX(prevTime);
+
+    for (const auto &change : changes) {
+        int currentX = timeToX(change.timestamp);
+
+        if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
+            painter.drawLine(prevX, highLevel, currentX, highLevel);
+        } else {
+            painter.drawLine(prevX, lowLevel, currentX, lowLevel);
+        }
+
+        if (prevValue != change.value) {
+            painter.drawLine(currentX, highLevel, currentX, lowLevel);
+        }
+
+        prevTime = change.timestamp;
+        prevValue = change.value;
+        prevX = currentX;
+    }
+
+    int endX = timeToX(vcdParser->getEndTime());
+    if (prevValue == "1" || prevValue == "X" || prevValue == "Z") {
+        painter.drawLine(prevX, highLevel, endX, highLevel);
+    } else {
+        painter.drawLine(prevX, lowLevel, endX, lowLevel);
+    }
+}
+
+QString WaveformWidget::getBusValueAtTime(const QString &identifier, int time) const {
+    const auto &changes = vcdParser->getValueChanges().value(identifier);
+    QString value = "0"; // Default value
+
+    for (const auto &change : changes) {
+        if (change.timestamp > time)
+            break;
+        value = change.value;
+    }
+
+    return value;
+}
+
+QString WaveformWidget::formatBusValue(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "x";
+    
+    // Handle special cases
+    if (binaryValue == "x" || binaryValue == "X") return "x";
+    if (binaryValue == "z" || binaryValue == "Z") return "z";
+    
+    // Check if it's a valid binary string
+    if (!isValidBinary(binaryValue)) {
+        return binaryValue; // Return as-is if not pure binary
+    }
+    
+    if (busDisplayHex) {
+        return binaryToHex(binaryValue);
+    } else {
+        return binaryValue;
+    }
+}
+
+bool WaveformWidget::isValidBinary(const QString& value) const {
+    for (QChar ch : value) {
+        if (ch != '0' && ch != '1') {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString WaveformWidget::binaryToHex(const QString& binaryValue) const {
+    if (binaryValue.isEmpty()) return "0";
+    
+    // Convert binary string to integer
+    bool ok;
+    unsigned long long value = binaryValue.toULongLong(&ok, 2);
+    
+    if (!ok) {
+        return "x"; // Conversion failed
+    }
+    
+    // Calculate number of hex digits needed
+    int bitCount = binaryValue.length();
+    int hexDigits = (bitCount + 3) / 4; // ceil(bitCount / 4)
+    
+    // Format as hex with appropriate number of digits
+    return "0x" + QString::number(value, 16).rightJustified(hexDigits, '0').toUpper();
+}
+
+// Update the context menu to include bus display options
+void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex) {
+    QMenu contextMenu(this);
+
+    if (itemIndex >= 0) {
+        // Ensure the clicked item is selected
+        if (!selectedItems.contains(itemIndex)) {
+            selectedItems.clear();
+            selectedItems.insert(itemIndex);
+            lastSelectedItem = itemIndex;
+            update();
+        }
+
+        // Remove option
+        QString removeText = "Remove";
+        if (isSignalItem(itemIndex)) removeText = "Remove Signal";
+        else if (isSpaceItem(itemIndex)) removeText = "Remove Space";
+        
+        contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
+        contextMenu.addSeparator();
+
+        // Rename for spaces
+        if (isSpaceItem(itemIndex)) {
+            contextMenu.addAction("Rename", this, [this, itemIndex]() {
+                renameItem(itemIndex);
+            });
+            contextMenu.addSeparator();
+        }
+
+        // Bus display options (only show if any multi-bit signals are selected)
+        bool hasMultiBitSignals = false;
+        for (int index : selectedItems) {
+            if (isSignalItem(index) && getSignalFromItem(index).width > 1) {
+                hasMultiBitSignals = true;
+                break;
+            }
+        }
+        
+        if (hasMultiBitSignals) {
+            QMenu* busFormatMenu = contextMenu.addMenu("Bus Display Format");
+            
+            QAction* hexAction = busFormatMenu->addAction("Hexadecimal", [this]() {
+                setBusDisplayFormat(true);
+            });
+            QAction* binAction = busFormatMenu->addAction("Binary", [this]() {
+                setBusDisplayFormat(false);
+            });
+            
+            hexAction->setCheckable(true);
+            binAction->setCheckable(true);
+            hexAction->setChecked(busDisplayHex);
+            binAction->setChecked(!busDisplayHex);
+            
+            contextMenu.addSeparator();
+        }
+
+        // Space management
+        contextMenu.addAction("Add Space Above", this, [this, itemIndex]() {
+            addSpaceAbove(itemIndex);
+        });
+        contextMenu.addAction("Add Space Below", this, [this, itemIndex]() {
+            addSpaceBelow(itemIndex);
+        });
+    } else {
+        // Global bus display options when clicking empty space
+        QMenu* busFormatMenu = contextMenu.addMenu("Bus Display Format");
+        
+        QAction* hexAction = busFormatMenu->addAction("Hexadecimal", [this]() {
+            setBusDisplayFormat(true);
+        });
+        QAction* binAction = busFormatMenu->addAction("Binary", [this]() {
+            setBusDisplayFormat(false);
+        });
+        
+        hexAction->setCheckable(true);
+        binAction->setCheckable(true);
+        hexAction->setChecked(busDisplayHex);
+        binAction->setChecked(!busDisplayHex);
+    }
+
+    QAction* selectedAction = contextMenu.exec(pos);
+    if (!selectedAction && itemIndex >= 0) {
+        // Restore selection if menu was cancelled
+        selectedItems.clear();
+        selectedItems.insert(itemIndex);
+        update();
+    }
+
+    emit contextMenuRequested(pos, itemIndex);
 }

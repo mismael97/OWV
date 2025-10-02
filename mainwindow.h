@@ -43,6 +43,7 @@ private slots:
     void about();
     void showAddSignalsDialog();
     void removeSelectedSignals();
+    void toggleBusDisplayFormat();
 
 private:
     void createActions();
@@ -51,6 +52,8 @@ private:
     void setupUI();
     void loadVcdFile(const QString &filename);
     void loadDefaultVcdFile();
+    QAction *busHexAction;
+    QAction *busBinaryAction;
 
     // UI Components
     WaveformWidget *waveformWidget;

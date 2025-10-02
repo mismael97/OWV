@@ -14,6 +14,7 @@
 #include <QHBoxLayout>
 #include <QWidget>
 #include <QDir>
+#include <QToolButton>
 #include <QKeyEvent>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -75,16 +76,40 @@ void MainWindow::createActions()
 
     aboutAction = new QAction("About", this);
     connect(aboutAction, &QAction::triggered, this, &MainWindow::about);
+
+    // Bus display actions
+    busHexAction = new QAction("Hex Bus Display", this);
+    busHexAction->setCheckable(true);
+    busHexAction->setChecked(true);
+    connect(busHexAction, &QAction::triggered, this, &MainWindow::toggleBusDisplayFormat);
+    
+    busBinaryAction = new QAction("Binary Bus Display", this);
+    busBinaryAction->setCheckable(true);
+    busBinaryAction->setChecked(false);
+    connect(busBinaryAction, &QAction::triggered, this, &MainWindow::toggleBusDisplayFormat);
 }
 
 void MainWindow::createToolBar()
 {
-    QToolBar *toolBar = addToolBar("Main Toolbar");
+     QToolBar *toolBar = addToolBar("Main Toolbar");
     toolBar->addAction(openAction);
     toolBar->addSeparator();
     toolBar->addAction(zoomInAction);
     toolBar->addAction(zoomOutAction);
     toolBar->addAction(zoomFitAction);
+    toolBar->addSeparator();
+    
+    // Bus display format toggle
+    QMenu *busMenu = new QMenu("Bus Format");
+    busMenu->addAction(busHexAction);
+    busMenu->addAction(busBinaryAction);
+    
+    QToolButton *busButton = new QToolButton();
+    busButton->setMenu(busMenu);
+    busButton->setPopupMode(QToolButton::InstantPopup);
+    busButton->setText("Bus Format");
+    toolBar->addWidget(busButton);
+    
     toolBar->addSeparator();
     toolBar->addAction(aboutAction);
 }
@@ -207,7 +232,7 @@ void MainWindow::removeSelectedSignals()
 
 void MainWindow::loadDefaultVcdFile()
 {
-    QString defaultPath = "C:/Users/mismael/Desktop/OWV/rtl.vcd";
+    QString defaultPath = "C:/Users/mismael/Desktop/OWV/test.vcd";
 
     if (QFile::exists(defaultPath)) {
         loadVcdFile(defaultPath);
@@ -276,3 +301,16 @@ void MainWindow::about()
                        "- Mouse wheel navigation");
 }
 
+// Add the toggle method:
+void MainWindow::toggleBusDisplayFormat()
+{
+    if (sender() == busHexAction) {
+        waveformWidget->setBusDisplayFormat(true);
+        busHexAction->setChecked(true);
+        busBinaryAction->setChecked(false);
+    } else if (sender() == busBinaryAction) {
+        waveformWidget->setBusDisplayFormat(false);
+        busHexAction->setChecked(false);
+        busBinaryAction->setChecked(true);
+    }
+}
