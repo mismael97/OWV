@@ -159,6 +159,13 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    // Virtual rendering optimization
+    int visibleSignalBuffer = 50;    // Number of signals to render above/below viewport
+    QList<int> visibleSignalIndices; // Indices of currently visible signals
+
+    // Helper methods for virtual rendering
+    void updateVisibleSignals();
+    QList<int> getVisibleSignalIndices() const;
     int calculateTotalHeight() const;
     void updateCursorTime(const QPoint &pos);
     void drawSignalNamesColumn(QPainter &painter);
@@ -271,8 +278,8 @@ private:
     bool showCursor = true;
 
     QScrollBar *horizontalScrollBar;
-    QScrollBar *verticalScrollBar; 
-    int verticalOffset = 0;        
+    QScrollBar *verticalScrollBar;
+    int verticalOffset = 0;
 };
 
 #endif // WAVEFORMWIDGET_H
