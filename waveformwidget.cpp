@@ -407,7 +407,7 @@ void WaveformWidget::drawWaveformArea(QPainter &painter)
 
     if (!displayItems.isEmpty())
     {
-        drawGrid(painter);
+        // drawGrid(painter);
         drawSignals(painter);
     }
 
@@ -457,46 +457,46 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     painter.drawText(timeRect, Qt::AlignCenter, timeText);
 }
 
-void WaveformWidget::drawGrid(QPainter &painter)
-{
-    painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
+// void WaveformWidget::drawGrid(QPainter &painter)
+// {
+//     painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
 
-    int startTime = xToTime(0);
-    int endTime = xToTime(width() - signalNamesWidth - valuesColumnWidth);
+//     int startTime = xToTime(0);
+//     int endTime = xToTime(width() - signalNamesWidth - valuesColumnWidth);
 
-    int timeStep = calculateTimeStep(startTime, endTime);
-    for (int time = (startTime / timeStep) * timeStep; time <= endTime; time += timeStep)
-    {
-        int x = timeToX(time);
-        // Draw vertical lines only in the scrollable area (starting from timeMarkersHeight)
-        painter.drawLine(x, timeMarkersHeight, x, calculateTotalHeight());
-    }
+//     int timeStep = calculateTimeStep(startTime, endTime);
+//     for (int time = (startTime / timeStep) * timeStep; time <= endTime; time += timeStep)
+//     {
+//         int x = timeToX(time);
+//         // Draw vertical lines only in the scrollable area (starting from timeMarkersHeight)
+//         painter.drawLine(x, timeMarkersHeight, x, calculateTotalHeight());
+//     }
 
-    // Draw horizontal lines for items (only in scrollable area)
-    int currentY = topMargin + timeMarkersHeight;
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+//     // Draw horizontal lines for items (only in scrollable area)
+//     int currentY = topMargin + timeMarkersHeight;
+//     for (int i = 0; i < displayItems.size(); i++)
+//     {
+//         const auto &item = displayItems[i];
+//         int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
 
-        painter.drawLine(0, currentY, width() - signalNamesWidth - valuesColumnWidth, currentY);
-        currentY += itemHeight;
-    }
+//         painter.drawLine(0, currentY, width() - signalNamesWidth - valuesColumnWidth, currentY);
+//         currentY += itemHeight;
+//     }
 
-    // Draw selection highlight for all selected items (only in scrollable area)
-    currentY = topMargin + timeMarkersHeight;
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+//     // Draw selection highlight for all selected items (only in scrollable area)
+//     currentY = topMargin + timeMarkersHeight;
+//     for (int i = 0; i < displayItems.size(); i++)
+//     {
+//         const auto &item = displayItems[i];
+//         int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
 
-        if (selectedItems.contains(i))
-        {
-            painter.fillRect(0, currentY, width() - signalNamesWidth - valuesColumnWidth, itemHeight, QColor(60, 60, 90));
-        }
-        currentY += itemHeight;
-    }
-}
+//         if (selectedItems.contains(i))
+//         {
+//             painter.fillRect(0, currentY, width() - signalNamesWidth - valuesColumnWidth, itemHeight, QColor(60, 60, 90));
+//         }
+//         currentY += itemHeight;
+//     }
+// }
 
 void WaveformWidget::drawSignals(QPainter &painter)
 {
