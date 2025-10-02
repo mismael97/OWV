@@ -15,8 +15,6 @@
 #include <QWidget>
 #include <QListWidget>
 #include <QListWidgetItem>
-#include <QGroupBox>
-#include <QDockWidget>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QKeyEvent>

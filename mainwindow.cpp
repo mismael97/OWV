@@ -192,7 +192,7 @@ void MainWindow::removeSelectedSignals()
         waveformWidget->removeSelectedSignals();
         removeSignalsButton->setEnabled(false);
 
-        // Count only signals for display (not spaces or groups)
+        // Count only signals for display (not spaces)
         int signalCount = 0;
         for (int i = 0; i < waveformWidget->getItemCount(); i++) {
             const DisplayItem* item = waveformWidget->getItem(i);
