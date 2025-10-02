@@ -212,7 +212,7 @@ void SignalSelectionDialog::filterTree(const QString &filter)
             if (signalPath.contains(filterLower)) {
                 // Show this signal and all its parents
                 item->setHidden(false);
-                item->setBackground(0, QColor(255, 255, 200)); // Highlight matching signals
+                item->setBackground(0, QColor(80, 80, 80)); // Highlight matching signals
                 
                 // Expand and show all parent items
                 expandAllParents(item);
