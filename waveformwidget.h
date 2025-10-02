@@ -191,7 +191,7 @@ private:
     // Add these to the private section of WaveformWidget class
     int signalHeight = 24; // Configurable signal height
     int busHeight = 30;    // Configurable bus height
-    int lineWidth = 2;     // Configurable line width
+    int lineWidth = 1;     // Configurable line width
     // Virtual rendering optimization
     int visibleSignalBuffer = 50;    // Number of signals to render above/below viewport
     QList<int> visibleSignalIndices; // Indices of currently visible signals

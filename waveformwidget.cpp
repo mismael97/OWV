@@ -544,19 +544,15 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     if (changes.isEmpty())
         return;
 
-    QColor signalColor = getSignalColor(signal.identifier);
+    QColor defaultColor = QColor(0xFF, 0xE6, 0xCD); // Default color: #ffe6cd
 
-// Hardcoded small offset - 3 pixels from top and bottom
+    // Hardcoded small offset - 3 pixels from top and bottom
     int signalTop = yPos + 3;
     int signalBottom = yPos + signalHeight - 3;
     int signalMidY = yPos + signalHeight / 2;
     int highLevel = signalTop;    // Top of the waveform area
     int lowLevel = signalBottom;  // Bottom of the waveform area
     int middleLevel = signalMidY; // Middle for X/Z values
-
-
-    // Use configurable line width
-    painter.setPen(QPen(signalColor, lineWidth));
 
     int prevTime = 0;
     QString prevValue = "0";
@@ -566,12 +562,14 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     {
         int currentX = timeToX(change.timestamp);
 
-        // Handle X and Z values with special colors and levels
-        QColor drawColor = signalColor;
+        // Determine color based on value
+        QColor drawColor = defaultColor; // Default to #ffe6cd
         bool isX = (change.value == "x" || change.value == "X");
         bool isZ = (change.value == "z" || change.value == "Z");
+        bool isZero = (change.value == "0");
         bool prevIsX = (prevValue == "x" || prevValue == "X");
         bool prevIsZ = (prevValue == "z" || prevValue == "Z");
+        bool prevIsZero = (prevValue == "0");
 
         if (isX)
         {
@@ -581,6 +579,11 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         {
             drawColor = QColor(255, 165, 0); // Orange for Z
         }
+        else if (isZero)
+        {
+            drawColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for zero
+        }
+        // For '1' values, it will use the default #ffe6cd
 
         painter.setPen(QPen(drawColor, lineWidth));
 
@@ -596,6 +599,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         }
         else
         {
+            // Previous value was zero - draw at low level
             painter.drawLine(prevX, lowLevel, currentX, lowLevel);
         }
 
@@ -641,9 +645,10 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     }
 
     // Draw the final segment
-    QColor finalColor = signalColor;
+    QColor finalColor = defaultColor;
     bool finalIsX = (prevValue == "x" || prevValue == "X");
     bool finalIsZ = (prevValue == "z" || prevValue == "Z");
+    bool finalIsZero = (prevValue == "0");
 
     if (finalIsX)
     {
@@ -652,6 +657,10 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     else if (finalIsZ)
     {
         finalColor = QColor(255, 165, 0);
+    }
+    else if (finalIsZero)
+    {
+        finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for zero
     }
 
     painter.setPen(QPen(finalColor, lineWidth));
@@ -671,6 +680,8 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         painter.drawLine(prevX, lowLevel, endX, lowLevel);
     }
 }
+
+
 
 void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
@@ -702,7 +713,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
 
         // Handle X and Z values with special colors for the region
         QColor regionColor = QColor(50, 50, 50, 180);
-        QColor textColor = Qt::white;
+        QColor textColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for bus text
 
         if (prevValue.contains('x') || prevValue.contains('X'))
         {
@@ -758,7 +769,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
             int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
             int centerX = prevX + (endX - prevX) / 2;
 
-            painter.setPen(QPen(Qt::white));
+            painter.setPen(QPen(QColor(0x01, 0xFF, 0xFF))); // Cyan #01ffff for bus text
             painter.drawText(centerX - textWidth / 2, textY, displayValue);
         }
     }
@@ -767,6 +778,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     painter.setPen(QPen(signalColor, lineWidth));
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), busBottom - busTop);
 }
+
 
 void WaveformWidget::updateScrollBar()
 {
@@ -1476,8 +1488,8 @@ QColor WaveformWidget::getSignalColor(const QString &identifier) const
         return signalColors[identifier];
     }
 
-    // Default to green for all signals
-    return QColor(0, 255, 0);
+    // Default to #ffe6cd for all signals
+    return QColor(0xFF, 0xE6, 0xCD);
 }
 
 void WaveformWidget::changeSignalColor(int itemIndex)
