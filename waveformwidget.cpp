@@ -38,7 +38,7 @@ WaveformWidget::WaveformWidget(QWidget *parent)
       verticalOffset(0),
       isSearchActive(false),
       visibleSignalBuffer(50),
-      MAX_CACHED_SIGNALS(1000)  // Add this initialization
+      MAX_CACHED_SIGNALS(1000) // Add this initialization
 {
     qDebug() << "WaveformWidget constructor started";
     setFocusPolicy(Qt::StrongFocus);
@@ -61,6 +61,14 @@ WaveformWidget::WaveformWidget(QWidget *parent)
         updateVisibleSignals();
         update(); });
     qDebug() << "WaveformWidget constructor completed";
+
+    // Add vertical scrollbar
+    verticalScrollBar = new QScrollBar(Qt::Vertical, this);
+    connect(verticalScrollBar, &QScrollBar::valueChanged, [this](int value)
+            {
+        verticalOffset = value;
+        updateVisibleSignals();
+        update(); });
 }
 
 void WaveformWidget::setVcdData(VCDParser *parser)
@@ -187,7 +195,8 @@ void WaveformWidget::zoomOut()
 
 void WaveformWidget::zoomFit()
 {
-    if (!vcdParser || vcdParser->getEndTime() <= 0) {
+    if (!vcdParser || vcdParser->getEndTime() <= 0)
+    {
         timeScale = 1.0;
         timeOffset = 0;
         updateScrollBar();
@@ -196,28 +205,32 @@ void WaveformWidget::zoomFit()
     }
 
     int availableWidth = width() - signalNamesWidth - valuesColumnWidth - 20;
-    
+
     // Use the same margins as scrolling - UPDATE THIS LINE:
-    const int LEFT_MARGIN = -50;  // -10 time units (negative time)
+    const int LEFT_MARGIN = -50; // -10 time units (negative time)
     const int RIGHT_MARGIN = 50; // 100 time units after end
-    
+
     int totalTimeRange = vcdParser->getEndTime() + RIGHT_MARGIN - LEFT_MARGIN; // Note: subtract LEFT_MARGIN because it's negative
-    
-    if (availableWidth <= 10) {
+
+    if (availableWidth <= 10)
+    {
         timeScale = 1.0;
-    } else if (totalTimeRange <= 0) {
+    }
+    else if (totalTimeRange <= 0)
+    {
         timeScale = 1.0;
-    } else {
+    }
+    else
+    {
         timeScale = static_cast<double>(availableWidth) / totalTimeRange;
     }
-    
+
     timeScale = qMax(0.001, qMin(1000.0, timeScale));
     timeOffset = 0;
-    
+
     updateScrollBar();
     update();
 }
-
 
 void WaveformWidget::resetSignalColors()
 {
@@ -242,8 +255,7 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     Q_UNUSED(event)
 
     // Global safety check - reset if zoom is completely unreasonable
-    if (timeScale > 1000.0 || timeScale < 0.001)
-    {
+    if (timeScale > 1000.0 || timeScale < 0.001) {
         qDebug() << "Global emergency: Resetting unreasonable zoom:" << timeScale;
         timeScale = 1.0;
         timeOffset = 0;
@@ -258,8 +270,7 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     // Fill entire background with dark theme
     painter.fillRect(rect(), QColor(45, 45, 48));
 
-    if (!vcdParser || displayItems.isEmpty())
-    {
+    if (!vcdParser || displayItems.isEmpty()) {
         painter.setPen(QPen(Qt::white));
         painter.drawText(rect(), Qt::AlignCenter, "No signals selected");
         return;
@@ -269,6 +280,10 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     drawSignalValuesColumn(painter);
     drawWaveformArea(painter);
     drawTimeCursor(painter);
+    
+    // Debug: show scroll info
+    // painter.setPen(QPen(Qt::yellow));
+    // painter.drawText(10, 20, QString("VOffset: %1/%2").arg(verticalOffset).arg(verticalScrollBar->maximum()));
 }
 
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
@@ -787,7 +802,6 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     }
 }
 
-
 void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor)
 {
     int height = bottom - top;
@@ -923,10 +937,10 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
 
-
 void WaveformWidget::updateScrollBar()
 {
-    if (!vcdParser) {
+    if (!vcdParser)
+    {
         horizontalScrollBar->setRange(0, 0);
         verticalScrollBar->setRange(0, 0);
         return;
@@ -934,40 +948,58 @@ void WaveformWidget::updateScrollBar()
 
     // Calculate viewport dimensions safely
     int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
-    if (viewportWidth < 10) viewportWidth = 10;
-    
-    int viewportHeight = height();
-    if (viewportHeight < 10) viewportHeight = 10;
+    if (viewportWidth < 10)
+        viewportWidth = 10;
 
-    // Define scroll margins in PIXELS - CHANGE THIS LINE:
-    const int LEFT_MARGIN_PIXELS = static_cast<int>(-10 * timeScale);   // -10 time units (negative time)
-    const int RIGHT_MARGIN_PIXELS = static_cast<int>(100 * timeScale); // 100 time units after end in pixels
+    int viewportHeight = height();
+    if (viewportHeight < 10)
+        viewportHeight = 10;
+
+    // Define scroll margins in PIXELS
+    const int LEFT_MARGIN_PIXELS = static_cast<int>(-10 * timeScale);  // -10 time units
+    const int RIGHT_MARGIN_PIXELS = static_cast<int>(100 * timeScale); // 100 time units after end
 
     // Calculate the total pixel width of the timeline including margins
     int timelinePixelWidth = static_cast<int>(vcdParser->getEndTime() * timeScale);
     int totalPixelWidth = timelinePixelWidth + LEFT_MARGIN_PIXELS + RIGHT_MARGIN_PIXELS;
-    
+
     // The maximum scroll offset is the difference between total width and viewport width
     int maxScrollOffset = qMax(0, totalPixelWidth - viewportWidth);
-    
-    qDebug() << "Scroll limits - timelinePixels:" << timelinePixelWidth 
-             << "totalPixels:" << totalPixelWidth 
-             << "viewport:" << viewportWidth 
-             << "maxScroll:" << maxScrollOffset;
 
-    // Set the scrollbar range
+    // Set the horizontal scrollbar range
     horizontalScrollBar->setRange(0, maxScrollOffset);
     horizontalScrollBar->setPageStep(viewportWidth);
     horizontalScrollBar->setSingleStep(viewportWidth / 10);
 
-    // ... rest of the method
-}
+    // Calculate vertical scrolling
+    int totalHeight = calculateTotalHeight();
+    int visibleHeight = viewportHeight - timeMarkersHeight; // Subtract pinned timeline area
 
+    // Only enable vertical scrollbar if content is taller than visible area
+    if (totalHeight > visibleHeight)
+    {
+        int maxVerticalOffset = totalHeight - visibleHeight;
+        verticalScrollBar->setRange(0, maxVerticalOffset);
+        verticalScrollBar->setPageStep(visibleHeight);
+        verticalScrollBar->setSingleStep(30); // Scroll by approximately one signal height
+        verticalScrollBar->setVisible(true);
+    }
+    else
+    {
+        verticalScrollBar->setRange(0, 0);
+        verticalScrollBar->setVisible(false);
+        verticalOffset = 0; // Reset offset if no scrolling needed
+    }
+
+    qDebug() << "Scrollbar update - Total height:" << totalHeight
+             << "Visible height:" << visibleHeight
+             << "Vertical range:" << verticalScrollBar->minimum() << "-" << verticalScrollBar->maximum();
+}
 
 int WaveformWidget::calculateTotalHeight() const
 {
     if (displayItems.isEmpty())
-        return 0;
+        return timeMarkersHeight; // Just the timeline area
 
     int totalHeight = topMargin + timeMarkersHeight;
     for (const auto &item : displayItems)
@@ -975,6 +1007,10 @@ int WaveformWidget::calculateTotalHeight() const
         int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
         totalHeight += itemHeight;
     }
+
+    // Add some extra padding at the bottom
+    totalHeight += 10;
+
     return totalHeight;
 }
 
@@ -1023,7 +1059,8 @@ QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time
     const auto changes = vcdParser->getValueChangesForSignal(identifier);
     QString value = "0";
 
-    for (const auto &change : changes) {
+    for (const auto &change : changes)
+    {
         if (change.timestamp > time)
             break;
         value = change.value;
@@ -1038,7 +1075,8 @@ QString WaveformWidget::getBusValueAtTime(const QString &identifier, int time) c
     const auto changes = vcdParser->getValueChangesForSignal(identifier);
     QString value = "0";
 
-    for (const auto &change : changes) {
+    for (const auto &change : changes)
+    {
         if (change.timestamp > time)
             break;
         value = change.value;
@@ -1361,22 +1399,22 @@ void WaveformWidget::mouseMoveEvent(QMouseEvent *event)
             update();
         }
         else if (isDragging)
-    {
-        int waveformStartX = signalNamesWidth + valuesColumnWidth;
-        int delta = dragStartX - (event->pos().x() - waveformStartX);
-        
-        // Calculate new offset and clamp it to scrollbar range
-        int newOffset = dragStartOffset + delta;
-        int maxOffset = horizontalScrollBar->maximum();
-        newOffset = qMax(0, qMin(newOffset, maxOffset));
-        
-        timeOffset = newOffset;
-        
-        // Update scrollbar position to match
-        horizontalScrollBar->setValue(timeOffset);
-        
-        update();
-    }
+        {
+            int waveformStartX = signalNamesWidth + valuesColumnWidth;
+            int delta = dragStartX - (event->pos().x() - waveformStartX);
+
+            // Calculate new offset and clamp it to scrollbar range
+            int newOffset = dragStartOffset + delta;
+            int maxOffset = horizontalScrollBar->maximum();
+            newOffset = qMax(0, qMin(newOffset, maxOffset));
+
+            timeOffset = newOffset;
+
+            // Update scrollbar position to match
+            horizontalScrollBar->setValue(timeOffset);
+
+            update();
+        }
 
         // Emit time change for cursor position in waveform area
         int waveformStartX = signalNamesWidth + valuesColumnWidth;
@@ -1529,10 +1567,18 @@ void WaveformWidget::wheelEvent(QWheelEvent *event)
         // Regular wheel for vertical scrolling
         int scrollAmount = event->angleDelta().y();
         verticalOffset -= scrollAmount / 2;
-        verticalOffset = qMax(0, qMin(verticalOffset, verticalScrollBar->maximum()));
-        updateScrollBar();
+
+        // Clamp vertical offset to valid range
+        int maxVerticalOffset = verticalScrollBar->maximum();
+        verticalOffset = qMax(0, qMin(verticalOffset, maxVerticalOffset));
+
+        // Update scrollbar position
+        verticalScrollBar->setValue(verticalOffset);
+
         updateVisibleSignals();
         update();
+
+        qDebug() << "Vertical scroll - Offset:" << verticalOffset << "Max:" << maxVerticalOffset;
     }
 }
 
@@ -1547,18 +1593,20 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     }
 
     displayItems.clear();
-    
+
     // Load data for the selected signals
-    if (vcdParser && !visibleSignals.isEmpty()) {
+    if (vcdParser && !visibleSignals.isEmpty())
+    {
         QList<QString> identifiers;
-        for (const auto &signal : visibleSignals) {
+        for (const auto &signal : visibleSignals)
+        {
             identifiers.append(signal.identifier);
         }
-        
+
         // Load signal data before displaying
         vcdParser->loadSignalsData(identifiers);
     }
-    
+
     for (const auto &signal : visibleSignals)
     {
         displayItems.append(DisplayItem::createSignal(signal));
@@ -1573,11 +1621,10 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     }
 
     updateVisibleSignals();
+    updateScrollBar(); // Make sure scrollbar is updated
     update();
     emit itemSelected(-1);
 }
-
-
 
 void WaveformWidget::contextMenuEvent(QContextMenuEvent *event)
 {
@@ -1599,19 +1646,24 @@ void WaveformWidget::resizeEvent(QResizeEvent *event)
 
     // Position the scrollbars safely
     int scrollbarSize = 20;
-    int bottomRightCornerWidth = qMax(0, width() - signalNamesWidth - valuesColumnWidth);
 
+    // Horizontal scrollbar - spans the entire bottom
     horizontalScrollBar->setGeometry(
         signalNamesWidth + valuesColumnWidth,
         qMax(0, height() - scrollbarSize),
-        bottomRightCornerWidth,
+        qMax(0, width() - signalNamesWidth - valuesColumnWidth),
         scrollbarSize);
 
+    // Vertical scrollbar - spans the right side, above horizontal scrollbar
     verticalScrollBar->setGeometry(
         qMax(0, width() - scrollbarSize),
         0,
         scrollbarSize,
-        qMax(0, height() - scrollbarSize));
+        qMax(0, height() - scrollbarSize)); // Leave space for horizontal scrollbar
+
+    qDebug() << "Resize event - Widget:" << width() << "x" << height()
+             << "Horizontal scrollbar:" << horizontalScrollBar->geometry()
+             << "Vertical scrollbar:" << verticalScrollBar->geometry();
 }
 
 int WaveformWidget::getItemAtPosition(const QPoint &pos) const
@@ -2266,23 +2318,24 @@ void WaveformWidget::applySearchFilter()
     emit itemSelected(lastSelectedItem);
 }
 
-
 void WaveformWidget::ensureSignalLoaded(const QString &identifier)
 {
-    if (!loadedSignalIdentifiers.contains(identifier)) {
+    if (!loadedSignalIdentifiers.contains(identifier))
+    {
         // Load the signal data - FIXED: use loadSignalsData instead of loadSignalData
         QList<QString> signalsToLoad = {identifier};
         vcdParser->loadSignalsData(signalsToLoad);
         loadedSignalIdentifiers.insert(identifier);
-        
+
         // Manage cache size
-        if (loadedSignalIdentifiers.size() > MAX_CACHED_SIGNALS) {
+        if (loadedSignalIdentifiers.size() > MAX_CACHED_SIGNALS)
+        {
             // Remove least recently used signal
-            if (!loadedSignalIdentifiers.isEmpty()) {
+            if (!loadedSignalIdentifiers.isEmpty())
+            {
                 QString oldestSignal = *loadedSignalIdentifiers.begin();
                 loadedSignalIdentifiers.remove(oldestSignal);
             }
         }
     }
 }
-

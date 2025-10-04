@@ -338,16 +338,25 @@ void MainWindow::showAddSignalsDialog()
 {
     if (!vcdParser) return;
 
-    // Show loading message for large files
     int signalCount = vcdParser->getSignals().size();
+    
+    // Show immediate feedback for large files
     if (signalCount > 10000) {
-        statusLabel->setText(QString("Preparing signal selection (%1 signals)...").arg(signalCount));
+        statusLabel->setText(QString("Loading signal selection dialog (%1 signals)...").arg(signalCount));
         QApplication::processEvents();
+        
+        // Use a simple message box for very large files
+        if (signalCount > 50000) {
+            QMessageBox::information(this, "Large File", 
+                QString("This file contains %1 signals.\n\n"
+                       "The signal selection will load in batches for better performance.\n"
+                       "Use the search filter to find specific signals quickly.").arg(signalCount));
+        }
     }
 
     SignalSelectionDialog dialog(this);
     
-    // Get current signals using public method
+    // Get current signals
     QList<VCDSignal> currentSignals;
     for (int i = 0; i < waveformWidget->getItemCount(); i++) {
         const DisplayItem* item = waveformWidget->getItem(i);
@@ -356,23 +365,22 @@ void MainWindow::showAddSignalsDialog()
         }
     }
     
+    // Set signals and show dialog
     dialog.setAvailableSignals(vcdParser->getSignals(), currentSignals);
 
     if (dialog.exec() == QDialog::Accepted) {
         QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
         if (!newSignalsToAdd.isEmpty()) {
-            // Add new signals to display
-            QList<VCDSignal> allSignalsToDisplay = currentSignals;
-            for (const auto& signal : newSignalsToAdd) {
-                allSignalsToDisplay.append(signal);
-            }
-            
-            statusLabel->setText("Loading waveform data...");
+            statusLabel->setText(QString("Loading %1 signals...").arg(newSignalsToAdd.size()));
             QApplication::processEvents();
+            
+            // Add to current signals
+            QList<VCDSignal> allSignalsToDisplay = currentSignals;
+            allSignalsToDisplay.append(newSignalsToAdd);
             
             waveformWidget->setVisibleSignals(allSignalsToDisplay);
             
-            // Count displayed signals
+            // Update status
             int displayedCount = 0;
             for (int i = 0; i < waveformWidget->getItemCount(); i++) {
                 const DisplayItem* item = waveformWidget->getItem(i);

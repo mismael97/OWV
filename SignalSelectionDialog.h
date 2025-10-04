@@ -10,6 +10,8 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QProgressBar>
+#include <QMap>
+#include <QSet>
 #include "vcdparser.h"
 
 class SignalSelectionDialog : public QDialog
@@ -24,10 +26,16 @@ private slots:
     void selectAll();
     void deselectAll();
     void onSearchTextChanged(const QString &text);
+    void onItemExpanded(QTreeWidgetItem *item);
+    void onItemChanged(QTreeWidgetItem *item, int column);
+    void onItemClicked(QTreeWidgetItem *item, int column);
 
 private:
-    void buildSignalTree();
+    void buildScopeStructure();
+    void populateTopLevelScopes();
+    void populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem);
     void filterTree(const QString &filter);
+    void handleMultiSelection(QTreeWidgetItem *item);
     
     QTreeWidget *signalTree;
     QPushButton *selectAllButton;
@@ -35,9 +43,24 @@ private:
     QDialogButtonBox *buttonBox;
     QLineEdit *searchEdit;
     QProgressBar *progressBar;
+    QLabel *statusLabel;
     
+    // Data storage
     QVector<VCDSignal> allSignals;
     QSet<QString> visibleSignalIdentifiers;
+    QSet<QString> selectedSignals;
+    
+    // Scope structure: scopePath -> list of signals in that scope
+    QMap<QString, QVector<VCDSignal>> scopeSignals;
+    QMap<QString, QStringList> childScopes; // scopePath -> list of immediate child scopes
+    
+    // Track which scopes have been populated
+    QSet<QString> populatedScopes;
+    
+    // Multi-selection support
+    QTreeWidgetItem *lastSelectedItem;
+    
+    QString currentFilter;
 };
 
 #endif // SIGNALSELECTIONDIALOG_H
