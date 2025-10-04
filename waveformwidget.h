@@ -208,12 +208,12 @@ private:
     int busHeight = 30;    // Configurable bus height
     int lineWidth = 1;     // Configurable line width
     // Virtual rendering optimization
-    int visibleSignalBuffer = 50;    // Number of signals to render above/below viewport
-    QList<int> visibleSignalIndices; // Indices of currently visible signals
+    // int visibleSignalBuffer = 50;    // Number of signals to render above/below viewport
+    // QList<int> visibleSignalIndices; // Indices of currently visible signals
 
     // Helper methods for virtual rendering
-    void updateVisibleSignals();
-    QList<int> getVisibleSignalIndices() const;
+    // void updateVisibleSignals();
+    // QList<int> getVisibleSignalIndices() const;
     int calculateTotalHeight() const;
     void updateCursorTime(const QPoint &pos);
     void drawSignalNamesColumn(QPainter &painter);
