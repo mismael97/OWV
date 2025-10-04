@@ -217,7 +217,7 @@ private:
     int calculateTotalHeight() const;
     void updateCursorTime(const QPoint &pos);
     void drawSignalNamesColumn(QPainter &painter);
-    void drawSignalValuesColumn(QPainter &painter);
+    void drawSignalValuesColumn(QPainter &painter, int cursorTime);
     void drawWaveformArea(QPainter &painter);
     void drawTimeCursor(QPainter &painter);
     void drawGrid(QPainter &painter);

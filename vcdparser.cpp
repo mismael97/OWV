@@ -181,6 +181,12 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
     int currentTime = 0;
     int changesFound = 0;
 
+    // Create a reverse mapping from identifier to all possible fullNames
+    QMap<QString, QList<QString>> identifierToFullNames;
+    for (const auto &signal : vcdSignals) {
+        identifierToFullNames[signal.identifier].append(signal.fullName);
+    }
+
     while (!stream.atEnd()) {
         QString line = stream.readLine().trimmed();
 
@@ -201,21 +207,15 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
             QString identifier = valueMatch.captured(2);
 
             if (signalsToLoad.contains(identifier)) {
-                // Find the fullName for this identifier
-                QString fullName;
-                for (const auto &signal : vcdSignals) {
-                    if (signal.identifier == identifier) {
-                        fullName = signal.fullName;
-                        break;
+                // Apply this value change to ALL signals with this identifier
+                if (identifierToFullNames.contains(identifier)) {
+                    for (const QString &fullName : identifierToFullNames[identifier]) {
+                        VCDValueChange change;
+                        change.timestamp = currentTime;
+                        change.value = value;
+                        valueChanges[fullName].append(change);
+                        changesFound++;
                     }
-                }
-                
-                if (!fullName.isEmpty()) {
-                    VCDValueChange change;
-                    change.timestamp = currentTime;
-                    change.value = value;
-                    valueChanges[fullName].append(change);
-                    changesFound++;
                 }
             }
             continue;
@@ -228,21 +228,15 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
             QString identifier = vectorMatch.captured(2);
 
             if (signalsToLoad.contains(identifier)) {
-                // Find the fullName for this identifier
-                QString fullName;
-                for (const auto &signal : vcdSignals) {
-                    if (signal.identifier == identifier) {
-                        fullName = signal.fullName;
-                        break;
+                // Apply this value change to ALL signals with this identifier
+                if (identifierToFullNames.contains(identifier)) {
+                    for (const QString &fullName : identifierToFullNames[identifier]) {
+                        VCDValueChange change;
+                        change.timestamp = currentTime;
+                        change.value = value;
+                        valueChanges[fullName].append(change);
+                        changesFound++;
                     }
-                }
-                
-                if (!fullName.isEmpty()) {
-                    VCDValueChange change;
-                    change.timestamp = currentTime;
-                    change.value = value;
-                    valueChanges[fullName].append(change);
-                    changesFound++;
                 }
             }
             continue;
@@ -256,21 +250,15 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
                 QString identifier = parts[1];
                 
                 if (signalsToLoad.contains(identifier)) {
-                    // Find the fullName for this identifier
-                    QString fullName;
-                    for (const auto &signal : vcdSignals) {
-                        if (signal.identifier == identifier) {
-                            fullName = signal.fullName;
-                            break;
+                    // Apply this value change to ALL signals with this identifier
+                    if (identifierToFullNames.contains(identifier)) {
+                        for (const QString &fullName : identifierToFullNames[identifier]) {
+                            VCDValueChange change;
+                            change.timestamp = currentTime;
+                            change.value = value;
+                            valueChanges[fullName].append(change);
+                            changesFound++;
                         }
-                    }
-                    
-                    if (!fullName.isEmpty()) {
-                        VCDValueChange change;
-                        change.timestamp = currentTime;
-                        change.value = value;
-                        valueChanges[fullName].append(change);
-                        changesFound++;
                     }
                 }
             }
@@ -280,7 +268,6 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
     qDebug() << "Found" << changesFound << "value changes for requested signals";
     return true;
 }
-
 QVector<VCDValueChange> VCDParser::getValueChangesForSignal(const QString &fullName)
 {
     // If signal data is not loaded yet, load it now

@@ -249,6 +249,94 @@ void WaveformWidget::setBusDisplayFormat(BusFormat format)
     update();
 }
 
+void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
+{
+    if (!showCursor || cursorTime < 0 || !vcdParser)
+        return;
+
+    int valuesColumnStart = signalNamesWidth;
+
+    // Draw values column background
+    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
+
+    // Draw values splitter
+    painter.fillRect(valuesColumnStart + valuesColumnWidth - 1, 0, 2, height(), QColor(100, 100, 100));
+
+    // Draw pinned header (always visible)
+    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
+    painter.setPen(QPen(Qt::white));
+    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value @ Time");
+
+    // Set up clipping to exclude pinned areas from scrolling
+    painter.setClipRect(valuesColumnStart, timeMarkersHeight, valuesColumnWidth, height() - timeMarkersHeight);
+
+    // FIXED: Use same starting position as names column
+    int currentY = timeMarkersHeight - verticalOffset;
+
+    for (int i = 0; i < displayItems.size(); i++)
+    {
+        const auto &item = displayItems[i];
+        int itemHeight = (item.type == DisplayItem::Signal) ? 
+            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
+
+        // Skip drawing if item is outside visible area
+        if (currentY + itemHeight <= timeMarkersHeight) {
+            currentY += itemHeight;
+            continue;
+        }
+        if (currentY >= height()) {
+            break;
+        }
+
+        // Draw background for this row
+        bool isSelected = selectedItems.contains(i);
+        bool isSearchMatch = searchResults.contains(i);
+
+        if (isSelected) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
+        } else if (isSearchActive && isSearchMatch) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(80, 80, 120, 150));
+        } else if (i % 2 == 0) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
+        } else {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
+        }
+
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal &signal = item.signal.signal;
+            
+            // FIX: Use the signal's fullName to get the value
+            QString value = getSignalValueAtTime(signal.fullName, cursorTime);
+
+            // Format the value based on signal type
+            QString displayValue;
+            if (signal.width > 1) {
+                displayValue = formatBusValue(value);
+            } else {
+                displayValue = value.toUpper();
+            }
+
+            // Center text vertically within the item
+            QFontMetrics fm(painter.font());
+            int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(valuesColumnStart + 5, textY, displayValue);
+        }
+
+        // Draw horizontal separator
+        painter.setPen(QPen(QColor(80, 80, 80)));
+        painter.drawLine(valuesColumnStart, currentY + itemHeight,
+                         valuesColumnStart + valuesColumnWidth, currentY + itemHeight);
+
+        currentY += itemHeight;
+    }
+
+    // Reset clipping
+    painter.setClipping(false);
+}
+
+
 void WaveformWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
@@ -259,9 +347,6 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
         timeScale = 1.0;
         timeOffset = 0;
     }
-
-    // Update which signals are visible before painting
-    
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
@@ -276,13 +361,9 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     }
 
     drawSignalNamesColumn(painter);
-    drawSignalValuesColumn(painter);
+    drawSignalValuesColumn(painter, cursorTime); // FIX: Pass cursorTime here
     drawWaveformArea(painter);
     drawTimeCursor(painter);
-    
-    // Debug: show scroll info
-    // painter.setPen(QPen(Qt::yellow));
-    // painter.drawText(10, 20, QString("VOffset: %1/%2").arg(verticalOffset).arg(verticalScrollBar->maximum()));
 }
 
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
@@ -365,91 +446,6 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     painter.setClipping(false);
 }
 
-void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
-{
-    if (!showCursor || cursorTime < 0 || !vcdParser)
-        return;
-
-    int valuesColumnStart = signalNamesWidth;
-
-    // Draw values column background
-    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
-
-    // Draw values splitter
-    painter.fillRect(valuesColumnStart + valuesColumnWidth - 1, 0, 2, height(), QColor(100, 100, 100));
-
-    // Draw pinned header (always visible)
-    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
-    painter.setPen(QPen(Qt::white));
-    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value @ Time");
-
-    // Set up clipping to exclude pinned areas from scrolling
-    painter.setClipRect(valuesColumnStart, timeMarkersHeight, valuesColumnWidth, height() - timeMarkersHeight);
-
-    // FIXED: Use same starting position as names column
-    int currentY = timeMarkersHeight - verticalOffset;
-
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? 
-            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
-
-        // Skip drawing if item is outside visible area
-        if (currentY + itemHeight <= timeMarkersHeight) {
-            currentY += itemHeight;
-            continue;
-        }
-        if (currentY >= height()) {
-            break;
-        }
-
-        // Draw background for this row
-        bool isSelected = selectedItems.contains(i);
-        bool isSearchMatch = searchResults.contains(i);
-
-        if (isSelected) {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
-        } else if (isSearchActive && isSearchMatch) {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(80, 80, 120, 150));
-        } else if (i % 2 == 0) {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
-        } else {
-            // FIXED: Changed 'itemItemHeight' to 'itemHeight'
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
-        }
-
-        if (item.type == DisplayItem::Signal) {
-            const VCDSignal &signal = item.signal.signal;
-            QString value = getSignalValueAtTime(signal.identifier, cursorTime);
-
-            // Format the value based on signal type
-            QString displayValue;
-            if (signal.width > 1) {
-                displayValue = formatBusValue(value);
-            } else {
-                displayValue = value.toUpper();
-            }
-
-            // Center text vertically within the item (same calculation as names column)
-            QFontMetrics fm(painter.font());
-            int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
-            
-            painter.setPen(QPen(Qt::white));
-            painter.drawText(valuesColumnStart + 5, textY, displayValue);
-        }
-
-        // Draw horizontal separator
-        painter.setPen(QPen(QColor(80, 80, 80)));
-        painter.drawLine(valuesColumnStart, currentY + itemHeight,
-                         valuesColumnStart + valuesColumnWidth, currentY + itemHeight);
-
-        currentY += itemHeight;
-    }
-
-    // Reset clipping
-    painter.setClipping(false);
-}
 
 void WaveformWidget::drawWaveformArea(QPainter &painter)
 {
