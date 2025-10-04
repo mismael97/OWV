@@ -13,35 +13,37 @@ VCDParser::~VCDParser()
 
 bool VCDParser::parseFile(const QString &filename)
 {
+    // For now, use header-only parsing for performance
+    return parseHeaderOnly(filename);
+}
+
+bool VCDParser::parseHeaderOnly(const QString &filename)
+{
     QFile file(filename);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         errorString = "Cannot open file: " + filename;
         return false;
     }
 
+    vcdFilename = filename;
     QTextStream stream(&file);
+    
     vcdSignals.clear();
-    valueChanges.clear();
     identifierMap.clear();
     currentScope.clear();
+    valueChanges.clear();
+    loadedSignals.clear();
     endTime = 0;
 
     if (!parseHeader(stream)) {
-        return false;
-    }
-
-    if (!parseValueChanges(stream)) {
+        file.close();
         return false;
     }
 
     file.close();
 
-    qDebug() << "VCD parsing completed";
+    qDebug() << "VCD header parsing completed";
     qDebug() << "Signals found:" << vcdSignals.size();
-    for (const auto& signal : vcdSignals) {
-        qDebug() << "Signal:" << signal.name << "Identifier:" << signal.identifier << "Scope:" << signal.scope;
-    }
-    qDebug() << "End time:" << endTime;
 
     return true;
 }
@@ -95,9 +97,147 @@ bool VCDParser::parseHeader(QTextStream &stream)
             // End of header
             break;
         }
+        else if (line.startsWith("#")) {
+            // We reached the value change section, stop header parsing
+            break;
+        }
     }
 
     return true;
+}
+
+bool VCDParser::loadSignalsData(const QList<QString> &identifiers)
+{
+    if (identifiers.isEmpty()) {
+        return true;
+    }
+
+    QFile file(vcdFilename);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        errorString = "Cannot open file for signal loading: " + vcdFilename;
+        return false;
+    }
+
+    QTextStream stream(&file);
+    
+    // Convert to set for fast lookup
+    QSet<QString> signalsToLoad;
+    for (const QString &identifier : identifiers) {
+        if (!loadedSignals.contains(identifier)) {
+            signalsToLoad.insert(identifier);
+            // Initialize empty value changes
+            valueChanges[identifier] = QVector<VCDValueChange>();
+        }
+    }
+
+    if (signalsToLoad.isEmpty()) {
+        file.close();
+        return true; // All signals already loaded
+    }
+
+    qDebug() << "Loading data for" << signalsToLoad.size() << "signals";
+
+    if (!parseValueChangesForSignals(stream, signalsToLoad)) {
+        file.close();
+        return false;
+    }
+
+    file.close();
+
+    // Mark signals as loaded
+    for (const QString &identifier : signalsToLoad) {
+        loadedSignals.insert(identifier);
+    }
+
+    qDebug() << "Successfully loaded data for" << signalsToLoad.size() << "signals";
+    return true;
+}
+
+bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QString> &signalsToLoad)
+{
+    QRegularExpression timestampRegex("^#(\\d+)$");
+    QRegularExpression valueChangeRegex("^([01xXzZrb])(\\S+)$");
+    QRegularExpression vectorValueRegex("^[bB]([01xXzZ]+)\\s+(\\S+)$");
+
+    int currentTime = 0;
+    int changesFound = 0;
+
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+
+        if (line.isEmpty()) continue;
+
+        // Check for timestamp
+        QRegularExpressionMatch timestampMatch = timestampRegex.match(line);
+        if (timestampMatch.hasMatch()) {
+            currentTime = timestampMatch.captured(1).toInt();
+            endTime = qMax(endTime, currentTime);
+            continue;
+        }
+
+        // Handle scalar value changes (0, 1, x, z)
+        QRegularExpressionMatch valueMatch = valueChangeRegex.match(line);
+        if (valueMatch.hasMatch()) {
+            QString value = valueMatch.captured(1).toUpper();
+            QString identifier = valueMatch.captured(2);
+
+            if (signalsToLoad.contains(identifier)) {
+                VCDValueChange change;
+                change.timestamp = currentTime;
+                change.value = value;
+                valueChanges[identifier].append(change);
+                changesFound++;
+            }
+            continue;
+        }
+
+        // Handle vector value changes (binary)
+        QRegularExpressionMatch vectorMatch = vectorValueRegex.match(line);
+        if (vectorMatch.hasMatch()) {
+            QString value = vectorMatch.captured(1);
+            QString identifier = vectorMatch.captured(2);
+
+            if (signalsToLoad.contains(identifier)) {
+                VCDValueChange change;
+                change.timestamp = currentTime;
+                change.value = value;
+                valueChanges[identifier].append(change);
+                changesFound++;
+            }
+            continue;
+        }
+
+        // Handle real value changes
+        if (line.startsWith("r")) {
+            QStringList parts = line.split(" ", Qt::SkipEmptyParts);
+            if (parts.size() >= 2) {
+                QString value = parts[0].mid(1); // Remove 'r' prefix
+                QString identifier = parts[1];
+                
+                if (signalsToLoad.contains(identifier)) {
+                    VCDValueChange change;
+                    change.timestamp = currentTime;
+                    change.value = value;
+                    valueChanges[identifier].append(change);
+                    changesFound++;
+                }
+            }
+        }
+    }
+
+    qDebug() << "Found" << changesFound << "value changes for requested signals";
+    return true;
+}
+
+QVector<VCDValueChange> VCDParser::getValueChangesForSignal(const QString &identifier)
+{
+    // If signal data is not loaded yet, load it now
+    if (!loadedSignals.contains(identifier)) {
+        QList<QString> signalsToLoad = {identifier};
+        loadSignalsData(signalsToLoad);
+    }
+    
+    return valueChanges.value(identifier);
 }
 
 void VCDParser::parseTimescale(const QString &line)
@@ -123,13 +263,11 @@ void VCDParser::parseScopeLine(const QString &line)
         } else {
             currentScope = scopeName;
         }
-        // qDebug() << "Entering scope:" << currentScope;
     }
 }
 
 void VCDParser::parseVarLine(const QString &line)
 {
-    // Improved regex to handle signal names with spaces and special characters
     QRegularExpression regex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(.+)\\s*\\$end$");
     QRegularExpressionMatch match = regex.match(line);
     
@@ -139,111 +277,11 @@ void VCDParser::parseVarLine(const QString &line)
         signal.width = match.captured(2).toInt();
         signal.identifier = match.captured(3);
         
-        // The signal name might have trailing spaces before $end, so trim it
         QString signalName = match.captured(4).trimmed();
         signal.name = signalName;
         signal.scope = currentScope;
 
         vcdSignals.append(signal);
         identifierMap[signal.identifier] = signal;
-        
-        // qDebug() << "Found signal:" << signal.name << "Identifier:" << signal.identifier 
-        //          << "Type:" << signal.type << "Width:" << signal.width << "Scope:" << signal.scope;
-    } else {
-        qDebug() << "Failed to parse var line:" << line;
     }
-}
-
-bool VCDParser::parseValueChanges(QTextStream &stream)
-{
-    QRegularExpression timestampRegex("^#(\\d+)$");
-    // Improved regex to handle all value change formats
-    QRegularExpression valueChangeRegex("^([01xXzZrb])(\\S+)$");
-    QRegularExpression vectorValueRegex("^[bB]([01xXzZ]+)\\s+(\\S+)$");
-
-    int currentTime = 0;
-    bool inDumpvars = false;
-
-    while (!stream.atEnd()) {
-        QString line = stream.readLine().trimmed();
-
-        if (line.isEmpty()) continue;
-
-        // Check for timestamp
-        QRegularExpressionMatch timestampMatch = timestampRegex.match(line);
-        if (timestampMatch.hasMatch()) {
-            currentTime = timestampMatch.captured(1).toInt();
-            endTime = qMax(endTime, currentTime);
-            inDumpvars = false; // We're past the initial dumpvars section
-            continue;
-        }
-
-        // Check for $dumpvars section
-        if (line.startsWith("$dumpvars")) {
-            inDumpvars = true;
-            continue;
-        }
-
-        if (line.startsWith("$end") && inDumpvars) {
-            inDumpvars = false;
-            continue;
-        }
-
-        // Handle scalar value changes (0, 1, x, z)
-        QRegularExpressionMatch valueMatch = valueChangeRegex.match(line);
-        if (valueMatch.hasMatch()) {
-            QString value = valueMatch.captured(1).toUpper();
-            QString identifier = valueMatch.captured(2);
-
-            // Handle special case where identifier might be just a single character
-            if (identifier.length() == 1) {
-                // This is a valid single-character identifier like #, %, etc.
-                VCDValueChange change;
-                change.timestamp = currentTime;
-                change.value = value;
-                valueChanges[identifier].append(change);
-                qDebug() << "Scalar change at time" << currentTime << ":" << value << "->" << identifier;
-            }
-            continue;
-        }
-
-        // Handle vector value changes (binary)
-        QRegularExpressionMatch vectorMatch = vectorValueRegex.match(line);
-        if (vectorMatch.hasMatch()) {
-            QString value = vectorMatch.captured(1);
-            QString identifier = vectorMatch.captured(2);
-
-            VCDValueChange change;
-            change.timestamp = currentTime;
-            change.value = value;
-            valueChanges[identifier].append(change);
-            // qDebug() << "Vector change at time" << currentTime << ":" << value << "->" << identifier;
-            continue;
-        }
-
-        // Handle real value changes (if any)
-        if (line.startsWith("r")) {
-            // Real value change - format: r<value> <identifier>
-            QStringList parts = line.split(" ", Qt::SkipEmptyParts);
-            if (parts.size() >= 2) {
-                QString value = parts[0].mid(1); // Remove 'r' prefix
-                QString identifier = parts[1];
-                
-                VCDValueChange change;
-                change.timestamp = currentTime;
-                change.value = value;
-                valueChanges[identifier].append(change);
-                qDebug() << "Real change at time" << currentTime << ":" << value << "->" << identifier;
-            }
-        }
-    }
-
-    // Debug: print all signals found
-    qDebug() << "=== All parsed signals ===";
-    for (const auto& signal : vcdSignals) {
-        // qDebug() << "Signal:" << signal.name << "ID:" << signal.identifier 
-        //          << "Values:" << valueChanges[signal.identifier].size();
-    }
-
-    return true;
 }

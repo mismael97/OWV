@@ -1,4 +1,3 @@
-// file: vcdparser.h
 #ifndef VCDPARSER_H
 #define VCDPARSER_H
 
@@ -38,16 +37,20 @@ public:
     ~VCDParser();
 
     bool parseFile(const QString &filename);
+    bool parseHeaderOnly(const QString &filename); // Fast header-only parsing
     QString getError() const { return errorString; }
 
     const QVector<VCDSignal>& getSignals() const { return vcdSignals; }
-    const QMap<QString, QVector<VCDValueChange>>& getValueChanges() const { return valueChanges; }
-    int getEndTime() const { return endTime; }
+    QVector<VCDValueChange> getValueChangesForSignal(const QString &identifier);
     const QMap<QString, VCDSignal>& getIdentifierMap() const { return identifierMap; }
+    int getEndTime() const { return endTime; }
+    
+    // Load specific signals on demand
+    bool loadSignalsData(const QList<QString> &identifiers);
 
 private:
     bool parseHeader(QTextStream &stream);
-    bool parseValueChanges(QTextStream &stream);
+    bool parseValueChangesForSignals(QTextStream &stream, const QSet<QString> &signalsToLoad);
     void parseScopeLine(const QString &line);
     void parseVarLine(const QString &line);
     void parseTimescale(const QString &line);
@@ -55,10 +58,15 @@ private:
     QString errorString;
     QVector<VCDSignal> vcdSignals;
     QMap<QString, VCDSignal> identifierMap;
+    
+    // Data storage
     QMap<QString, QVector<VCDValueChange>> valueChanges;
+    QSet<QString> loadedSignals; // Track which signals have data loaded
+    
     QString currentScope;
     int endTime;
     QString timescale;
+    QString vcdFilename;
 };
 
 #endif // VCDPARSER_H

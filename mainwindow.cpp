@@ -338,6 +338,13 @@ void MainWindow::showAddSignalsDialog()
 {
     if (!vcdParser) return;
 
+    // Show loading message for large files
+    int signalCount = vcdParser->getSignals().size();
+    if (signalCount > 10000) {
+        statusLabel->setText(QString("Preparing signal selection (%1 signals)...").arg(signalCount));
+        QApplication::processEvents();
+    }
+
     SignalSelectionDialog dialog(this);
     
     // Get current signals using public method
@@ -354,25 +361,32 @@ void MainWindow::showAddSignalsDialog()
     if (dialog.exec() == QDialog::Accepted) {
         QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
         if (!newSignalsToAdd.isEmpty()) {
-            // Add new signals to display using public method
+            // Add new signals to display
+            QList<VCDSignal> allSignalsToDisplay = currentSignals;
             for (const auto& signal : newSignalsToAdd) {
-                currentSignals.append(signal);
+                allSignalsToDisplay.append(signal);
             }
             
-            waveformWidget->setVisibleSignals(currentSignals);
+            statusLabel->setText("Loading waveform data...");
+            QApplication::processEvents();
             
-            int signalCount = 0;
+            waveformWidget->setVisibleSignals(allSignalsToDisplay);
+            
+            // Count displayed signals
+            int displayedCount = 0;
             for (int i = 0; i < waveformWidget->getItemCount(); i++) {
                 const DisplayItem* item = waveformWidget->getItem(i);
                 if (item && item->type == DisplayItem::Signal) {
-                    signalCount++;
+                    displayedCount++;
                 }
             }
             
-            statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
-            removeSignalsButton->setEnabled(false); // Clear selection
+            statusLabel->setText(QString("%1 signal(s) displayed").arg(displayedCount));
+            removeSignalsButton->setEnabled(false);
         }
     }
+    
+    statusLabel->setText("Ready");
 }
 
 void MainWindow::removeSelectedSignals()
@@ -422,12 +436,20 @@ void MainWindow::loadVcdFile(const QString &filename)
     statusLabel->setText("Loading VCD file...");
     QApplication::processEvents();
 
-    if (vcdParser->parseFile(filename)) {
-        statusLabel->setText(QString("Loaded: %1 (%2 signals)").arg(QFileInfo(filename).fileName()).arg(vcdParser->getSignals().size()));
+    // Use header-only parsing for fast loading
+    if (vcdParser->parseHeaderOnly(filename)) {
+        statusLabel->setText(QString("Loaded: %1 (%2 signals) - Ready to display")
+                            .arg(QFileInfo(filename).fileName())
+                            .arg(vcdParser->getSignals().size()));
+        
+        // Pass parser to waveform widget but don't load all signals
         waveformWidget->setVcdData(vcdParser);
+        
+        // Clear any existing signals from previous file
+        waveformWidget->setVisibleSignals(QList<VCDSignal>());
     } else {
         QMessageBox::critical(this, "Error",
-                              "Failed to parse VCD file: " + vcdParser->getError());
+                            "Failed to parse VCD file: " + vcdParser->getError());
         statusLabel->setText("Ready");
     }
 }

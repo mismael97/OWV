@@ -37,7 +37,8 @@ WaveformWidget::WaveformWidget(QWidget *parent)
       showCursor(true),
       verticalOffset(0),
       isSearchActive(false),
-      visibleSignalBuffer(50)
+      visibleSignalBuffer(50),
+      MAX_CACHED_SIGNALS(1000)  // Add this initialization
 {
     qDebug() << "WaveformWidget constructor started";
     setFocusPolicy(Qt::StrongFocus);
@@ -637,16 +638,17 @@ void WaveformWidget::drawSignals(QPainter &painter)
 
 void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
+    // Use lazy loading to get value changes
+    const auto changes = vcdParser->getValueChangesForSignal(signal.identifier);
+    if (changes.isEmpty())
+        return;
+
     // Emergency check for extreme zoom
     if (timeScale > 1000.0 || timeScale < 0.001)
     {
         qDebug() << "Emergency: Skipping waveform drawing due to extreme zoom:" << timeScale;
         return;
     }
-
-    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
-    if (changes.isEmpty())
-        return;
 
     QColor defaultColor = QColor(0xFF, 0xE6, 0xCD); // Default color: #ffe6cd
 
@@ -785,6 +787,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     }
 }
 
+
 void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor)
 {
     int height = bottom - top;
@@ -811,16 +814,17 @@ void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int 
 
 void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
+    // Use lazy loading to get value changes
+    const auto changes = vcdParser->getValueChangesForSignal(signal.identifier);
+    if (changes.isEmpty())
+        return;
+
     // Emergency check for extreme zoom
     if (timeScale > 1000.0 || timeScale < 0.001)
     {
         qDebug() << "Emergency: Skipping bus drawing due to extreme zoom:" << timeScale;
         return;
     }
-
-    const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
-    if (changes.isEmpty())
-        return;
 
     QColor signalColor = getSignalColor(signal.identifier);
 
@@ -919,6 +923,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
 
+
 void WaveformWidget::updateScrollBar()
 {
     if (!vcdParser) {
@@ -1014,11 +1019,11 @@ int WaveformWidget::xToTime(int x) const
 
 QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time) const
 {
-    const auto &changes = vcdParser->getValueChanges().value(identifier);
+    // Use lazy loading
+    const auto changes = vcdParser->getValueChangesForSignal(identifier);
     QString value = "0";
 
-    for (const auto &change : changes)
-    {
+    for (const auto &change : changes) {
         if (change.timestamp > time)
             break;
         value = change.value;
@@ -1029,11 +1034,11 @@ QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time
 
 QString WaveformWidget::getBusValueAtTime(const QString &identifier, int time) const
 {
-    const auto &changes = vcdParser->getValueChanges().value(identifier);
-    QString value = "0"; // Default value
+    // Use lazy loading
+    const auto changes = vcdParser->getValueChangesForSignal(identifier);
+    QString value = "0";
 
-    for (const auto &change : changes)
-    {
+    for (const auto &change : changes) {
         if (change.timestamp > time)
             break;
         value = change.value;
@@ -1542,6 +1547,18 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     }
 
     displayItems.clear();
+    
+    // Load data for the selected signals
+    if (vcdParser && !visibleSignals.isEmpty()) {
+        QList<QString> identifiers;
+        for (const auto &signal : visibleSignals) {
+            identifiers.append(signal.identifier);
+        }
+        
+        // Load signal data before displaying
+        vcdParser->loadSignalsData(identifiers);
+    }
+    
     for (const auto &signal : visibleSignals)
     {
         displayItems.append(DisplayItem::createSignal(signal));
@@ -1559,6 +1576,8 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     update();
     emit itemSelected(-1);
 }
+
+
 
 void WaveformWidget::contextMenuEvent(QContextMenuEvent *event)
 {
@@ -2246,3 +2265,24 @@ void WaveformWidget::applySearchFilter()
     update();
     emit itemSelected(lastSelectedItem);
 }
+
+
+void WaveformWidget::ensureSignalLoaded(const QString &identifier)
+{
+    if (!loadedSignalIdentifiers.contains(identifier)) {
+        // Load the signal data - FIXED: use loadSignalsData instead of loadSignalData
+        QList<QString> signalsToLoad = {identifier};
+        vcdParser->loadSignalsData(signalsToLoad);
+        loadedSignalIdentifiers.insert(identifier);
+        
+        // Manage cache size
+        if (loadedSignalIdentifiers.size() > MAX_CACHED_SIGNALS) {
+            // Remove least recently used signal
+            if (!loadedSignalIdentifiers.isEmpty()) {
+                QString oldestSignal = *loadedSignalIdentifiers.begin();
+                loadedSignalIdentifiers.remove(oldestSignal);
+            }
+        }
+    }
+}
+

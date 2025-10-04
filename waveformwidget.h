@@ -124,6 +124,7 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    void ensureSignalLoaded(const QString &identifier);
     void searchSignals(const QString &searchText);
     void clearSearch();
 
@@ -190,7 +191,13 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    // Track which signals have been loaded to avoid reloading
+    QSet<QString> loadedSignalIdentifiers;
 
+    // Signal data cache with limits
+    QMap<QString, QVector<VCDValueChange>> signalDataCache;
+    const int MAX_CACHED_SIGNALS = 1000; // Limit cache size
+    QStringList recentlyUsedSignals;     // For LRU cache management
 
     // Make sure these search methods exist:
     void handleSearchInput(const QString &text);
@@ -247,7 +254,6 @@ private:
     bool isSearchFocused = false;
     QSet<int> searchResults;
     void drawSearchBar(QPainter &painter);
-
 
     // Drag and movement
     void startDrag(int itemIndex);

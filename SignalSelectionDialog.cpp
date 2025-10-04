@@ -2,12 +2,13 @@
 #include <QHeaderView>
 #include <QDebug>
 #include <QApplication>
+#include <QTreeWidgetItemIterator>
 
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
-    : QDialog(parent), lastHighlightedItem(nullptr)
+    : QDialog(parent)
 {
     setWindowTitle("Add Signals to Waveform");
-    setMinimumSize(600, 500);
+    setMinimumSize(800, 600);
 
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
@@ -17,12 +18,16 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     searchEdit = new QLineEdit();
     searchEdit->setPlaceholderText("Type to search signals...");
     searchEdit->setClearButtonEnabled(true);
-    
+
     connect(searchEdit, &QLineEdit::textChanged, this, &SignalSelectionDialog::onSearchTextChanged);
-    
+
     searchLayout->addWidget(searchLabel);
     searchLayout->addWidget(searchEdit);
-    
+
+    // Progress bar
+    progressBar = new QProgressBar();
+    progressBar->setVisible(false);
+
     // Signal tree
     signalTree = new QTreeWidget();
     signalTree->setHeaderLabels({"Signal", "Width", "Type", "Identifier"});
@@ -32,12 +37,7 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     signalTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     signalTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     signalTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-
-     // Enable multi-selection
     signalTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    
-    // Connect item clicked signal
-    connect(signalTree, &QTreeWidget::itemClicked, this, &SignalSelectionDialog::onItemClicked);
 
     // Controls
     QHBoxLayout *controlsLayout = new QHBoxLayout();
@@ -57,93 +57,180 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     mainLayout->addLayout(searchLayout);
-    mainLayout->addWidget(signalTree);
+    mainLayout->addWidget(progressBar);
+    mainLayout->addWidget(signalTree, 1);
     mainLayout->addLayout(controlsLayout);
     mainLayout->addWidget(buttonBox);
 }
 
-
 void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals)
 {
-    signalTree->clear();
-    lastHighlightedItem = nullptr;
+    this->allSignals = allSignals;
 
     // Create a set of visible signal identifiers for quick lookup
-    QSet<QString> visibleSignalIdentifiers;
-    for (const auto& signal : visibleSignals) {
+    visibleSignalIdentifiers.clear();
+    for (const auto &signal : visibleSignals)
+    {
         visibleSignalIdentifiers.insert(signal.identifier);
     }
 
-    QMap<QString, QTreeWidgetItem*> scopeItems;
-
-    for (const auto& signal : allSignals) {
-        // Skip signals that are already visible in the waveform
-        if (visibleSignalIdentifiers.contains(signal.identifier)) {
-            continue;
-        }
-
-        QString scopePath = signal.scope;
-        if (!scopeItems.contains(scopePath)) {
-            QStringList scopeParts = scopePath.split('.');
-            QTreeWidgetItem *parent = nullptr;
-            QString currentPath;
-
-            for (const QString& part : scopeParts) {
-                if (!currentPath.isEmpty()) currentPath += ".";
-                currentPath += part;
-
-                if (!scopeItems.contains(currentPath)) {
-                    QTreeWidgetItem *item = new QTreeWidgetItem();
-                    item->setText(0, part);
-                    item->setData(0, Qt::UserRole, currentPath);
-
-                    if (parent) {
-                        parent->addChild(item);
-                    } else {
-                        signalTree->addTopLevelItem(item);
-                    }
-
-                    scopeItems[currentPath] = item;
-                    parent = item;
-                } else {
-                    parent = scopeItems[currentPath];
-                }
-            }
-        }
-
-        QTreeWidgetItem *signalItem = new QTreeWidgetItem();
-        signalItem->setText(0, signal.name);
-        signalItem->setText(1, QString::number(signal.width));
-        signalItem->setText(2, signal.type);
-        signalItem->setText(3, signal.identifier);
-        signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
-        signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-        signalItem->setCheckState(0, Qt::Unchecked);
-
-        scopeItems[scopePath]->addChild(signalItem);
+    // Show progress for large files
+    if (allSignals.size() > 1000)
+    {
+        progressBar->setVisible(true);
+        progressBar->setRange(0, allSignals.size());
+        progressBar->setValue(0);
     }
 
-    // Apply current search filter if any
-    if (!searchEdit->text().isEmpty()) {
-        filterTree(searchEdit->text());
-    } else {
-        signalTree->expandAll();
-    }
+    buildSignalTree();
+
+    progressBar->setVisible(false);
 }
 
+void SignalSelectionDialog::buildSignalTree()
+{
+    signalTree->clear();
+
+    if (allSignals.isEmpty())
+    {
+        return;
+    }
+
+    // For very large files, use a flat list instead of tree structure
+    if (allSignals.size() > 50000)
+    {
+        progressBar->setVisible(true);
+        progressBar->setRange(0, allSignals.size());
+        progressBar->setValue(0);
+
+        int processed = 0;
+        for (const auto &signal : allSignals)
+        {
+            // Skip signals that are already visible
+            if (visibleSignalIdentifiers.contains(signal.identifier))
+            {
+                processed++;
+                continue;
+            }
+
+            QTreeWidgetItem *signalItem = new QTreeWidgetItem();
+            QString displayName = signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name;
+            signalItem->setText(0, displayName);
+            signalItem->setText(1, QString::number(signal.width));
+            signalItem->setText(2, signal.type);
+            signalItem->setText(3, signal.identifier);
+            signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+            signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+            signalItem->setCheckState(0, Qt::Unchecked);
+
+            signalTree->addTopLevelItem(signalItem);
+
+            processed++;
+            if (processed % 100 == 0)
+            {
+                progressBar->setValue(processed);
+                QApplication::processEvents();
+            }
+        }
+    }
+    else
+    {
+
+        QMap<QString, QTreeWidgetItem *> scopeItems;
+        int processed = 0;
+
+        for (const auto &signal : allSignals)
+        {
+            // Skip signals that are already visible in the waveform
+            if (visibleSignalIdentifiers.contains(signal.identifier))
+            {
+                processed++;
+                continue;
+            }
+
+            QString scopePath = signal.scope;
+            if (!scopeItems.contains(scopePath))
+            {
+                QStringList scopeParts = scopePath.split('.');
+                QTreeWidgetItem *parent = nullptr;
+                QString currentPath;
+
+                for (const QString &part : scopeParts)
+                {
+                    if (!currentPath.isEmpty())
+                        currentPath += ".";
+                    currentPath += part;
+
+                    if (!scopeItems.contains(currentPath))
+                    {
+                        QTreeWidgetItem *item = new QTreeWidgetItem();
+                        item->setText(0, part);
+                        item->setData(0, Qt::UserRole, currentPath);
+
+                        if (parent)
+                        {
+                            parent->addChild(item);
+                        }
+                        else
+                        {
+                            signalTree->addTopLevelItem(item);
+                        }
+
+                        scopeItems[currentPath] = item;
+                        parent = item;
+                    }
+                    else
+                    {
+                        parent = scopeItems[currentPath];
+                    }
+                }
+            }
+
+            QTreeWidgetItem *signalItem = new QTreeWidgetItem();
+            signalItem->setText(0, signal.name);
+            signalItem->setText(1, QString::number(signal.width));
+            signalItem->setText(2, signal.type);
+            signalItem->setText(3, signal.identifier);
+            signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+            signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+            signalItem->setCheckState(0, Qt::Unchecked);
+
+            if (scopeItems.contains(scopePath))
+            {
+                scopeItems[scopePath]->addChild(signalItem);
+            }
+
+            // Update progress and process events for large files
+            processed++;
+            if (allSignals.size() > 1000 && processed % 100 == 0)
+            {
+                progressBar->setValue(processed);
+                QApplication::processEvents();
+            }
+        }
+    }
+
+    // Expand all for better usability
+    signalTree->expandAll();
+
+    qDebug() << "Signal tree built with" << signalTree->topLevelItemCount() << "top-level items";
+    
+}
 
 QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
 {
     QList<VCDSignal> selectedSignals;
 
     QTreeWidgetItemIterator it(signalTree);
-    while (*it) {
-        if ((*it)->checkState(0) == Qt::Checked) {
+    while (*it)
+    {
+        if ((*it)->checkState(0) == Qt::Checked)
+        {
             QVariant data = (*it)->data(0, Qt::UserRole);
-            if (data.canConvert<VCDSignal>()) {
+            if (data.canConvert<VCDSignal>())
+            {
                 VCDSignal signal = data.value<VCDSignal>();
                 selectedSignals.append(signal);
-                qDebug() << "Selected signal:" << signal.name << "ID:" << signal.identifier;
             }
         }
         ++it;
@@ -155,27 +242,29 @@ QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
 void SignalSelectionDialog::selectAll()
 {
     QTreeWidgetItemIterator it(signalTree);
-    while (*it) {
+    while (*it)
+    {
         QVariant data = (*it)->data(0, Qt::UserRole);
-        if (data.canConvert<VCDSignal>()) {
+        if (data.canConvert<VCDSignal>())
+        {
             (*it)->setCheckState(0, Qt::Checked);
         }
         ++it;
     }
-    lastSelectedItem = nullptr; // Reset last selection
 }
 
 void SignalSelectionDialog::deselectAll()
 {
     QTreeWidgetItemIterator it(signalTree);
-    while (*it) {
+    while (*it)
+    {
         QVariant data = (*it)->data(0, Qt::UserRole);
-        if (data.canConvert<VCDSignal>()) {
+        if (data.canConvert<VCDSignal>())
+        {
             (*it)->setCheckState(0, Qt::Unchecked);
         }
         ++it;
     }
-    lastSelectedItem = nullptr; // Reset last selection
 }
 
 void SignalSelectionDialog::onSearchTextChanged(const QString &text)
@@ -185,133 +274,60 @@ void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 
 void SignalSelectionDialog::filterTree(const QString &filter)
 {
-    if (filter.isEmpty()) {
-        // Show all items and expand all
+    if (filter.isEmpty())
+    {
+        // Show all items
         QTreeWidgetItemIterator it(signalTree);
-        while (*it) {
+        while (*it)
+        {
             (*it)->setHidden(false);
             ++it;
         }
         signalTree->expandAll();
-        lastHighlightedItem = nullptr;
         return;
     }
 
     QString filterLower = filter.toLower();
-    QTreeWidgetItemIterator it(signalTree);
-    
+    int visibleCount = 0;
+
     // First, hide all items
-    while (*it) {
-        (*it)->setHidden(true);
-        (*it)->setBackground(0, QBrush()); // Clear any previous highlighting
-        ++it;
+    QTreeWidgetItemIterator hideIt(signalTree);
+    while (*hideIt)
+    {
+        (*hideIt)->setHidden(true);
+        ++hideIt;
     }
 
-    // Show and highlight matching items and their parents
-    it = QTreeWidgetItemIterator(signalTree);
-    while (*it) {
-        QTreeWidgetItem *item = *it;
+    // Show matching items and their parents
+    QTreeWidgetItemIterator showIt(signalTree);
+    while (*showIt)
+    {
+        QTreeWidgetItem *item = *showIt;
         QVariant data = item->data(0, Qt::UserRole);
-        
-        if (data.canConvert<VCDSignal>()) {
-            // This is a signal item
+
+        if (data.canConvert<VCDSignal>())
+        {
             VCDSignal signal = data.value<VCDSignal>();
             QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
-            
-            if (signalPath.contains(filterLower)) {
-                // Show this signal and all its parents
+
+            if (signalPath.contains(filterLower))
+            {
+                // Show this signal
                 item->setHidden(false);
-                item->setBackground(0, QColor(80, 80, 80)); // Highlight matching signals
-                
-                // Expand and show all parent items
-                expandAllParents(item);
-                
-                lastHighlightedItem = item;
-            }
-        } else {
-            // This is a scope item - check if it has any visible children
-            bool hasVisibleChildren = false;
-            for (int i = 0; i < item->childCount(); ++i) {
-                if (!item->child(i)->isHidden()) {
-                    hasVisibleChildren = true;
-                    break;
+                visibleCount++;
+
+                // Show all parent items
+                QTreeWidgetItem *parent = item->parent();
+                while (parent)
+                {
+                    parent->setHidden(false);
+                    parent->setExpanded(true);
+                    parent = parent->parent();
                 }
             }
-            
-            if (hasVisibleChildren) {
-                item->setHidden(false);
-                item->setExpanded(true);
-            }
         }
-        ++it;
+        ++showIt;
     }
-}
 
-void SignalSelectionDialog::expandAllParents(QTreeWidgetItem *item)
-{
-    QTreeWidgetItem *parent = item->parent();
-    while (parent) {
-        parent->setHidden(false);
-        parent->setExpanded(true);
-        parent = parent->parent();
-    }
-}
-
-void SignalSelectionDialog::onItemClicked(QTreeWidgetItem *item, int column)
-{
-    Q_UNUSED(column);
-    handleMultiSelection(item);
-}
-
-
-void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
-{
-    if (!item) return;
-    
-    QVariant data = item->data(0, Qt::UserRole);
-    if (!data.canConvert<VCDSignal>()) return;
-    
-    Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
-    
-    if (modifiers & Qt::ShiftModifier && lastSelectedItem) {
-        // Find all items between lastSelectedItem and current item
-        QList<QTreeWidgetItem*> allSignalItems;
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it) {
-            QVariant itData = (*it)->data(0, Qt::UserRole);
-            if (itData.canConvert<VCDSignal>()) {
-                allSignalItems.append(*it);
-            }
-            ++it;
-        }
-        
-        int startIndex = allSignalItems.indexOf(lastSelectedItem);
-        int endIndex = allSignalItems.indexOf(item);
-        
-        if (startIndex != -1 && endIndex != -1) {
-            int low = qMin(startIndex, endIndex);
-            int high = qMax(startIndex, endIndex);
-            
-            for (int i = low; i <= high; i++) {
-                allSignalItems[i]->setCheckState(0, Qt::Checked);
-            }
-        }
-    } else if (modifiers & Qt::ControlModifier) {
-        // Toggle current item
-        Qt::CheckState newState = (item->checkState(0) == Qt::Checked) ? Qt::Unchecked : Qt::Checked;
-        item->setCheckState(0, newState);
-    } else {
-        // Single selection - clear all others
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it) {
-            QVariant itData = (*it)->data(0, Qt::UserRole);
-            if (itData.canConvert<VCDSignal>()) {
-                (*it)->setCheckState(0, Qt::Unchecked);
-            }
-            ++it;
-        }
-        item->setCheckState(0, Qt::Checked);
-    }
-    
-    lastSelectedItem = item;
+    qDebug() << "Search filter applied:" << filter << "-" << visibleCount << "signals visible";
 }

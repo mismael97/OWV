@@ -9,8 +9,8 @@
 #include <QDialogButtonBox>
 #include <QLineEdit>
 #include <QLabel>
+#include <QProgressBar>
 #include "vcdparser.h"
-
 
 class SignalSelectionDialog : public QDialog
 {
@@ -24,20 +24,20 @@ private slots:
     void selectAll();
     void deselectAll();
     void onSearchTextChanged(const QString &text);
-    void onItemClicked(QTreeWidgetItem *item, int column);
 
 private:
+    void buildSignalTree();
     void filterTree(const QString &filter);
-    void expandAllParents(QTreeWidgetItem *item);
-    void handleMultiSelection(QTreeWidgetItem *item);
-
+    
     QTreeWidget *signalTree;
     QPushButton *selectAllButton;
     QPushButton *deselectAllButton;
     QDialogButtonBox *buttonBox;
     QLineEdit *searchEdit;
-    QTreeWidgetItem *lastHighlightedItem;
-    QTreeWidgetItem *lastSelectedItem;
+    QProgressBar *progressBar;
+    
+    QVector<VCDSignal> allSignals;
+    QSet<QString> visibleSignalIdentifiers;
 };
 
 #endif // SIGNALSELECTIONDIALOG_H
