@@ -187,7 +187,6 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
-
     // Add these to the private section of WaveformWidget class
     int signalHeight = 24; // Configurable signal height
     int busHeight = 30;    // Configurable bus height
@@ -222,6 +221,7 @@ private:
     void addSpaceBelow(int index);
     void renameItem(int itemIndex);
     QString promptForName(const QString &title, const QString &defaultName = "");
+    void drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor);
 
     // Color management
     void changeSignalColor(int itemIndex);

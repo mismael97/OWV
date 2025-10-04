@@ -1,4 +1,1598 @@
+#ifndef SIGNALSELECTIONDIALOG_H
+#define SIGNALSELECTIONDIALOG_H
+
+#include <QDialog>
+#include <QTreeWidget>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QDialogButtonBox>
+#include <QLineEdit>
+#include <QLabel>
+#include "vcdparser.h"
+
+
+class SignalSelectionDialog : public QDialog
+{
+    Q_OBJECT
+public:
+    explicit SignalSelectionDialog(QWidget *parent = nullptr);
+    void setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals);
+    QList<VCDSignal> getSelectedSignals() const;
+
+private slots:
+    void selectAll();
+    void deselectAll();
+    void onSearchTextChanged(const QString &text);
+    void onItemClicked(QTreeWidgetItem *item, int column);
+
+private:
+    void filterTree(const QString &filter);
+    void expandAllParents(QTreeWidgetItem *item);
+    void handleMultiSelection(QTreeWidgetItem *item);
+
+    QTreeWidget *signalTree;
+    QPushButton *selectAllButton;
+    QPushButton *deselectAllButton;
+    QDialogButtonBox *buttonBox;
+    QLineEdit *searchEdit;
+    QTreeWidgetItem *lastHighlightedItem;
+    QTreeWidgetItem *lastSelectedItem;
+};
+
+#endif // SIGNALSELECTIONDIALOG_H
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
+
+#include <QMainWindow>
+#include <QTreeWidget>
+#include <QSplitter>
+#include <QToolBar>
+#include <QStatusBar>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QScrollBar>
+#include <QLabel>
+#include <QPushButton>
+#include <QHBoxLayout>
+#include <QWidget>
+#include <QListWidget>
+#include <QListWidgetItem>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QKeyEvent>
+#include "vcdparser.h"
 #include "waveformwidget.h"
+
+class SignalSelectionDialog;
+
+class MainWindow : public QMainWindow
+{
+    Q_OBJECT
+
+public:
+    MainWindow(QWidget *parent = nullptr);
+    ~MainWindow();
+
+protected:
+    void keyPressEvent(QKeyEvent *event) override;
+
+private slots:
+    void setLineThicknessThin();
+    void setLineThicknessMedium();
+    void setLineThicknessThick();
+    void openFile();
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
+    void updateTimeDisplay(int time);
+    void about();
+    void showAddSignalsDialog();
+    void removeSelectedSignals();
+    void toggleBusDisplayFormat();
+    void resetSignalColors();
+    void toggleHighlightBusses();
+    void setBusHexFormat();
+    void setBusBinaryFormat();
+    void setBusOctalFormat();
+    void setBusDecimalFormat();
+    void updateBusFormatActions();
+    void increaseSignalHeight();
+    void decreaseSignalHeight();
+
+private:
+    void updateLineThicknessActions();
+     QAction *increaseHeightAction;
+    QAction *decreaseHeightAction;
+
+
+    QMenu *lineThicknessMenu;
+    QAction *lineThinAction;
+    QAction *lineMediumAction;
+    QAction *lineThickAction;
+    // Wave menu actions
+    QMenu *waveMenu;
+    QAction *defaultColorsAction;
+    QAction *highlightBussesAction;
+    QMenu *busFormatMenu;
+    QAction *busHexAction;
+    QAction *busBinaryAction;
+    QAction *busOctalAction;
+    QAction *busDecimalAction;
+    QAction *resetColorsAction;
+    void createActions();
+    void createToolBar();
+    void createStatusBar();
+    void setupUI();
+    void loadVcdFile(const QString &filename);
+    void loadDefaultVcdFile();
+
+    // UI Components
+    WaveformWidget *waveformWidget;
+    QScrollBar *timeScrollBar;
+
+    // Toolbar Actions
+    QAction *openAction;
+    QAction *zoomInAction;
+    QAction *zoomOutAction;
+    QAction *zoomFitAction;
+    QAction *aboutAction;
+
+    // Bottom controls
+    QPushButton *addSignalsButton;
+    QPushButton *removeSignalsButton;
+
+    // Status Bar
+    QLabel *statusLabel;
+    QLabel *timeLabel;
+
+    // Data
+    VCDParser *vcdParser;
+};
+
+#endif // MAINWINDOW_H
+// file: vcdparser.h
+#ifndef VCDPARSER_H
+#define VCDPARSER_H
+
+#include <QObject>
+#include <QString>
+#include <QVector>
+#include <QMap>
+#include <QFile>
+#include <QTextStream>
+#include <QSet>
+
+struct VCDSignal {
+    QString identifier;
+    QString name;
+    QString scope;
+    int width;
+    QString type;
+
+    bool operator==(const VCDSignal& other) const {
+        return identifier == other.identifier;
+    }
+};
+
+Q_DECLARE_METATYPE(VCDSignal)
+
+struct VCDValueChange {
+    int timestamp;
+    QString value;
+};
+
+class VCDParser : public QObject
+{
+    Q_OBJECT
+
+public:
+    explicit VCDParser(QObject *parent = nullptr);
+    ~VCDParser();
+
+    bool parseFile(const QString &filename);
+    QString getError() const { return errorString; }
+
+    const QVector<VCDSignal>& getSignals() const { return vcdSignals; }
+    const QMap<QString, QVector<VCDValueChange>>& getValueChanges() const { return valueChanges; }
+    int getEndTime() const { return endTime; }
+    const QMap<QString, VCDSignal>& getIdentifierMap() const { return identifierMap; }
+
+private:
+    bool parseHeader(QTextStream &stream);
+    bool parseValueChanges(QTextStream &stream);
+    void parseScopeLine(const QString &line);
+    void parseVarLine(const QString &line);
+    void parseTimescale(const QString &line);
+
+    QString errorString;
+    QVector<VCDSignal> vcdSignals;
+    QMap<QString, VCDSignal> identifierMap;
+    QMap<QString, QVector<VCDValueChange>> valueChanges;
+    QString currentScope;
+    int endTime;
+    QString timescale;
+};
+
+#endif // VCDPARSER_H
+#ifndef WAVEFORMWIDGET_H
+#define WAVEFORMWIDGET_H
+
+#include <QWidget>
+#include <QPainter>
+#include <QScrollBar>
+#include <QWheelEvent>
+#include <QMouseEvent>
+#include <QVector>
+#include <QList>
+#include <QLabel>
+#include <QMenu>
+#include <QContextMenuEvent>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QSet>
+#include <QInputDialog>
+#include <QColorDialog>
+
+#include "vcdparser.h"
+
+// Simple signal display structure
+struct DisplaySignal
+{
+    VCDSignal signal;
+};
+
+// Space structure
+struct DisplaySpace
+{
+    QString name;
+};
+
+// Unified display item
+struct DisplayItem
+{
+    enum Type
+    {
+        Signal,
+        Space
+    };
+    Type type;
+
+    // Only one of these is valid based on type
+    DisplaySignal signal;
+    DisplaySpace space;
+
+    // Constructor for signal
+    static DisplayItem createSignal(const VCDSignal &sig)
+    {
+        DisplayItem item;
+        item.type = Signal;
+        item.signal = {sig};
+        return item;
+    }
+
+    // Constructor for space
+    static DisplayItem createSpace(const QString &name = "")
+    {
+        DisplayItem item;
+        item.type = Space;
+        item.space = {name};
+        return item;
+    }
+
+    QString getName() const
+    {
+        switch (type)
+        {
+        case Signal:
+        {
+            QString name = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+            // Remove any width information like "[3:0]" from the name
+            int bracketPos = name.indexOf('[');
+            if (bracketPos != -1)
+            {
+                name = name.left(bracketPos).trimmed();
+            }
+            return name;
+        }
+        case Space:
+            return space.name.isEmpty() ? "⏐" : "⏐ " + space.name;
+        }
+        return "";
+    }
+
+    // Helper function to get full scope path for searching
+    QString getFullPath() const
+    {
+        if (type == Signal)
+        {
+            QString fullPath = signal.signal.scope.isEmpty() ? signal.signal.name : signal.signal.scope + "." + signal.signal.name;
+            // Remove any width information for consistency
+            int bracketPos = fullPath.indexOf('[');
+            if (bracketPos != -1)
+            {
+                fullPath = fullPath.left(bracketPos).trimmed();
+            }
+            return fullPath;
+        }
+        return getName();
+    }
+
+    int getHeight() const
+    {
+        // Use reasonable default heights - these will be overridden by the actual drawing functions
+        // The actual drawing will use the configurable heights from WaveformWidget
+        switch (type)
+        {
+        case Signal:
+            return 30; // Default height for signals
+        case Space:
+            return 30; // Fixed height for spaces
+        }
+        return 30;
+    }
+
+    bool isSelectable() const { return true; }
+    bool isMovable() const { return true; }
+};
+
+class WaveformWidget : public QWidget
+{
+    Q_OBJECT
+
+public:
+    // Add these to the public section of WaveformWidget class
+    int getSignalHeight() const { return signalHeight; }
+    int getBusHeight() const { return busHeight; }
+    int getLineWidth() const { return lineWidth; }
+    void setSignalHeight(int height)
+    {
+        signalHeight = qMax(5, qMin(50, height)); // Clamp between 5 and 50
+        update();
+    }
+    void setBusHeight(int height)
+    {
+        busHeight = qMax(5, qMin(50, height)); // Clamp between 5 and 50
+        update();
+    }
+    void setLineWidth(int width)
+    {
+        lineWidth = qMax(1, qMin(5, width)); // Clamp between 1 and 5 (was 1 and 1)
+        update();
+    }
+    enum BusFormat
+    {
+        Hex,
+        Binary,
+        Octal,
+        Decimal
+    };
+
+    explicit WaveformWidget(QWidget *parent = nullptr);
+    void setVcdData(VCDParser *parser);
+    void setVisibleSignals(const QList<VCDSignal> &visibleSignals);
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
+    void removeSelectedSignals();
+    void selectAllSignals();
+    void resetSignalColors();
+    void setHighlightBusses(bool highlight);
+    void setBusDisplayFormat(BusFormat format);
+    BusFormat getBusDisplayFormat() const { return busDisplayFormat; }
+    int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
+    QList<int> getSelectedItemIndices() const { return selectedItems.values(); }
+
+    // Item management
+    int getItemCount() const { return displayItems.size(); }
+    const DisplayItem *getItem(int index) const;
+
+signals:
+    void timeChanged(int time);
+    void itemSelected(int itemIndex);
+    void contextMenuRequested(const QPoint &pos, int itemIndex);
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+
+private:
+
+    // Add these to the private section of WaveformWidget class
+    int signalHeight = 24; // Configurable signal height
+    int busHeight = 30;    // Configurable bus height
+    int lineWidth = 1;     // Configurable line width
+    // Virtual rendering optimization
+    int visibleSignalBuffer = 50;    // Number of signals to render above/below viewport
+    QList<int> visibleSignalIndices; // Indices of currently visible signals
+
+    // Helper methods for virtual rendering
+    void updateVisibleSignals();
+    QList<int> getVisibleSignalIndices() const;
+    int calculateTotalHeight() const;
+    void updateCursorTime(const QPoint &pos);
+    void drawSignalNamesColumn(QPainter &painter);
+    void drawSignalValuesColumn(QPainter &painter);
+    void drawWaveformArea(QPainter &painter);
+    void drawTimeCursor(QPainter &painter);
+    void drawGrid(QPainter &painter);
+    void drawSignals(QPainter &painter);
+    void drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos);
+    void drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos);
+    void updateScrollBar();
+    int timeToX(int time) const;
+    int xToTime(int x) const;
+    QString getSignalValueAtTime(const QString &identifier, int time) const;
+    QString getBusValueAtTime(const QString &identifier, int time) const;
+    int calculateTimeStep(int startTime, int endTime) const;
+    int getItemAtPosition(const QPoint &pos) const;
+    int getItemYPosition(int index) const;
+    void showContextMenu(const QPoint &pos, int itemIndex);
+    void addSpaceAbove(int index);
+    void addSpaceBelow(int index);
+    void renameItem(int itemIndex);
+    QString promptForName(const QString &title, const QString &defaultName = "");
+
+    // Color management
+    void changeSignalColor(int itemIndex);
+    QColor getSignalColor(const QString &identifier) const;
+
+    // Splitter handling
+    bool isOverNamesSplitter(const QPoint &pos) const;
+    bool isOverValuesSplitter(const QPoint &pos) const;
+    void updateSplitterPositions();
+
+    // Search functionality
+    QString searchText;
+    bool isSearchActive = false;
+    bool isSearchFocused = false;
+    QSet<int> searchResults;
+    void drawSearchBar(QPainter &painter);
+    void handleSearchInput(const QString &text);
+    void updateSearchResults();
+    void applySearchFilter();
+
+    // Drag and movement
+    void startDrag(int itemIndex);
+    void performDrag(int mouseY);
+    void moveItem(int itemIndex, int newIndex);
+
+    // Selection
+    void handleMultiSelection(int itemIndex, QMouseEvent *event);
+
+    // Helper methods
+    bool isSignalItem(int index) const
+    {
+        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Signal;
+    }
+    bool isSpaceItem(int index) const
+    {
+        return index >= 0 && index < displayItems.size() && displayItems[index].type == DisplayItem::Space;
+    }
+    VCDSignal getSignalFromItem(int index) const
+    {
+        return isSignalItem(index) ? displayItems[index].signal.signal : VCDSignal();
+    }
+
+    // Bus display helpers
+    QString formatBusValue(const QString &binaryValue) const;
+    bool isValidBinary(const QString &value) const;
+    QString binaryToHex(const QString &binaryValue) const;
+    QString binaryToOctal(const QString &binaryValue) const;
+    QString binaryToDecimal(const QString &binaryValue) const;
+
+    VCDParser *vcdParser;
+
+    // Layout parameters
+    int signalNamesWidth = 250;
+    int valuesColumnWidth = 120;
+    double timeScale;
+    int timeOffset;
+    int timeMarkersHeight;
+    int topMargin;
+
+    // Display items
+    QList<DisplayItem> displayItems;
+
+    // Signal colors
+    QMap<QString, QColor> signalColors;
+    bool highlightBusses = false;
+    BusFormat busDisplayFormat = Hex;
+
+    // Splitter state
+    bool draggingNamesSplitter = false;
+    bool draggingValuesSplitter = false;
+
+    // Drag state
+    bool isDragging;
+    bool isDraggingItem;
+    int dragStartX;
+    int dragStartOffset;
+    int dragItemIndex;
+    int dragStartY;
+    QPoint dragStartPos;
+
+    // Selection state
+    QSet<int> selectedItems;
+    int lastSelectedItem;
+
+    // Time cursor and values display
+    int cursorTime = 0;
+    bool showCursor = true;
+
+    QScrollBar *horizontalScrollBar;
+    QScrollBar *verticalScrollBar;
+    int verticalOffset = 0;
+};
+
+#endif // WAVEFORMWIDGET_H
+#include "SignalSelectionDialog.h"
+#include <QHeaderView>
+#include <QDebug>
+#include <QApplication>
+
+SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
+    : QDialog(parent), lastHighlightedItem(nullptr)
+{
+    setWindowTitle("Add Signals to Waveform");
+    setMinimumSize(600, 500);
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+
+    // Search bar
+    QHBoxLayout *searchLayout = new QHBoxLayout();
+    QLabel *searchLabel = new QLabel("Search:");
+    searchEdit = new QLineEdit();
+    searchEdit->setPlaceholderText("Type to search signals...");
+    searchEdit->setClearButtonEnabled(true);
+    
+    connect(searchEdit, &QLineEdit::textChanged, this, &SignalSelectionDialog::onSearchTextChanged);
+    
+    searchLayout->addWidget(searchLabel);
+    searchLayout->addWidget(searchEdit);
+    
+    // Signal tree
+    signalTree = new QTreeWidget();
+    signalTree->setHeaderLabels({"Signal", "Width", "Type", "Identifier"});
+    signalTree->setAlternatingRowColors(true);
+    signalTree->header()->setStretchLastSection(false);
+    signalTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    signalTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    signalTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    signalTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+
+     // Enable multi-selection
+    signalTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    
+    // Connect item clicked signal
+    connect(signalTree, &QTreeWidget::itemClicked, this, &SignalSelectionDialog::onItemClicked);
+
+    // Controls
+    QHBoxLayout *controlsLayout = new QHBoxLayout();
+    selectAllButton = new QPushButton("Select All");
+    deselectAllButton = new QPushButton("Deselect All");
+
+    connect(selectAllButton, &QPushButton::clicked, this, &SignalSelectionDialog::selectAll);
+    connect(deselectAllButton, &QPushButton::clicked, this, &SignalSelectionDialog::deselectAll);
+
+    controlsLayout->addWidget(selectAllButton);
+    controlsLayout->addWidget(deselectAllButton);
+    controlsLayout->addStretch();
+
+    // Buttons
+    buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+    mainLayout->addLayout(searchLayout);
+    mainLayout->addWidget(signalTree);
+    mainLayout->addLayout(controlsLayout);
+    mainLayout->addWidget(buttonBox);
+}
+
+
+void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals)
+{
+    signalTree->clear();
+    lastHighlightedItem = nullptr;
+
+    // Create a set of visible signal identifiers for quick lookup
+    QSet<QString> visibleSignalIdentifiers;
+    for (const auto& signal : visibleSignals) {
+        visibleSignalIdentifiers.insert(signal.identifier);
+    }
+
+    QMap<QString, QTreeWidgetItem*> scopeItems;
+
+    for (const auto& signal : allSignals) {
+        // Skip signals that are already visible in the waveform
+        if (visibleSignalIdentifiers.contains(signal.identifier)) {
+            continue;
+        }
+
+        QString scopePath = signal.scope;
+        if (!scopeItems.contains(scopePath)) {
+            QStringList scopeParts = scopePath.split('.');
+            QTreeWidgetItem *parent = nullptr;
+            QString currentPath;
+
+            for (const QString& part : scopeParts) {
+                if (!currentPath.isEmpty()) currentPath += ".";
+                currentPath += part;
+
+                if (!scopeItems.contains(currentPath)) {
+                    QTreeWidgetItem *item = new QTreeWidgetItem();
+                    item->setText(0, part);
+                    item->setData(0, Qt::UserRole, currentPath);
+
+                    if (parent) {
+                        parent->addChild(item);
+                    } else {
+                        signalTree->addTopLevelItem(item);
+                    }
+
+                    scopeItems[currentPath] = item;
+                    parent = item;
+                } else {
+                    parent = scopeItems[currentPath];
+                }
+            }
+        }
+
+        QTreeWidgetItem *signalItem = new QTreeWidgetItem();
+        signalItem->setText(0, signal.name);
+        signalItem->setText(1, QString::number(signal.width));
+        signalItem->setText(2, signal.type);
+        signalItem->setText(3, signal.identifier);
+        signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+        signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+        signalItem->setCheckState(0, Qt::Unchecked);
+
+        scopeItems[scopePath]->addChild(signalItem);
+    }
+
+    // Apply current search filter if any
+    if (!searchEdit->text().isEmpty()) {
+        filterTree(searchEdit->text());
+    } else {
+        signalTree->expandAll();
+    }
+}
+
+
+QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
+{
+    QList<VCDSignal> selectedSignals;
+
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it) {
+        if ((*it)->checkState(0) == Qt::Checked) {
+            QVariant data = (*it)->data(0, Qt::UserRole);
+            if (data.canConvert<VCDSignal>()) {
+                VCDSignal signal = data.value<VCDSignal>();
+                selectedSignals.append(signal);
+                qDebug() << "Selected signal:" << signal.name << "ID:" << signal.identifier;
+            }
+        }
+        ++it;
+    }
+
+    return selectedSignals;
+}
+
+void SignalSelectionDialog::selectAll()
+{
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it) {
+        QVariant data = (*it)->data(0, Qt::UserRole);
+        if (data.canConvert<VCDSignal>()) {
+            (*it)->setCheckState(0, Qt::Checked);
+        }
+        ++it;
+    }
+    lastSelectedItem = nullptr; // Reset last selection
+}
+
+void SignalSelectionDialog::deselectAll()
+{
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it) {
+        QVariant data = (*it)->data(0, Qt::UserRole);
+        if (data.canConvert<VCDSignal>()) {
+            (*it)->setCheckState(0, Qt::Unchecked);
+        }
+        ++it;
+    }
+    lastSelectedItem = nullptr; // Reset last selection
+}
+
+void SignalSelectionDialog::onSearchTextChanged(const QString &text)
+{
+    filterTree(text);
+}
+
+void SignalSelectionDialog::filterTree(const QString &filter)
+{
+    if (filter.isEmpty()) {
+        // Show all items and expand all
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it) {
+            (*it)->setHidden(false);
+            ++it;
+        }
+        signalTree->expandAll();
+        lastHighlightedItem = nullptr;
+        return;
+    }
+
+    QString filterLower = filter.toLower();
+    QTreeWidgetItemIterator it(signalTree);
+    
+    // First, hide all items
+    while (*it) {
+        (*it)->setHidden(true);
+        (*it)->setBackground(0, QBrush()); // Clear any previous highlighting
+        ++it;
+    }
+
+    // Show and highlight matching items and their parents
+    it = QTreeWidgetItemIterator(signalTree);
+    while (*it) {
+        QTreeWidgetItem *item = *it;
+        QVariant data = item->data(0, Qt::UserRole);
+        
+        if (data.canConvert<VCDSignal>()) {
+            // This is a signal item
+            VCDSignal signal = data.value<VCDSignal>();
+            QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
+            
+            if (signalPath.contains(filterLower)) {
+                // Show this signal and all its parents
+                item->setHidden(false);
+                item->setBackground(0, QColor(80, 80, 80)); // Highlight matching signals
+                
+                // Expand and show all parent items
+                expandAllParents(item);
+                
+                lastHighlightedItem = item;
+            }
+        } else {
+            // This is a scope item - check if it has any visible children
+            bool hasVisibleChildren = false;
+            for (int i = 0; i < item->childCount(); ++i) {
+                if (!item->child(i)->isHidden()) {
+                    hasVisibleChildren = true;
+                    break;
+                }
+            }
+            
+            if (hasVisibleChildren) {
+                item->setHidden(false);
+                item->setExpanded(true);
+            }
+        }
+        ++it;
+    }
+}
+
+void SignalSelectionDialog::expandAllParents(QTreeWidgetItem *item)
+{
+    QTreeWidgetItem *parent = item->parent();
+    while (parent) {
+        parent->setHidden(false);
+        parent->setExpanded(true);
+        parent = parent->parent();
+    }
+}
+
+void SignalSelectionDialog::onItemClicked(QTreeWidgetItem *item, int column)
+{
+    Q_UNUSED(column);
+    handleMultiSelection(item);
+}
+
+
+void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
+{
+    if (!item) return;
+    
+    QVariant data = item->data(0, Qt::UserRole);
+    if (!data.canConvert<VCDSignal>()) return;
+    
+    Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
+    
+    if (modifiers & Qt::ShiftModifier && lastSelectedItem) {
+        // Find all items between lastSelectedItem and current item
+        QList<QTreeWidgetItem*> allSignalItems;
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it) {
+            QVariant itData = (*it)->data(0, Qt::UserRole);
+            if (itData.canConvert<VCDSignal>()) {
+                allSignalItems.append(*it);
+            }
+            ++it;
+        }
+        
+        int startIndex = allSignalItems.indexOf(lastSelectedItem);
+        int endIndex = allSignalItems.indexOf(item);
+        
+        if (startIndex != -1 && endIndex != -1) {
+            int low = qMin(startIndex, endIndex);
+            int high = qMax(startIndex, endIndex);
+            
+            for (int i = low; i <= high; i++) {
+                allSignalItems[i]->setCheckState(0, Qt::Checked);
+            }
+        }
+    } else if (modifiers & Qt::ControlModifier) {
+        // Toggle current item
+        Qt::CheckState newState = (item->checkState(0) == Qt::Checked) ? Qt::Unchecked : Qt::Checked;
+        item->setCheckState(0, newState);
+    } else {
+        // Single selection - clear all others
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it) {
+            QVariant itData = (*it)->data(0, Qt::UserRole);
+            if (itData.canConvert<VCDSignal>()) {
+                (*it)->setCheckState(0, Qt::Unchecked);
+            }
+            ++it;
+        }
+        item->setCheckState(0, Qt::Checked);
+    }
+    
+    lastSelectedItem = item;
+}// file: main.cpp
+#include "mainwindow.h"
+#include <QApplication>
+
+int main(int argc, char *argv[])
+{
+    QApplication app(argc, argv);
+
+    // Set application properties
+    app.setApplicationName("VCD Wave Viewer");
+    app.setApplicationVersion("1.0");
+    app.setOrganizationName("VCDViewer");
+
+    MainWindow window;
+    window.show();
+
+    return app.exec();
+}
+#include "mainwindow.h"
+#include "SignalSelectionDialog.h"
+#include <QTreeWidgetItemIterator>
+#include <QFileInfo>
+#include <QMessageBox>
+#include <QSplitter>
+#include <QToolBar>
+#include <QStatusBar>
+#include <QFileDialog>
+#include <QLabel>
+#include <QApplication>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QWidget>
+#include <QDir>
+#include <QToolButton>
+#include <QKeyEvent>
+
+MainWindow::MainWindow(QWidget *parent)
+    : QMainWindow(parent), vcdParser(new VCDParser(this))
+{
+    qRegisterMetaType<VCDSignal>("VCDSignal");
+    setWindowTitle("VCD Wave Viewer");
+    setMinimumSize(1200, 800);
+
+    createActions();
+    setupUI();
+    createToolBar();
+    createStatusBar();
+
+    loadDefaultVcdFile();
+}
+
+MainWindow::~MainWindow()
+{
+}
+
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Delete) {
+        // Let the waveform widget handle deletion if it has focus
+        if (waveformWidget->hasFocus() && !waveformWidget->getSelectedItemIndices().isEmpty()) {
+            waveformWidget->removeSelectedSignals();
+            event->accept();
+        } else {
+            // Fall back to the main window's delete handling
+            removeSelectedSignals();
+            event->accept();
+        }
+    } else if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier) {
+        waveformWidget->selectAllSignals();
+        removeSignalsButton->setEnabled(true);
+        event->accept();
+    } else {
+        QMainWindow::keyPressEvent(event);
+    }
+}
+
+void MainWindow::createActions()
+{
+    openAction = new QAction("Open", this);
+    openAction->setShortcut(QKeySequence::Open);
+    connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
+
+    zoomInAction = new QAction("Zoom In", this);
+    zoomInAction->setShortcut(QKeySequence::ZoomIn);
+    connect(zoomInAction, &QAction::triggered, this, &MainWindow::zoomIn);
+
+    resetColorsAction = new QAction("Reset Colors", this);
+    connect(resetColorsAction, &QAction::triggered, this, &MainWindow::resetSignalColors);
+
+    zoomOutAction = new QAction("Zoom Out", this);
+    zoomOutAction->setShortcut(QKeySequence::ZoomOut);
+    connect(zoomOutAction, &QAction::triggered, this, &MainWindow::zoomOut);
+
+    zoomFitAction = new QAction("Zoom Fit", this);
+    connect(zoomFitAction, &QAction::triggered, this, &MainWindow::zoomFit);
+
+    aboutAction = new QAction("About", this);
+    connect(aboutAction, &QAction::triggered, this, &MainWindow::about);
+
+    // Wave menu actions
+    defaultColorsAction = new QAction("Default Colors", this);
+    connect(defaultColorsAction, &QAction::triggered, this, &MainWindow::resetSignalColors);
+
+    highlightBussesAction = new QAction("Highlight Busses", this);
+    highlightBussesAction->setCheckable(true);
+    connect(highlightBussesAction, &QAction::triggered, this, &MainWindow::toggleHighlightBusses);
+
+    // Bus format actions
+    busHexAction = new QAction("Hexadecimal", this);
+    busHexAction->setCheckable(true);
+    busHexAction->setChecked(true);
+    connect(busHexAction, &QAction::triggered, this, &MainWindow::setBusHexFormat);
+
+    busBinaryAction = new QAction("Binary", this);
+    busBinaryAction->setCheckable(true);
+    connect(busBinaryAction, &QAction::triggered, this, &MainWindow::setBusBinaryFormat);
+
+    busOctalAction = new QAction("Octal", this);
+    busOctalAction->setCheckable(true);
+    connect(busOctalAction, &QAction::triggered, this, &MainWindow::setBusOctalFormat);
+
+    busDecimalAction = new QAction("Decimal", this);
+    busDecimalAction->setCheckable(true);
+    connect(busDecimalAction, &QAction::triggered, this, &MainWindow::setBusDecimalFormat);
+
+    // Line thickness actions
+    lineThinAction = new QAction("Thin (1px)", this);
+    lineThinAction->setCheckable(true);
+    connect(lineThinAction, &QAction::triggered, this, &MainWindow::setLineThicknessThin);
+
+    lineMediumAction = new QAction("Medium (2px)", this);
+    lineMediumAction->setCheckable(true);
+    lineMediumAction->setChecked(true);
+    connect(lineMediumAction, &QAction::triggered, this, &MainWindow::setLineThicknessMedium);
+
+    lineThickAction = new QAction("Thick (3px)", this);
+    lineThickAction->setCheckable(true);
+    connect(lineThickAction, &QAction::triggered, this, &MainWindow::setLineThicknessThick);
+
+    // Signal height adjustment actions
+    increaseHeightAction = new QAction("Increase Signal Height", this);
+    increaseHeightAction->setShortcut(QKeySequence("Ctrl+Up")); // Changed from Ctrl+Shift++
+    connect(increaseHeightAction, &QAction::triggered, this, &MainWindow::increaseSignalHeight);
+
+    decreaseHeightAction = new QAction("Decrease Signal Height", this);
+    decreaseHeightAction->setShortcut(QKeySequence("Ctrl+Down")); // Changed from Ctrl+Shift+-
+    connect(decreaseHeightAction, &QAction::triggered, this, &MainWindow::decreaseSignalHeight);
+}
+
+
+void MainWindow::increaseSignalHeight()
+{
+    waveformWidget->setSignalHeight(waveformWidget->getSignalHeight() + 2);
+    waveformWidget->setBusHeight(waveformWidget->getBusHeight() + 2);
+    statusLabel->setText(QString("Signal height increased to %1").arg(waveformWidget->getSignalHeight()));
+}
+
+void MainWindow::decreaseSignalHeight()
+{
+    waveformWidget->setSignalHeight(waveformWidget->getSignalHeight() - 2);
+    waveformWidget->setBusHeight(waveformWidget->getBusHeight() - 2);
+    statusLabel->setText(QString("Signal height decreased to %1").arg(waveformWidget->getSignalHeight()));
+}
+
+void MainWindow::resetSignalColors()
+{
+    waveformWidget->resetSignalColors();
+}
+
+void MainWindow::createToolBar()
+{
+    QToolBar *toolBar = addToolBar("Main Toolbar");
+    toolBar->addAction(openAction);
+    toolBar->addSeparator();
+    
+    // Wave menu - CREATE THIS FIRST
+    waveMenu = new QMenu("Wave");
+    
+    // Signal colors submenu
+    QMenu *signalColorsMenu = new QMenu("Signal Colors");
+    signalColorsMenu->addAction(defaultColorsAction);
+    signalColorsMenu->addAction(highlightBussesAction);
+    
+    // Bus format submenu
+    busFormatMenu = new QMenu("Bus Format");
+    busFormatMenu->addAction(busHexAction);
+    busFormatMenu->addAction(busBinaryAction);
+    busFormatMenu->addAction(busOctalAction);
+    busFormatMenu->addAction(busDecimalAction);
+    
+    // Line thickness submenu
+    lineThicknessMenu = new QMenu("Line Thickness");
+    lineThicknessMenu->addAction(lineThinAction);
+    lineThicknessMenu->addAction(lineMediumAction);
+    lineThicknessMenu->addAction(lineThickAction);
+    
+    // Add signal height actions to wave menu - NOW THIS WILL WORK
+    waveMenu->addAction(increaseHeightAction);
+    waveMenu->addAction(decreaseHeightAction);
+    waveMenu->addSeparator();
+    
+    waveMenu->addMenu(signalColorsMenu);
+    waveMenu->addMenu(busFormatMenu);
+    waveMenu->addMenu(lineThicknessMenu);
+    
+    QToolButton *waveButton = new QToolButton();
+    waveButton->setMenu(waveMenu);
+    waveButton->setPopupMode(QToolButton::InstantPopup);
+    waveButton->setText("Wave");
+    toolBar->addWidget(waveButton);
+    
+    toolBar->addSeparator();
+    toolBar->addAction(zoomInAction);
+    toolBar->addAction(zoomOutAction);
+    toolBar->addAction(zoomFitAction);
+    toolBar->addSeparator();
+    toolBar->addAction(aboutAction);
+}
+
+
+void MainWindow::setLineThicknessThin()
+{
+    waveformWidget->setLineWidth(1);
+    updateLineThicknessActions();
+}
+
+void MainWindow::setLineThicknessMedium()
+{
+    waveformWidget->setLineWidth(2);
+    updateLineThicknessActions();
+}
+
+void MainWindow::setLineThicknessThick()
+{
+    waveformWidget->setLineWidth(3);
+    updateLineThicknessActions();
+}
+
+void MainWindow::updateLineThicknessActions()
+{
+    lineThinAction->setChecked(false);
+    lineMediumAction->setChecked(false);
+    lineThickAction->setChecked(false);
+    
+    int currentWidth = waveformWidget->getLineWidth();
+    if (currentWidth == 1) lineThinAction->setChecked(true);
+    else if (currentWidth == 2) lineMediumAction->setChecked(true);
+    else if (currentWidth == 3) lineThickAction->setChecked(true);
+}
+
+
+void MainWindow::createStatusBar()
+{
+    statusLabel = new QLabel("Ready");
+    statusBar()->addWidget(statusLabel);
+
+    timeLabel = new QLabel("Time: 0");
+    statusBar()->addPermanentWidget(timeLabel);
+}
+
+void MainWindow::setupUI()
+{
+    // Create central widget with waveform
+    QWidget *centralWidget = new QWidget();
+    QVBoxLayout *centralLayout = new QVBoxLayout(centralWidget);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+
+    // Create waveform widget (now includes signal names column)
+    waveformWidget = new WaveformWidget();
+    connect(waveformWidget, &WaveformWidget::timeChanged,
+            this, &MainWindow::updateTimeDisplay);
+    connect(waveformWidget, &WaveformWidget::itemSelected, this, [this](int index) {
+    // Enable/disable remove button based on selection
+    removeSignalsButton->setEnabled(index >= 0);
+});
+
+    // === BOTTOM CONTROLS ===
+    QWidget *bottomControls = new QWidget();
+    QHBoxLayout *bottomLayout = new QHBoxLayout(bottomControls);
+    bottomLayout->setContentsMargins(10, 5, 10, 5);
+
+    addSignalsButton = new QPushButton("+ Add Signals");
+    removeSignalsButton = new QPushButton("🗑️");
+
+    addSignalsButton->setStyleSheet("QPushButton { padding: 8px; font-weight: bold; background-color: #4CAF50; color: white; }");
+    removeSignalsButton->setStyleSheet("QPushButton { padding: 8px; font-weight: bold; background-color: #f44336; color: white; }");
+    removeSignalsButton->setEnabled(false);
+    removeSignalsButton->setToolTip("Remove selected signal (Delete)");
+
+    connect(addSignalsButton, &QPushButton::clicked, this, &MainWindow::showAddSignalsDialog);
+    connect(removeSignalsButton, &QPushButton::clicked, this, &MainWindow::removeSelectedSignals);
+
+    bottomLayout->addWidget(addSignalsButton);
+    bottomLayout->addWidget(removeSignalsButton);
+    bottomLayout->addStretch();
+
+    centralLayout->addWidget(waveformWidget, 1);
+    centralLayout->addWidget(bottomControls);
+
+    setCentralWidget(centralWidget);
+}
+
+void MainWindow::showAddSignalsDialog()
+{
+    if (!vcdParser) return;
+
+    SignalSelectionDialog dialog(this);
+    
+    // Get current signals using public method
+    QList<VCDSignal> currentSignals;
+    for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+        const DisplayItem* item = waveformWidget->getItem(i);
+        if (item && item->type == DisplayItem::Signal) {
+            currentSignals.append(item->signal.signal);
+        }
+    }
+    
+    dialog.setAvailableSignals(vcdParser->getSignals(), currentSignals);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
+        if (!newSignalsToAdd.isEmpty()) {
+            // Add new signals to display using public method
+            for (const auto& signal : newSignalsToAdd) {
+                // We need to add this through a public method in WaveformWidget
+                // For now, we'll use setVisibleSignals which replaces all signals
+                // In the future, we should add an addSignals method to WaveformWidget
+                currentSignals.append(signal);
+            }
+            
+            waveformWidget->setVisibleSignals(currentSignals);
+            
+            int signalCount = 0;
+            for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+                const DisplayItem* item = waveformWidget->getItem(i);
+                if (item && item->type == DisplayItem::Signal) {
+                    signalCount++;
+                }
+            }
+            
+            statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
+            removeSignalsButton->setEnabled(false); // Clear selection
+        }
+    }
+}
+// In mainwindow.cpp, update the removeSelectedSignals method:
+void MainWindow::removeSelectedSignals()
+{
+    // Check if there are any selected items in the waveform widget
+    if (!waveformWidget->getSelectedItemIndices().isEmpty()) {
+        waveformWidget->removeSelectedSignals();
+        removeSignalsButton->setEnabled(false);
+
+        // Count only signals for display (not spaces)
+        int signalCount = 0;
+        for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+            const DisplayItem* item = waveformWidget->getItem(i);
+            if (item && item->type == DisplayItem::Signal) {
+                signalCount++;
+            }
+        }
+
+        statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
+    }
+}
+
+void MainWindow::loadDefaultVcdFile()
+{
+    QString defaultPath = "F:/OWV/test.vcd";
+
+    if (QFile::exists(defaultPath)) {
+        loadVcdFile(defaultPath);
+    } else {
+        statusLabel->setText("Default VCD file not found. Use File → Open to load a VCD file.");
+        qDebug() << "Default VCD file not found:" << defaultPath;
+    }
+}
+
+void MainWindow::openFile()
+{
+    QString filename = QFileDialog::getOpenFileName(
+        this, "Open VCD File", "C:/Users/mismael/Desktop/OWV", "VCD Files (*.vcd)");
+
+    if (!filename.isEmpty()) {
+        loadVcdFile(filename);
+    }
+}
+
+void MainWindow::loadVcdFile(const QString &filename)
+{
+    statusLabel->setText("Loading VCD file...");
+    QApplication::processEvents();
+
+    if (vcdParser->parseFile(filename)) {
+        statusLabel->setText(QString("Loaded: %1 (%2 signals)").arg(QFileInfo(filename).fileName()).arg(vcdParser->getSignals().size()));
+        waveformWidget->setVcdData(vcdParser);
+    } else {
+        QMessageBox::critical(this, "Error",
+                              "Failed to parse VCD file: " + vcdParser->getError());
+        statusLabel->setText("Ready");
+    }
+}
+
+void MainWindow::zoomIn()
+{
+    waveformWidget->zoomIn();
+}
+
+void MainWindow::zoomOut()
+{
+    waveformWidget->zoomOut();
+}
+
+void MainWindow::zoomFit()
+{
+    waveformWidget->zoomFit();
+}
+
+void MainWindow::updateTimeDisplay(int time)
+{
+    timeLabel->setText(QString("Time: %1").arg(time));
+}
+
+void MainWindow::about()
+{
+    QMessageBox::about(this, "About VCD Wave Viewer",
+                       "VCD Wave Viewer\n\n"
+                       "A professional waveform viewer for Value Change Dump (VCD) files.\n"
+                       "Built with Qt C++\n\n"
+                       "Features:\n"
+                       "- Unified signal names and waveform display\n"
+                       "- Dark theme\n"
+                       "- Drag to reorder signals\n"
+                       "- Professional signal selection dialog\n"
+                       "- Mouse wheel navigation");
+}
+
+// Add the toggle method:
+void MainWindow::toggleBusDisplayFormat()
+{
+    if (sender() == busHexAction) {
+        waveformWidget->setBusDisplayFormat(WaveformWidget::Hex);
+        busHexAction->setChecked(true);
+        busBinaryAction->setChecked(false);
+    } else if (sender() == busBinaryAction) {
+        waveformWidget->setBusDisplayFormat(WaveformWidget::Binary);
+        busHexAction->setChecked(false);
+        busBinaryAction->setChecked(true);
+    }
+}
+
+void MainWindow::toggleHighlightBusses()
+{
+    waveformWidget->setHighlightBusses(highlightBussesAction->isChecked());
+}
+
+void MainWindow::setBusHexFormat()
+{
+    waveformWidget->setBusDisplayFormat(WaveformWidget::Hex);
+    updateBusFormatActions();
+}
+
+void MainWindow::setBusBinaryFormat()
+{
+    waveformWidget->setBusDisplayFormat(WaveformWidget::Binary);
+    updateBusFormatActions();
+}
+
+void MainWindow::setBusOctalFormat()
+{
+    waveformWidget->setBusDisplayFormat(WaveformWidget::Octal);
+    updateBusFormatActions();
+}
+
+void MainWindow::setBusDecimalFormat()
+{
+    waveformWidget->setBusDisplayFormat(WaveformWidget::Decimal);
+    updateBusFormatActions();
+}
+
+void MainWindow::updateBusFormatActions()
+{
+    busHexAction->setChecked(false);
+    busBinaryAction->setChecked(false);
+    busOctalAction->setChecked(false);
+    busDecimalAction->setChecked(false);
+    
+    switch(waveformWidget->getBusDisplayFormat()) {
+        case WaveformWidget::Hex: busHexAction->setChecked(true); break;
+        case WaveformWidget::Binary: busBinaryAction->setChecked(true); break;
+        case WaveformWidget::Octal: busOctalAction->setChecked(true); break;
+        case WaveformWidget::Decimal: busDecimalAction->setChecked(true); break;
+    }
+}#include "vcdparser.h"
+#include <QRegularExpression>
+#include <QDebug>
+
+VCDParser::VCDParser(QObject *parent)
+    : QObject(parent), endTime(0)
+{
+}
+
+VCDParser::~VCDParser()
+{
+}
+
+bool VCDParser::parseFile(const QString &filename)
+{
+    QFile file(filename);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        errorString = "Cannot open file: " + filename;
+        return false;
+    }
+
+    QTextStream stream(&file);
+    vcdSignals.clear();
+    valueChanges.clear();
+    identifierMap.clear();
+    currentScope.clear();
+    endTime = 0;
+
+    if (!parseHeader(stream)) {
+        return false;
+    }
+
+    if (!parseValueChanges(stream)) {
+        return false;
+    }
+
+    file.close();
+
+    qDebug() << "VCD parsing completed";
+    qDebug() << "Signals found:" << vcdSignals.size();
+    for (const auto& signal : vcdSignals) {
+        qDebug() << "Signal:" << signal.name << "Identifier:" << signal.identifier << "Scope:" << signal.scope;
+    }
+    qDebug() << "End time:" << endTime;
+
+    return true;
+}
+
+bool VCDParser::parseHeader(QTextStream &stream)
+{
+    QRegularExpression scopeRegex("^\\$scope\\s+(\\w+)\\s+(\\S+)\\s*\\$end$");
+    QRegularExpression varRegex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(\\S+.*\\S+)\\s*\\$end$");
+    QRegularExpression timescaleRegex("^\\$timescale\\s+(\\S+)\\s*\\$end$");
+
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+
+        if (line.startsWith("$date")) {
+            // Skip date section
+            while (!stream.atEnd() && !line.contains("$end")) {
+                line = stream.readLine().trimmed();
+            }
+        }
+        else if (line.startsWith("$version")) {
+            // Skip version section
+            while (!stream.atEnd() && !line.contains("$end")) {
+                line = stream.readLine().trimmed();
+            }
+        }
+        else if (line.startsWith("$comment")) {
+            // Skip comment section
+            while (!stream.atEnd() && !line.contains("$end")) {
+                line = stream.readLine().trimmed();
+            }
+        }
+        else if (line.startsWith("$timescale")) {
+            parseTimescale(line);
+        }
+        else if (line.startsWith("$scope")) {
+            parseScopeLine(line);
+        }
+        else if (line.startsWith("$var")) {
+            parseVarLine(line);
+        }
+        else if (line.startsWith("$upscope")) {
+            // Move up one scope level
+            int lastDot = currentScope.lastIndexOf('.');
+            if (lastDot != -1) {
+                currentScope = currentScope.left(lastDot);
+            } else {
+                currentScope.clear();
+            }
+        }
+        else if (line.startsWith("$enddefinitions")) {
+            // End of header
+            break;
+        }
+    }
+
+    return true;
+}
+
+void VCDParser::parseTimescale(const QString &line)
+{
+    QRegularExpression regex("^\\$timescale\\s+(\\S+)\\s*\\$end$");
+    QRegularExpressionMatch match = regex.match(line);
+    if (match.hasMatch()) {
+        timescale = match.captured(1);
+        qDebug() << "Timescale:" << timescale;
+    }
+}
+
+void VCDParser::parseScopeLine(const QString &line)
+{
+    QRegularExpression regex("^\\$scope\\s+(\\w+)\\s+(\\S+)\\s*\\$end$");
+    QRegularExpressionMatch match = regex.match(line);
+    if (match.hasMatch()) {
+        QString scopeType = match.captured(1);
+        QString scopeName = match.captured(2);
+        
+        if (!currentScope.isEmpty()) {
+            currentScope += "." + scopeName;
+        } else {
+            currentScope = scopeName;
+        }
+        // qDebug() << "Entering scope:" << currentScope;
+    }
+}
+
+void VCDParser::parseVarLine(const QString &line)
+{
+    // Improved regex to handle signal names with spaces and special characters
+    QRegularExpression regex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(.+)\\s*\\$end$");
+    QRegularExpressionMatch match = regex.match(line);
+    
+    if (match.hasMatch()) {
+        VCDSignal signal;
+        signal.type = match.captured(1);
+        signal.width = match.captured(2).toInt();
+        signal.identifier = match.captured(3);
+        
+        // The signal name might have trailing spaces before $end, so trim it
+        QString signalName = match.captured(4).trimmed();
+        signal.name = signalName;
+        signal.scope = currentScope;
+
+        vcdSignals.append(signal);
+        identifierMap[signal.identifier] = signal;
+        
+        // qDebug() << "Found signal:" << signal.name << "Identifier:" << signal.identifier 
+        //          << "Type:" << signal.type << "Width:" << signal.width << "Scope:" << signal.scope;
+    } else {
+        qDebug() << "Failed to parse var line:" << line;
+    }
+}
+
+bool VCDParser::parseValueChanges(QTextStream &stream)
+{
+    QRegularExpression timestampRegex("^#(\\d+)$");
+    // Improved regex to handle all value change formats
+    QRegularExpression valueChangeRegex("^([01xXzZrb])(\\S+)$");
+    QRegularExpression vectorValueRegex("^[bB]([01xXzZ]+)\\s+(\\S+)$");
+
+    int currentTime = 0;
+    bool inDumpvars = false;
+
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+
+        if (line.isEmpty()) continue;
+
+        // Check for timestamp
+        QRegularExpressionMatch timestampMatch = timestampRegex.match(line);
+        if (timestampMatch.hasMatch()) {
+            currentTime = timestampMatch.captured(1).toInt();
+            endTime = qMax(endTime, currentTime);
+            inDumpvars = false; // We're past the initial dumpvars section
+            continue;
+        }
+
+        // Check for $dumpvars section
+        if (line.startsWith("$dumpvars")) {
+            inDumpvars = true;
+            continue;
+        }
+
+        if (line.startsWith("$end") && inDumpvars) {
+            inDumpvars = false;
+            continue;
+        }
+
+        // Handle scalar value changes (0, 1, x, z)
+        QRegularExpressionMatch valueMatch = valueChangeRegex.match(line);
+        if (valueMatch.hasMatch()) {
+            QString value = valueMatch.captured(1).toUpper();
+            QString identifier = valueMatch.captured(2);
+
+            // Handle special case where identifier might be just a single character
+            if (identifier.length() == 1) {
+                // This is a valid single-character identifier like #, %, etc.
+                VCDValueChange change;
+                change.timestamp = currentTime;
+                change.value = value;
+                valueChanges[identifier].append(change);
+                qDebug() << "Scalar change at time" << currentTime << ":" << value << "->" << identifier;
+            }
+            continue;
+        }
+
+        // Handle vector value changes (binary)
+        QRegularExpressionMatch vectorMatch = vectorValueRegex.match(line);
+        if (vectorMatch.hasMatch()) {
+            QString value = vectorMatch.captured(1);
+            QString identifier = vectorMatch.captured(2);
+
+            VCDValueChange change;
+            change.timestamp = currentTime;
+            change.value = value;
+            valueChanges[identifier].append(change);
+            // qDebug() << "Vector change at time" << currentTime << ":" << value << "->" << identifier;
+            continue;
+        }
+
+        // Handle real value changes (if any)
+        if (line.startsWith("r")) {
+            // Real value change - format: r<value> <identifier>
+            QStringList parts = line.split(" ", Qt::SkipEmptyParts);
+            if (parts.size() >= 2) {
+                QString value = parts[0].mid(1); // Remove 'r' prefix
+                QString identifier = parts[1];
+                
+                VCDValueChange change;
+                change.timestamp = currentTime;
+                change.value = value;
+                valueChanges[identifier].append(change);
+                qDebug() << "Real change at time" << currentTime << ":" << value << "->" << identifier;
+            }
+        }
+    }
+
+    // Debug: print all signals found
+    qDebug() << "=== All parsed signals ===";
+    for (const auto& signal : vcdSignals) {
+        // qDebug() << "Signal:" << signal.name << "ID:" << signal.identifier 
+        //          << "Values:" << valueChanges[signal.identifier].size();
+    }
+
+    return true;
+}#include "waveformwidget.h"
 #include <QScrollBar>
 #include <QWheelEvent>
 #include <QMouseEvent>
@@ -681,29 +2275,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     }
 }
 
-void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor)
-{
-    int height = bottom - top;
-    
-    // Draw a prominent vertical line
-    painter.setPen(QPen(signalColor.lighter(150), 2));
-    painter.drawLine(x, top, x, bottom);
-    
-    // Add small cross markers for visibility
-    int crossSize = 2;
-    
-    // Top cross
-    painter.drawLine(x - crossSize, top + crossSize, x + crossSize, top + crossSize);
-    painter.drawLine(x, top, x, top + crossSize * 2);
-    
-    // Bottom cross  
-    painter.drawLine(x - crossSize, bottom - crossSize, x + crossSize, bottom - crossSize);
-    painter.drawLine(x, bottom - crossSize * 2, x, bottom);
-    
-    // Center dot for extra visibility
-    int centerY = top + height / 2;
-    painter.fillRect(x - 1, centerY - 1, 3, 3, signalColor);
-}
+
 
 void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
@@ -712,64 +2284,57 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         return;
 
     QColor signalColor = getSignalColor(signal.identifier);
-    
-    // Clean styling parameters
-    int busTop = yPos + 2;
-    int busBottom = yPos + busHeight - 2;
+    painter.setPen(QPen(signalColor, lineWidth));
+
+    // Hardcoded small offset - 3 pixels from top and bottom (same as 1-bit signals)
+    int busTop = yPos + 3;
+    int busBottom = yPos + busHeight - 3;
     int busMidY = yPos + busHeight / 2;
     int textY = busMidY + 4;
-    int waveformHeight = busBottom - busTop;
 
     int prevTime = 0;
     QString prevValue = getBusValueAtTime(signal.identifier, 0);
     int prevX = timeToX(prevTime);
 
-    // Draw clean bus background
-    painter.fillRect(prevX, busTop, width() - signalNamesWidth - valuesColumnWidth, waveformHeight, QColor(45, 45, 50));
+    // Draw the bus background (with hardcoded small offset)
+    painter.fillRect(prevX, busTop, width() - signalNamesWidth - valuesColumnWidth, busBottom - busTop, QColor(40, 40, 40, 128));
 
-    // Draw value regions with clear transitions
+    // Draw value regions and labels
     for (int i = 0; i < changes.size(); i++)
     {
         const auto &change = changes[i];
         int currentX = timeToX(change.timestamp);
 
-        // Clean region coloring
-        QColor regionColor = QColor(60, 60, 70);
-        
+        // Handle X and Z values with special colors for the region
+        QColor regionColor = QColor(50, 50, 50, 180);
+        QColor textColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for bus text
+
         if (prevValue.contains('x') || prevValue.contains('X'))
         {
-            regionColor = QColor(120, 60, 60);  // Dark red for X
+            regionColor = QColor(255, 0, 0, 100); // Red background for X
         }
         else if (prevValue.contains('z') || prevValue.contains('Z'))
         {
-            regionColor = QColor(120, 80, 40);  // Dark orange for Z
-        }
-        else if (!prevValue.isEmpty() && prevValue != "0")
-        {
-            // Active value - slightly brighter
-            regionColor = QColor(70, 70, 90);
+            regionColor = QColor(255, 165, 0, 100); // Orange background for Z
         }
 
-        // Draw the value region
-        painter.fillRect(prevX, busTop, currentX - prevX, waveformHeight, regionColor);
+        // Draw the value region (only in the middle portion)
+        painter.fillRect(prevX, busTop, currentX - prevX, busBottom - busTop, regionColor);
 
-        // Draw the value text with clean styling
-        if (currentX - prevX > 50) // Only draw text if region is wide enough
-        {
+        // Draw the value text centered in this region
+        if (currentX - prevX > 30)
+        { // Only draw text if region is wide enough
             QString displayValue = formatBusValue(prevValue);
             int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
             int centerX = prevX + (currentX - prevX) / 2;
 
-            // Simple text with good contrast
-            painter.setPen(QPen(Qt::white));
-            painter.drawText(centerX - textWidth/2, textY, displayValue);
+            painter.setPen(QPen(textColor));
+            painter.drawText(centerX - textWidth / 2, textY, displayValue);
+            painter.setPen(QPen(signalColor, lineWidth));
         }
 
-        // Draw clear transition line
-        if (i > 0) // Don't draw transition for first value
-        {
-            drawCleanTransition(painter, currentX, busTop, busBottom, signalColor);
-        }
+        // Draw vertical separator at value change
+        painter.drawLine(currentX, busTop, currentX, busBottom);
 
         prevTime = change.timestamp;
         prevValue = change.value;
@@ -780,32 +2345,32 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     int endX = timeToX(vcdParser->getEndTime());
     if (endX > prevX)
     {
-        QColor finalRegionColor = QColor(60, 60, 70);
+        QColor finalRegionColor = QColor(50, 50, 50, 180);
         if (prevValue.contains('x') || prevValue.contains('X'))
         {
-            finalRegionColor = QColor(120, 60, 60);
+            finalRegionColor = QColor(255, 0, 0, 100);
         }
         else if (prevValue.contains('z') || prevValue.contains('Z'))
         {
-            finalRegionColor = QColor(120, 80, 40);
+            finalRegionColor = QColor(255, 165, 0, 100);
         }
 
-        painter.fillRect(prevX, busTop, endX - prevX, waveformHeight, finalRegionColor);
+        painter.fillRect(prevX, busTop, endX - prevX, busBottom - busTop, finalRegionColor);
 
-        if (endX - prevX > 50)
+        if (endX - prevX > 30)
         {
             QString displayValue = formatBusValue(prevValue);
             int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
             int centerX = prevX + (endX - prevX) / 2;
 
-            painter.setPen(QPen(Qt::white));
-            painter.drawText(centerX - textWidth/2, textY, displayValue);
+            painter.setPen(QPen(QColor(0x01, 0xFF, 0xFF))); // Cyan #01ffff for bus text
+            painter.drawText(centerX - textWidth / 2, textY, displayValue);
         }
     }
 
-    // Draw clean bus outline
-    painter.setPen(QPen(signalColor, 2));
-    painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
+    // Draw bus outline with signal color (only around the middle portion)
+    painter.setPen(QPen(signalColor, lineWidth));
+    painter.drawRect(timeToX(0), busTop, endX - timeToX(0), busBottom - busTop);
 }
 
 
@@ -2071,4 +3636,80 @@ QList<int> WaveformWidget::getVisibleSignalIndices() const
 void WaveformWidget::updateVisibleSignals()
 {
     visibleSignalIndices = getVisibleSignalIndices();
-}
+}# File: CMakeLists.txt
+cmake_minimum_required(VERSION 3.16)
+
+project(OWV VERSION 0.1 LANGUAGES CXX)
+
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+
+set(PROJECT_SOURCES
+        main.cpp
+        mainwindow.cpp
+        mainwindow.h
+        mainwindow.ui
+)
+
+if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
+    qt_add_executable(OWV
+        MANUAL_FINALIZATION
+        ${PROJECT_SOURCES}
+        vcdparser.cpp
+        vcdparser.h
+        waveformwidget.cpp
+        waveformwidget.h
+        SignalSelectionDialog.h
+        SignalSelectionDialog.cpp
+    )
+# Define target properties for Android with Qt 6 as:
+#    set_property(TARGET OWV APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
+#                 ${CMAKE_CURRENT_SOURCE_DIR}/android)
+# For more information, see https://doc.qt.io/qt-6/qt-add-executable.html#target-creation
+else()
+    if(ANDROID)
+        add_library(OWV SHARED
+            ${PROJECT_SOURCES}
+        )
+# Define properties for Android with Qt 5 after find_package() calls as:
+#    set(ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
+    else()
+        add_executable(OWV
+            ${PROJECT_SOURCES}
+        )
+    endif()
+endif()
+
+target_link_libraries(OWV PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+
+# Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
+# If you are developing for iOS or macOS you should consider setting an
+# explicit, fixed bundle identifier manually though.
+if(${QT_VERSION} VERSION_LESS 6.1.0)
+  set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.OWV)
+endif()
+set_target_properties(OWV PROPERTIES
+    ${BUNDLE_ID_OPTION}
+    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+    MACOSX_BUNDLE TRUE
+    WIN32_EXECUTABLE TRUE
+)
+
+include(GNUInstallDirs)
+install(TARGETS OWV
+    BUNDLE DESTINATION .
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+if(QT_VERSION_MAJOR EQUAL 6)
+    qt_finalize_executable(OWV)
+endif()
