@@ -124,6 +124,9 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    void searchSignals(const QString &searchText);
+    void clearSearch();
+
     // Add these to the public section of WaveformWidget class
     int getSignalHeight() const { return signalHeight; }
     int getBusHeight() const { return busHeight; }
@@ -187,6 +190,12 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+
+
+    // Make sure these search methods exist:
+    void handleSearchInput(const QString &text);
+    void updateSearchResults();
+    void applySearchFilter();
     // Add these to the private section of WaveformWidget class
     int signalHeight = 24; // Configurable signal height
     int busHeight = 30;    // Configurable bus height
@@ -238,9 +247,7 @@ private:
     bool isSearchFocused = false;
     QSet<int> searchResults;
     void drawSearchBar(QPainter &painter);
-    void handleSearchInput(const QString &text);
-    void updateSearchResults();
-    void applySearchFilter();
+
 
     // Drag and movement
     void startDrag(int itemIndex);

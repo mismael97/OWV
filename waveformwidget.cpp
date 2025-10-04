@@ -11,35 +11,67 @@
 #include <cmath>
 
 WaveformWidget::WaveformWidget(QWidget *parent)
-    : QWidget(parent), vcdParser(nullptr), timeScale(1.0), timeOffset(0),
-      timeMarkersHeight(30), topMargin(10), verticalOffset(0), // Initialize verticalOffset
-      isDragging(false), isDraggingItem(false), dragItemIndex(-1), lastSelectedItem(-1),
-      busDisplayFormat(Hex), cursorTime(0), showCursor(true)
+    : QWidget(parent), 
+      vcdParser(nullptr), 
+      timeScale(1.0), 
+      timeOffset(0),
+      signalNamesWidth(250),
+      valuesColumnWidth(120),
+      timeMarkersHeight(30),
+      topMargin(0),
+      signalHeight(24),
+      busHeight(30),
+      lineWidth(1),
+      isDragging(false),
+      isDraggingItem(false),
+      dragItemIndex(-1),
+      dragStartX(0),
+      dragStartOffset(0),
+      dragStartY(0),
+      lastSelectedItem(-1),
+      highlightBusses(false),
+      busDisplayFormat(Hex),
+      draggingNamesSplitter(false),
+      draggingValuesSplitter(false),
+      cursorTime(0),
+      showCursor(true),
+      verticalOffset(0),
+      isSearchActive(false),
+      visibleSignalBuffer(50)
 {
+     qDebug() << "WaveformWidget constructor started";
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
 
+     qDebug() << "Creating scrollbars...";
+
     horizontalScrollBar = new QScrollBar(Qt::Horizontal, this);
-    connect(horizontalScrollBar, &QScrollBar::valueChanged, [this](int value)
-            {
+    connect(horizontalScrollBar, &QScrollBar::valueChanged, [this](int value) {
         timeOffset = value;
-        update(); });
+        update();
+    });
 
     // Add vertical scrollbar
     verticalScrollBar = new QScrollBar(Qt::Vertical, this);
-    connect(verticalScrollBar, &QScrollBar::valueChanged, [this](int value)
-            {
-    verticalOffset = value;
-    updateVisibleSignals(); // Update visible signals on scroll
-    update(); });
+    connect(verticalScrollBar, &QScrollBar::valueChanged, [this](int value) {
+        verticalOffset = value;
+        updateVisibleSignals();
+        update();
+    });
+    qDebug() << "WaveformWidget constructor completed";
 }
 
 void WaveformWidget::setVcdData(VCDParser *parser)
 {
     vcdParser = parser;
     displayItems.clear();
-    timeScale = 1.0;
-    timeOffset = 0;
+    
+    // Reset zoom to safe levels when loading new data
+    if (timeScale > 100.0 || timeScale < 0.01) {
+        timeScale = 1.0;
+        timeOffset = 0;
+    }
+    
     selectedItems.clear();
     lastSelectedItem = -1;
 
@@ -102,32 +134,80 @@ void WaveformWidget::selectAllSignals()
 
 void WaveformWidget::zoomIn()
 {
-    timeScale *= 1.2;
+    // Very conservative maximum zoom
+    if (timeScale >= 50.0) { // Reduced from 100.0
+        qDebug() << "Maximum zoom reached at 50.0";
+        return;
+    }
+    
+    double newTimeScale = timeScale * 1.2;
+    
+    if (newTimeScale > 50.0) {
+        newTimeScale = 50.0;
+    }
+    
+    double oldTimeScale = timeScale;
+    timeScale = newTimeScale;
+    
+    qDebug() << "Zoom in:" << oldTimeScale << "->" << timeScale;
+    
     updateScrollBar();
     update();
 }
 
 void WaveformWidget::zoomOut()
 {
-    timeScale /= 1.2;
-    if (timeScale < 0.1)
-        timeScale = 0.1;
+    // Very conservative minimum zoom
+    if (timeScale <= 0.1) { // Increased from 0.05
+        qDebug() << "Minimum zoom reached at 0.1";
+        return;
+    }
+    
+    double newTimeScale = timeScale / 1.2;
+    
+    if (newTimeScale < 0.1) {
+        newTimeScale = 0.1;
+    }
+    
+    double oldTimeScale = timeScale;
+    timeScale = newTimeScale;
+    
+    qDebug() << "Zoom out:" << oldTimeScale << "->" << timeScale;
+    
     updateScrollBar();
     update();
 }
 
 void WaveformWidget::zoomFit()
 {
-    if (!vcdParser || vcdParser->getEndTime() == 0)
+    if (!vcdParser || vcdParser->getEndTime() <= 0) {
+        timeScale = 1.0;
+        timeOffset = 0;
+        updateScrollBar();
+        update();
         return;
+    }
 
     int availableWidth = width() - signalNamesWidth - valuesColumnWidth - 20;
-    timeScale = static_cast<double>(availableWidth) / vcdParser->getEndTime();
+    
+    // Ensure reasonable values
+    if (availableWidth <= 10) {
+        timeScale = 1.0;
+    } else if (vcdParser->getEndTime() <= 0) {
+        timeScale = 1.0;
+    } else {
+        timeScale = static_cast<double>(availableWidth) / vcdParser->getEndTime();
+    }
+    
+    // Clamp to safe range
+    timeScale = qMax(0.001, qMin(1000.0, timeScale));
     timeOffset = 0;
+    
+    qDebug() << "Zoom fit: scale =" << timeScale << "endTime =" << vcdParser->getEndTime();
+    
     updateScrollBar();
     update();
 }
-
 void WaveformWidget::resetSignalColors()
 {
     signalColors.clear();
@@ -149,6 +229,13 @@ void WaveformWidget::setBusDisplayFormat(BusFormat format)
 void WaveformWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
+
+    // Global safety check - reset if zoom is completely unreasonable
+    if (timeScale > 1000.0 || timeScale < 0.001) {
+        qDebug() << "Global emergency: Resetting unreasonable zoom:" << timeScale;
+        timeScale = 1.0;
+        timeOffset = 0;
+    }
 
     // Update which signals are visible before painting
     updateVisibleSignals();
@@ -172,6 +259,7 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     drawTimeCursor(painter);
 }
 
+
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 {
     // Draw signal names column background
@@ -186,7 +274,6 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     painter.drawText(5, timeMarkersHeight - 8, "Signal Name");
 
     // Draw pinned search bar
-    drawSearchBar(painter);
 
     // Set up clipping to exclude pinned areas from scrolling
     painter.setClipRect(0, topMargin + timeMarkersHeight, signalNamesWidth, height() - (topMargin + timeMarkersHeight));
@@ -214,17 +301,17 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         // Only draw if this signal is in our visible set (or close to it)
         bool shouldDraw = visibleSignalIndices.contains(i);
 
-        if (shouldDraw)
+                if (shouldDraw)
         {
             // Draw background based on selection and type
             bool isSelected = selectedItems.contains(i);
-            bool isSearchMatch = searchResults.contains(i);
+            bool isSearchMatch = searchResults.contains(i); // Keep this line
 
             if (isSelected)
             {
                 painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(60, 60, 90));
             }
-            else if (isSearchActive && isSearchMatch)
+            else if (isSearchActive && isSearchMatch) // Keep this condition
             {
                 painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 80, 120, 150));
             }
@@ -246,7 +333,7 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
             {
                 painter.setPen(QPen(Qt::white));
             }
-            else if (isSearchActive && isSearchMatch)
+            else if (isSearchActive && isSearchMatch) // Keep this condition
             {
                 painter.setPen(QPen(QColor(200, 200, 255)));
             }
@@ -540,6 +627,12 @@ void WaveformWidget::drawSignals(QPainter &painter)
 
 void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
+     // Emergency check for extreme zoom
+    if (timeScale > 1000.0 || timeScale < 0.001) {
+        qDebug() << "Emergency: Skipping waveform drawing due to extreme zoom:" << timeScale;
+        return;
+    }
+    
     const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
     if (changes.isEmpty())
         return;
@@ -707,6 +800,12 @@ void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int 
 
 void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
+     // Emergency check for extreme zoom
+    if (timeScale > 1000.0 || timeScale < 0.001) {
+        qDebug() << "Emergency: Skipping bus drawing due to extreme zoom:" << timeScale;
+        return;
+    }
+    
     const auto &changes = vcdParser->getValueChanges().value(signal.identifier);
     if (changes.isEmpty())
         return;
@@ -811,27 +910,46 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
 
 void WaveformWidget::updateScrollBar()
 {
-    if (!vcdParser)
-    {
+    if (!vcdParser) {
         horizontalScrollBar->setRange(0, 0);
         verticalScrollBar->setRange(0, 0);
         return;
     }
 
-    // Horizontal scrollbar (existing code)
-    int contentWidth = timeToX(vcdParser->getEndTime());
+    // Qt's actual scrollbar maximum range
+    const int QT_MAX_SCROLLBAR_RANGE = 32767;
+
+    // Calculate viewport dimensions safely
     int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
-    horizontalScrollBar->setRange(0, qMax(0, contentWidth - viewportWidth));
+    if (viewportWidth < 10) viewportWidth = 10;
+    
+    int viewportHeight = height();
+    if (viewportHeight < 10) viewportHeight = 10;
+
+    // Horizontal scrollbar
+    int maxContentWidth = 0;
+    if (vcdParser->getEndTime() > 0 && timeScale > 0) {
+        maxContentWidth = static_cast<int>(vcdParser->getEndTime() * timeScale);
+    }
+    
+    int maxHorizontal = qMax(0, maxContentWidth - viewportWidth);
+    maxHorizontal = qMin(maxHorizontal, QT_MAX_SCROLLBAR_RANGE);
+    
+    horizontalScrollBar->setRange(0, maxHorizontal);
     horizontalScrollBar->setPageStep(viewportWidth);
     horizontalScrollBar->setSingleStep(viewportWidth / 10);
 
-    // Vertical scrollbar (new code)
+    // Vertical scrollbar
     int totalHeight = calculateTotalHeight();
-    int viewportHeight = height();
-    verticalScrollBar->setRange(0, qMax(0, totalHeight - viewportHeight));
+    int maxVertical = qMax(0, totalHeight - viewportHeight);
+    maxVertical = qMin(maxVertical, QT_MAX_SCROLLBAR_RANGE);
+    
+    verticalScrollBar->setRange(0, maxVertical);
     verticalScrollBar->setPageStep(viewportHeight);
-    verticalScrollBar->setSingleStep(30); // Step by one signal height
+    verticalScrollBar->setSingleStep(30);
 }
+
+
 
 int WaveformWidget::calculateTotalHeight() const
 {
@@ -849,12 +967,39 @@ int WaveformWidget::calculateTotalHeight() const
 
 int WaveformWidget::timeToX(int time) const
 {
-    return static_cast<int>(time * timeScale) - timeOffset;
+    // Handle invalid time
+    if (time < 0) return 0;
+    
+    // Safe calculation with bounds checking
+    double scaledTime = time * timeScale;
+    
+    // Prevent excessive values
+    if (scaledTime > 1000000.0) return 1000000;
+    if (scaledTime < -1000000.0) return -1000000;
+    
+    int result = static_cast<int>(scaledTime) - timeOffset;
+    
+    // Final bounds check
+    if (result > 1000000) return 1000000;
+    if (result < -1000000) return -1000000;
+    
+    return result;
 }
+
 
 int WaveformWidget::xToTime(int x) const
 {
-    return static_cast<int>((x + timeOffset) / timeScale);
+    if (timeScale <= 0.0001) // Prevent division by very small numbers
+        return 0;
+    
+    // Use 64-bit to prevent overflow
+    qint64 result = (static_cast<qint64>(x) + timeOffset) / timeScale;
+    
+    // Clamp to safe integer range
+    if (result > INT_MAX) return INT_MAX;
+    if (result < 0) return 0; // Time shouldn't be negative
+    
+    return static_cast<int>(result);
 }
 
 QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time) const
@@ -1057,19 +1202,6 @@ void WaveformWidget::moveItem(int itemIndex, int newIndex)
 void WaveformWidget::mousePressEvent(QMouseEvent *event)
 {
     // Check if click is in search bar area (pinned)
-    QPoint pos = event->pos();
-    bool inSearchBar = (pos.y() >= timeMarkersHeight &&
-                        pos.y() <= timeMarkersHeight + 25 &&
-                        pos.x() < signalNamesWidth);
-
-    if (event->button() == Qt::LeftButton && inSearchBar)
-    {
-        // Focus search bar on click
-        isSearchFocused = true;
-        update();
-        event->accept();
-        return;
-    }
 
     if (event->button() == Qt::LeftButton)
     {
@@ -1161,12 +1293,6 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
             }
         }
 
-        // Lose search focus when clicking outside search bar
-        if (isSearchFocused && !inSearchBar)
-        {
-            isSearchFocused = false;
-            update();
-        }
     }
 }
 
@@ -1384,6 +1510,13 @@ void WaveformWidget::wheelEvent(QWheelEvent *event)
 
 void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
 {
+    // If we're at an extreme zoom level, reset to reasonable zoom first
+    if (timeScale > 100.0 || timeScale < 0.01) {
+        qDebug() << "Resetting extreme zoom level before adding signals:" << timeScale;
+        timeScale = 1.0;
+        timeOffset = 0;
+    }
+    
     displayItems.clear();
     for (const auto &signal : visibleSignals)
     {
@@ -1391,7 +1524,13 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     }
     selectedItems.clear();
     lastSelectedItem = -1;
-    updateVisibleSignals(); // Update visible signals when signals change
+    
+    // Auto-zoom to fit after adding signals
+    if (!visibleSignals.isEmpty()) {
+        zoomFit();
+    }
+    
+    updateVisibleSignals();
     update();
     emit itemSelected(-1);
 }
@@ -1405,23 +1544,29 @@ void WaveformWidget::contextMenuEvent(QContextMenuEvent *event)
 void WaveformWidget::resizeEvent(QResizeEvent *event)
 {
     Q_UNUSED(event)
+    
+    // Ensure minimum dimensions
+    if (width() < 100 || height() < 100) {
+        qDebug() << "Warning: Very small widget size" << width() << "x" << height();
+    }
+    
     updateScrollBar();
 
-    // Position the scrollbars
+    // Position the scrollbars safely
     int scrollbarSize = 20;
-    int bottomRightCornerWidth = width() - signalNamesWidth - valuesColumnWidth;
+    int bottomRightCornerWidth = qMax(0, width() - signalNamesWidth - valuesColumnWidth);
 
     horizontalScrollBar->setGeometry(
         signalNamesWidth + valuesColumnWidth,
-        height() - scrollbarSize,
+        qMax(0, height() - scrollbarSize),
         bottomRightCornerWidth,
         scrollbarSize);
 
     verticalScrollBar->setGeometry(
-        width() - scrollbarSize,
+        qMax(0, width() - scrollbarSize),
         0,
         scrollbarSize,
-        height() - scrollbarSize);
+        qMax(0, height() - scrollbarSize));
 }
 
 int WaveformWidget::getItemAtPosition(const QPoint &pos) const
@@ -1952,82 +2097,7 @@ void WaveformWidget::drawSearchBar(QPainter &painter)
     }
 
     // Update top margin to account for search bar
-    topMargin = searchBarHeight;
-}
-
-void WaveformWidget::handleSearchInput(const QString &text)
-{
-    searchText = text;
-    isSearchActive = !searchText.isEmpty();
-    isSearchFocused = true; // Set focus when typing
-    updateSearchResults();
-    update();
-}
-
-void WaveformWidget::updateSearchResults()
-{
-    searchResults.clear();
-
-    if (!isSearchActive || searchText.isEmpty())
-    {
-        // If no search, show all signals
-        for (int i = 0; i < displayItems.size(); i++)
-        {
-            if (displayItems[i].type == DisplayItem::Signal)
-            {
-                searchResults.insert(i);
-            }
-        }
-        // Clear focus when search is completely cleared
-        if (searchText.isEmpty())
-        {
-            isSearchFocused = false;
-        }
-    }
-    else
-    {
-        // Filter signals based on search text
-        QString searchLower = searchText.toLower();
-        for (int i = 0; i < displayItems.size(); i++)
-        {
-            if (displayItems[i].type == DisplayItem::Signal)
-            {
-                QString signalName = displayItems[i].getFullPath().toLower();
-                if (signalName.contains(searchLower))
-                {
-                    searchResults.insert(i);
-                }
-            }
-        }
-    }
-
-    qDebug() << "Search results:" << searchResults;
-    applySearchFilter();
-}
-
-void WaveformWidget::applySearchFilter()
-{
-    if (isSearchActive)
-    {
-        // Only select search results, don't filter them out
-        selectedItems = searchResults;
-        if (!selectedItems.isEmpty())
-        {
-            lastSelectedItem = *selectedItems.begin();
-        }
-        else
-        {
-            lastSelectedItem = -1;
-        }
-    }
-    else
-    {
-        // Clear selection when search is inactive
-        selectedItems.clear();
-        lastSelectedItem = -1;
-    }
-    update();
-    emit itemSelected(lastSelectedItem);
+    // topMargin = searchBarHeight;
 }
 
 // Add this function to calculate which signals are visible
@@ -2071,4 +2141,83 @@ QList<int> WaveformWidget::getVisibleSignalIndices() const
 void WaveformWidget::updateVisibleSignals()
 {
     visibleSignalIndices = getVisibleSignalIndices();
+}
+
+void WaveformWidget::searchSignals(const QString &searchText)
+{
+    handleSearchInput(searchText);
+}
+
+void WaveformWidget::clearSearch()
+{
+    handleSearchInput("");
+}
+
+void WaveformWidget::handleSearchInput(const QString &text)
+{
+    searchText = text;
+    isSearchActive = !searchText.isEmpty();
+    updateSearchResults();
+    update();
+}
+
+void WaveformWidget::updateSearchResults()
+{
+    searchResults.clear();
+
+    if (!isSearchActive || searchText.isEmpty())
+    {
+        // If no search, show all signals
+        for (int i = 0; i < displayItems.size(); i++)
+        {
+            if (displayItems[i].type == DisplayItem::Signal)
+            {
+                searchResults.insert(i);
+            }
+        }
+    }
+    else
+    {
+        // Filter signals based on search text
+        QString searchLower = searchText.toLower();
+        for (int i = 0; i < displayItems.size(); i++)
+        {
+            if (displayItems[i].type == DisplayItem::Signal)
+            {
+                QString signalName = displayItems[i].getFullPath().toLower();
+                if (signalName.contains(searchLower))
+                {
+                    searchResults.insert(i);
+                }
+            }
+        }
+    }
+
+    // qDebug() << "Search results:" << searchResults;
+    applySearchFilter();
+}
+
+void WaveformWidget::applySearchFilter()
+{
+    if (isSearchActive)
+    {
+        // Only select search results, don't filter them out
+        selectedItems = searchResults;
+        if (!selectedItems.isEmpty())
+        {
+            lastSelectedItem = *selectedItems.begin();
+        }
+        else
+        {
+            lastSelectedItem = -1;
+        }
+    }
+    else
+    {
+        // Clear selection when search is inactive
+        selectedItems.clear();
+        lastSelectedItem = -1;
+    }
+    update();
+    emit itemSelected(lastSelectedItem);
 }

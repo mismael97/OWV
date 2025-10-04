@@ -101,10 +101,14 @@ private slots:
     void decreaseSignalHeight();
 
 private:
-    void updateLineThicknessActions();
-     QAction *increaseHeightAction;
-    QAction *decreaseHeightAction;
+    void createToolbarBelowMenu(); // Add this line
 
+    // Add these to private section
+    QToolBar *mainToolBar;
+    QLineEdit *searchField;
+    void updateLineThicknessActions();
+    QAction *increaseHeightAction;
+    QAction *decreaseHeightAction;
 
     QMenu *lineThicknessMenu;
     QAction *lineThinAction;
@@ -404,7 +408,6 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
-
     // Add these to the private section of WaveformWidget class
     int signalHeight = 24; // Configurable signal height
     int busHeight = 30;    // Configurable bus height
@@ -439,6 +442,7 @@ private:
     void addSpaceBelow(int index);
     void renameItem(int itemIndex);
     QString promptForName(const QString &title, const QString &defaultName = "");
+    void drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor);
 
     // Color management
     void changeSignalColor(int itemIndex);
@@ -1118,6 +1122,11 @@ void MainWindow::setupUI()
     centralLayout->setContentsMargins(0, 0, 0, 0);
     centralLayout->setSpacing(0);
 
+    createActions();
+    createToolBar();
+
+     createToolbarBelowMenu();
+
     // Create waveform widget (now includes signal names column)
     waveformWidget = new WaveformWidget();
     connect(waveformWidget, &WaveformWidget::timeChanged,
@@ -1344,6 +1353,35 @@ void MainWindow::updateBusFormatActions()
         case WaveformWidget::Octal: busOctalAction->setChecked(true); break;
         case WaveformWidget::Decimal: busDecimalAction->setChecked(true); break;
     }
+}
+
+void MainWindow::createToolbarBelowMenu()
+{
+    // Create toolbar that appears below the menu bar
+    mainToolBar = addToolBar("Main Toolbar");
+    mainToolBar->setMovable(false);
+    mainToolBar->setIconSize(QSize(16, 16));
+
+    // Search field
+    QLabel *searchLabel = new QLabel("Search:");
+    searchField = new QLineEdit();
+    searchField->setPlaceholderText("Search signals...");
+    searchField->setMaximumWidth(200);
+    searchField->setClearButtonEnabled(true);
+    
+    // Add widgets to toolbar
+    mainToolBar->addWidget(searchLabel);
+    mainToolBar->addWidget(searchField);
+    mainToolBar->addSeparator();
+    
+    // Zoom label (we'll add buttons later)
+    mainToolBar->addWidget(new QLabel("Zoom: "));
+    
+    // Add some spacing and stretch
+    mainToolBar->addSeparator();
+    QWidget *spacer = new QWidget();
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    mainToolBar->addWidget(spacer);
 }#include "vcdparser.h"
 #include <QRegularExpression>
 #include <QDebug>
@@ -1696,27 +1734,47 @@ void WaveformWidget::selectAllSignals()
 
 void WaveformWidget::zoomIn()
 {
-    timeScale *= 1.2;
+    double newTimeScale = timeScale * 1.2;
+    
+    // Prevent excessive zoom that could cause crashes
+    if (newTimeScale > 500.0) {
+        newTimeScale = 500.0;
+    }
+    
+    timeScale = newTimeScale;
     updateScrollBar();
     update();
 }
 
+
 void WaveformWidget::zoomOut()
 {
-    timeScale /= 1.2;
-    if (timeScale < 0.1)
-        timeScale = 0.1;
+    double newTimeScale = timeScale / 1.2;
+    
+    // Prevent zooming out too far
+    if (newTimeScale < 0.01) {
+        newTimeScale = 0.01;
+    }
+    
+    timeScale = newTimeScale;
     updateScrollBar();
     update();
 }
 
 void WaveformWidget::zoomFit()
 {
-    if (!vcdParser || vcdParser->getEndTime() == 0)
+    if (!vcdParser || vcdParser->getEndTime() <= 0)
         return;
 
     int availableWidth = width() - signalNamesWidth - valuesColumnWidth - 20;
-    timeScale = static_cast<double>(availableWidth) / vcdParser->getEndTime();
+    
+    // Prevent division by zero
+    if (availableWidth <= 0 || vcdParser->getEndTime() <= 0) {
+        timeScale = 1.0;
+    } else {
+        timeScale = static_cast<double>(availableWidth) / vcdParser->getEndTime();
+    }
+    
     timeOffset = 0;
     updateScrollBar();
     update();
@@ -2275,7 +2333,29 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     }
 }
 
-
+void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor)
+{
+    int height = bottom - top;
+    
+    // Draw a prominent vertical line
+    painter.setPen(QPen(signalColor.lighter(150), 2));
+    painter.drawLine(x, top, x, bottom);
+    
+    // Add small cross markers for visibility
+    int crossSize = 2;
+    
+    // Top cross
+    painter.drawLine(x - crossSize, top + crossSize, x + crossSize, top + crossSize);
+    painter.drawLine(x, top, x, top + crossSize * 2);
+    
+    // Bottom cross  
+    painter.drawLine(x - crossSize, bottom - crossSize, x + crossSize, bottom - crossSize);
+    painter.drawLine(x, bottom - crossSize * 2, x, bottom);
+    
+    // Center dot for extra visibility
+    int centerY = top + height / 2;
+    painter.fillRect(x - 1, centerY - 1, 3, 3, signalColor);
+}
 
 void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
@@ -2284,57 +2364,64 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         return;
 
     QColor signalColor = getSignalColor(signal.identifier);
-    painter.setPen(QPen(signalColor, lineWidth));
-
-    // Hardcoded small offset - 3 pixels from top and bottom (same as 1-bit signals)
-    int busTop = yPos + 3;
-    int busBottom = yPos + busHeight - 3;
+    
+    // Clean styling parameters
+    int busTop = yPos + 2;
+    int busBottom = yPos + busHeight - 2;
     int busMidY = yPos + busHeight / 2;
     int textY = busMidY + 4;
+    int waveformHeight = busBottom - busTop;
 
     int prevTime = 0;
     QString prevValue = getBusValueAtTime(signal.identifier, 0);
     int prevX = timeToX(prevTime);
 
-    // Draw the bus background (with hardcoded small offset)
-    painter.fillRect(prevX, busTop, width() - signalNamesWidth - valuesColumnWidth, busBottom - busTop, QColor(40, 40, 40, 128));
+    // Draw clean bus background
+    painter.fillRect(prevX, busTop, width() - signalNamesWidth - valuesColumnWidth, waveformHeight, QColor(45, 45, 50));
 
-    // Draw value regions and labels
+    // Draw value regions with clear transitions
     for (int i = 0; i < changes.size(); i++)
     {
         const auto &change = changes[i];
         int currentX = timeToX(change.timestamp);
 
-        // Handle X and Z values with special colors for the region
-        QColor regionColor = QColor(50, 50, 50, 180);
-        QColor textColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for bus text
-
+        // Clean region coloring
+        QColor regionColor = QColor(60, 60, 70);
+        
         if (prevValue.contains('x') || prevValue.contains('X'))
         {
-            regionColor = QColor(255, 0, 0, 100); // Red background for X
+            regionColor = QColor(120, 60, 60);  // Dark red for X
         }
         else if (prevValue.contains('z') || prevValue.contains('Z'))
         {
-            regionColor = QColor(255, 165, 0, 100); // Orange background for Z
+            regionColor = QColor(120, 80, 40);  // Dark orange for Z
+        }
+        else if (!prevValue.isEmpty() && prevValue != "0")
+        {
+            // Active value - slightly brighter
+            regionColor = QColor(70, 70, 90);
         }
 
-        // Draw the value region (only in the middle portion)
-        painter.fillRect(prevX, busTop, currentX - prevX, busBottom - busTop, regionColor);
+        // Draw the value region
+        painter.fillRect(prevX, busTop, currentX - prevX, waveformHeight, regionColor);
 
-        // Draw the value text centered in this region
-        if (currentX - prevX > 30)
-        { // Only draw text if region is wide enough
+        // Draw the value text with clean styling
+        if (currentX - prevX > 50) // Only draw text if region is wide enough
+        {
             QString displayValue = formatBusValue(prevValue);
             int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
             int centerX = prevX + (currentX - prevX) / 2;
 
-            painter.setPen(QPen(textColor));
-            painter.drawText(centerX - textWidth / 2, textY, displayValue);
-            painter.setPen(QPen(signalColor, lineWidth));
+            // Simple text with good contrast
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(centerX - textWidth/2, textY, displayValue);
         }
 
-        // Draw vertical separator at value change
-        painter.drawLine(currentX, busTop, currentX, busBottom);
+        // Draw clear transition line
+        if (i > 0) // Don't draw transition for first value
+        {
+            drawCleanTransition(painter, currentX, busTop, busBottom, signalColor);
+        }
 
         prevTime = change.timestamp;
         prevValue = change.value;
@@ -2345,32 +2432,32 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     int endX = timeToX(vcdParser->getEndTime());
     if (endX > prevX)
     {
-        QColor finalRegionColor = QColor(50, 50, 50, 180);
+        QColor finalRegionColor = QColor(60, 60, 70);
         if (prevValue.contains('x') || prevValue.contains('X'))
         {
-            finalRegionColor = QColor(255, 0, 0, 100);
+            finalRegionColor = QColor(120, 60, 60);
         }
         else if (prevValue.contains('z') || prevValue.contains('Z'))
         {
-            finalRegionColor = QColor(255, 165, 0, 100);
+            finalRegionColor = QColor(120, 80, 40);
         }
 
-        painter.fillRect(prevX, busTop, endX - prevX, busBottom - busTop, finalRegionColor);
+        painter.fillRect(prevX, busTop, endX - prevX, waveformHeight, finalRegionColor);
 
-        if (endX - prevX > 30)
+        if (endX - prevX > 50)
         {
             QString displayValue = formatBusValue(prevValue);
             int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
             int centerX = prevX + (endX - prevX) / 2;
 
-            painter.setPen(QPen(QColor(0x01, 0xFF, 0xFF))); // Cyan #01ffff for bus text
-            painter.drawText(centerX - textWidth / 2, textY, displayValue);
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(centerX - textWidth/2, textY, displayValue);
         }
     }
 
-    // Draw bus outline with signal color (only around the middle portion)
-    painter.setPen(QPen(signalColor, lineWidth));
-    painter.drawRect(timeToX(0), busTop, endX - timeToX(0), busBottom - busTop);
+    // Draw clean bus outline
+    painter.setPen(QPen(signalColor, 2));
+    painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
 
 
@@ -3636,7 +3723,9 @@ QList<int> WaveformWidget::getVisibleSignalIndices() const
 void WaveformWidget::updateVisibleSignals()
 {
     visibleSignalIndices = getVisibleSignalIndices();
-}# File: CMakeLists.txt
+}
+
+# File: CMakeLists.txt
 cmake_minimum_required(VERSION 3.16)
 
 project(OWV VERSION 0.1 LANGUAGES CXX)

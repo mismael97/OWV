@@ -58,10 +58,11 @@ private slots:
     void decreaseSignalHeight();
 
 private:
-    void updateLineThicknessActions();
-     QAction *increaseHeightAction;
-    QAction *decreaseHeightAction;
+    void createToolbarBelowMenu(); // Add this line
 
+    void updateLineThicknessActions();
+    QAction *increaseHeightAction;
+    QAction *decreaseHeightAction;
 
     QMenu *lineThicknessMenu;
     QAction *lineThinAction;
@@ -83,6 +84,13 @@ private:
     void setupUI();
     void loadVcdFile(const QString &filename);
     void loadDefaultVcdFile();
+
+    void createMenuBar();     // Renamed from createToolBar()
+    void createMainToolbar(); // Renamed from createToolbarBelowMenu()
+
+    // Add these to private section
+    QToolBar *mainToolBar;
+    QLineEdit *searchField;
 
     // UI Components
     WaveformWidget *waveformWidget;

@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QToolButton>
 #include <QKeyEvent>
+#include <QMenuBar>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), vcdParser(new VCDParser(this))
@@ -26,7 +27,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     createActions();
     setupUI();
-    createToolBar();
+    createMenuBar();
+    createMainToolbar();
     createStatusBar();
 
     loadDefaultVcdFile();
@@ -122,12 +124,112 @@ void MainWindow::createActions()
 
     // Signal height adjustment actions
     increaseHeightAction = new QAction("Increase Signal Height", this);
-    increaseHeightAction->setShortcut(QKeySequence("Ctrl+Up")); // Changed from Ctrl+Shift++
+    increaseHeightAction->setShortcut(QKeySequence("Ctrl+Up"));
     connect(increaseHeightAction, &QAction::triggered, this, &MainWindow::increaseSignalHeight);
 
     decreaseHeightAction = new QAction("Decrease Signal Height", this);
-    decreaseHeightAction->setShortcut(QKeySequence("Ctrl+Down")); // Changed from Ctrl+Shift+-
+    decreaseHeightAction->setShortcut(QKeySequence("Ctrl+Down"));
     connect(decreaseHeightAction, &QAction::triggered, this, &MainWindow::decreaseSignalHeight);
+}
+
+void MainWindow::createMenuBar()
+{
+    // Create proper menu bar
+    QMenuBar *menuBar = this->menuBar();
+    
+    // File menu
+    QMenu *fileMenu = menuBar->addMenu("File");
+    fileMenu->addAction(openAction);
+    
+    // Edit menu (empty for now)
+    QMenu *editMenu = menuBar->addMenu("Edit");
+    
+    // View menu
+    QMenu *viewMenu = menuBar->addMenu("View");
+    viewMenu->addAction(zoomInAction);
+    viewMenu->addAction(zoomOutAction);
+    viewMenu->addAction(zoomFitAction);
+    
+    // Workspace menu (empty for now)
+    QMenu *workspaceMenu = menuBar->addMenu("Workspace");
+    
+    // Wave menu with submenus
+    QMenu *waveMenu = menuBar->addMenu("Wave");
+    waveMenu->addAction(increaseHeightAction);
+    waveMenu->addAction(decreaseHeightAction);
+    waveMenu->addSeparator();
+
+    // Help menu
+    QMenu *helpMenu = menuBar->addMenu("Help");
+    helpMenu->addAction(aboutAction);
+    
+    // Signal colors submenu
+    QMenu *signalColorsMenu = waveMenu->addMenu("Signal Colors");
+    signalColorsMenu->addAction(defaultColorsAction);
+    signalColorsMenu->addAction(highlightBussesAction);
+    
+    // Bus format submenu
+    busFormatMenu = waveMenu->addMenu("Bus Format");
+    busFormatMenu->addAction(busHexAction);
+    busFormatMenu->addAction(busBinaryAction);
+    busFormatMenu->addAction(busOctalAction);
+    busFormatMenu->addAction(busDecimalAction);
+    
+    // Line thickness submenu
+    lineThicknessMenu = waveMenu->addMenu("Line Thickness");
+    lineThicknessMenu->addAction(lineThinAction);
+    lineThicknessMenu->addAction(lineMediumAction);
+    lineThicknessMenu->addAction(lineThickAction);
+}
+
+void MainWindow::createMainToolbar()
+{
+    // Create main toolbar that appears below the menu bar
+    mainToolBar = addToolBar("Main Toolbar");
+    mainToolBar->setObjectName("MainToolbar");
+    mainToolBar->setMovable(false);
+    mainToolBar->setIconSize(QSize(16, 16));
+
+    // Search field
+    QLabel *searchLabel = new QLabel("Search:");
+    searchField = new QLineEdit();
+    searchField->setPlaceholderText("Search signals...");
+    searchField->setMaximumWidth(200);
+    searchField->setClearButtonEnabled(true);
+    
+    // Connect search field to waveform widget search functionality
+    connect(searchField, &QLineEdit::textChanged, this, [this](const QString &text) {
+        waveformWidget->searchSignals(text);
+    });
+
+    // Zoom controls
+    QAction *zoomInToolbarAction = new QAction("🔍+", this);
+    zoomInToolbarAction->setToolTip("Zoom In");
+    connect(zoomInToolbarAction, &QAction::triggered, this, &MainWindow::zoomIn);
+
+    QAction *zoomOutToolbarAction = new QAction("🔍-", this);
+    zoomOutToolbarAction->setToolTip("Zoom Out");
+    connect(zoomOutToolbarAction, &QAction::triggered, this, &MainWindow::zoomOut);
+
+    QAction *zoomFitToolbarAction = new QAction("⤢ Fit", this);
+    zoomFitToolbarAction->setToolTip("Zoom to Fit");
+    connect(zoomFitToolbarAction, &QAction::triggered, this, &MainWindow::zoomFit);
+
+    // Add widgets to toolbar
+    mainToolBar->addWidget(searchLabel);
+    mainToolBar->addWidget(searchField);
+    mainToolBar->addSeparator();
+    
+    // Zoom controls
+    mainToolBar->addAction(zoomInToolbarAction);
+    mainToolBar->addAction(zoomOutToolbarAction);
+    mainToolBar->addAction(zoomFitToolbarAction);
+    
+    // Add some spacing and stretch
+    mainToolBar->addSeparator();
+    QWidget *spacer = new QWidget();
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    mainToolBar->addWidget(spacer);
 }
 
 
@@ -149,57 +251,6 @@ void MainWindow::resetSignalColors()
 {
     waveformWidget->resetSignalColors();
 }
-
-void MainWindow::createToolBar()
-{
-    QToolBar *toolBar = addToolBar("Main Toolbar");
-    toolBar->addAction(openAction);
-    toolBar->addSeparator();
-    
-    // Wave menu - CREATE THIS FIRST
-    waveMenu = new QMenu("Wave");
-    
-    // Signal colors submenu
-    QMenu *signalColorsMenu = new QMenu("Signal Colors");
-    signalColorsMenu->addAction(defaultColorsAction);
-    signalColorsMenu->addAction(highlightBussesAction);
-    
-    // Bus format submenu
-    busFormatMenu = new QMenu("Bus Format");
-    busFormatMenu->addAction(busHexAction);
-    busFormatMenu->addAction(busBinaryAction);
-    busFormatMenu->addAction(busOctalAction);
-    busFormatMenu->addAction(busDecimalAction);
-    
-    // Line thickness submenu
-    lineThicknessMenu = new QMenu("Line Thickness");
-    lineThicknessMenu->addAction(lineThinAction);
-    lineThicknessMenu->addAction(lineMediumAction);
-    lineThicknessMenu->addAction(lineThickAction);
-    
-    // Add signal height actions to wave menu - NOW THIS WILL WORK
-    waveMenu->addAction(increaseHeightAction);
-    waveMenu->addAction(decreaseHeightAction);
-    waveMenu->addSeparator();
-    
-    waveMenu->addMenu(signalColorsMenu);
-    waveMenu->addMenu(busFormatMenu);
-    waveMenu->addMenu(lineThicknessMenu);
-    
-    QToolButton *waveButton = new QToolButton();
-    waveButton->setMenu(waveMenu);
-    waveButton->setPopupMode(QToolButton::InstantPopup);
-    waveButton->setText("Wave");
-    toolBar->addWidget(waveButton);
-    
-    toolBar->addSeparator();
-    toolBar->addAction(zoomInAction);
-    toolBar->addAction(zoomOutAction);
-    toolBar->addAction(zoomFitAction);
-    toolBar->addSeparator();
-    toolBar->addAction(aboutAction);
-}
-
 
 void MainWindow::setLineThicknessThin()
 {
@@ -231,7 +282,6 @@ void MainWindow::updateLineThicknessActions()
     else if (currentWidth == 3) lineThickAction->setChecked(true);
 }
 
-
 void MainWindow::createStatusBar()
 {
     statusLabel = new QLabel("Ready");
@@ -249,14 +299,14 @@ void MainWindow::setupUI()
     centralLayout->setContentsMargins(0, 0, 0, 0);
     centralLayout->setSpacing(0);
 
-    // Create waveform widget (now includes signal names column)
+    // Create waveform widget
     waveformWidget = new WaveformWidget();
     connect(waveformWidget, &WaveformWidget::timeChanged,
             this, &MainWindow::updateTimeDisplay);
     connect(waveformWidget, &WaveformWidget::itemSelected, this, [this](int index) {
-    // Enable/disable remove button based on selection
-    removeSignalsButton->setEnabled(index >= 0);
-});
+        // Enable/disable remove button based on selection
+        removeSignalsButton->setEnabled(index >= 0);
+    });
 
     // === BOTTOM CONTROLS ===
     QWidget *bottomControls = new QWidget();
@@ -306,9 +356,6 @@ void MainWindow::showAddSignalsDialog()
         if (!newSignalsToAdd.isEmpty()) {
             // Add new signals to display using public method
             for (const auto& signal : newSignalsToAdd) {
-                // We need to add this through a public method in WaveformWidget
-                // For now, we'll use setVisibleSignals which replaces all signals
-                // In the future, we should add an addSignals method to WaveformWidget
                 currentSignals.append(signal);
             }
             
@@ -327,7 +374,7 @@ void MainWindow::showAddSignalsDialog()
         }
     }
 }
-// In mainwindow.cpp, update the removeSelectedSignals method:
+
 void MainWindow::removeSelectedSignals()
 {
     // Check if there are any selected items in the waveform widget
@@ -419,7 +466,6 @@ void MainWindow::about()
                        "- Mouse wheel navigation");
 }
 
-// Add the toggle method:
 void MainWindow::toggleBusDisplayFormat()
 {
     if (sender() == busHexAction) {
