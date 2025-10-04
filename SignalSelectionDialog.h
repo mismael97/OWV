@@ -32,6 +32,9 @@ private slots:
     void onItemClicked(QTreeWidgetItem *item, int column);
 
 private:
+    QVector<VCDSignal> allSignals;
+    QSet<QString> visibleSignalIdentifiers; // CHANGE: store fullNames instead of identifiers
+    QSet<QString> selectedSignals;          // CHANGE: store fullNames instead of identifiers
     void buildScopeStructure();
     void populateTopLevelScopes();
     void populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem);
@@ -50,9 +53,6 @@ private:
     QLabel *statusLabel;
 
     // Data storage
-    QVector<VCDSignal> allSignals;
-    QSet<QString> visibleSignalIdentifiers;
-    QSet<QString> selectedSignals;
 
     // Scope structure: scopePath -> list of signals in that scope
     QMap<QString, QVector<VCDSignal>> scopeSignals;

@@ -624,7 +624,7 @@ void WaveformWidget::drawSignals(QPainter &painter)
 void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
     // Use lazy loading to get value changes
-    const auto changes = vcdParser->getValueChangesForSignal(signal.identifier);
+    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName); // CHANGE: use fullNa
     if (changes.isEmpty())
         return;
 
@@ -799,7 +799,7 @@ void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int 
 void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
     // Use lazy loading to get value changes
-    const auto changes = vcdParser->getValueChangesForSignal(signal.identifier);
+    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName); 
     if (changes.isEmpty())
         return;
 
@@ -1019,10 +1019,10 @@ int WaveformWidget::xToTime(int x) const
     return static_cast<int>(result);
 }
 
-QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time) const
+QString WaveformWidget::getSignalValueAtTime(const QString &fullName, int time) const // CHANGE: parameter name
 {
-    // Use lazy loading
-    const auto changes = vcdParser->getValueChangesForSignal(identifier);
+    // Use lazy loading - use fullName
+    const auto changes = vcdParser->getValueChangesForSignal(fullName); // CHANGE: use fullName
     QString value = "0";
 
     for (const auto &change : changes)
@@ -1035,10 +1035,10 @@ QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time
     return value;
 }
 
-QString WaveformWidget::getBusValueAtTime(const QString &identifier, int time) const
+QString WaveformWidget::getBusValueAtTime(const QString &fullName, int time) const // CHANGE: parameter name
 {
-    // Use lazy loading
-    const auto changes = vcdParser->getValueChangesForSignal(identifier);
+    // Use lazy loading - use fullName
+    const auto changes = vcdParser->getValueChangesForSignal(fullName); // CHANGE: use fullName
     QString value = "0";
 
     for (const auto &change : changes)
@@ -1564,14 +1564,14 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     // Load data for the selected signals
     if (vcdParser && !visibleSignals.isEmpty())
     {
-        QList<QString> identifiers;
+        QList<QString> fullNames; // CHANGE: use fullNames
         for (const auto &signal : visibleSignals)
         {
-            identifiers.append(signal.identifier);
+            fullNames.append(signal.fullName); // CHANGE: use fullName
         }
 
         // Load signal data before displaying
-        vcdParser->loadSignalsData(identifiers);
+        vcdParser->loadSignalsData(fullNames); // This now uses fullNames
     }
 
     for (const auto &signal : visibleSignals)
@@ -1587,8 +1587,7 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
         zoomFit();
     }
 
-    
-    updateScrollBar(); // Make sure scrollbar is updated
+    updateScrollBar();
     update();
     emit itemSelected(-1);
 }
@@ -1717,12 +1716,13 @@ void WaveformWidget::renameItem(int itemIndex)
     }
 }
 
-QColor WaveformWidget::getSignalColor(const QString &identifier) const
+// Update the color management to use fullName
+QColor WaveformWidget::getSignalColor(const QString &fullName) const // CHANGE: parameter name
 {
     // If user has set a custom color, use it
-    if (signalColors.contains(identifier))
+    if (signalColors.contains(fullName)) // CHANGE: use fullName
     {
-        return signalColors[identifier];
+        return signalColors[fullName]; // CHANGE: use fullName
     }
 
     // Default to #ffe6cd for all signals
@@ -1741,7 +1741,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
         if (isSignalItem(index))
         {
             const VCDSignal &signal = displayItems[index].signal.signal;
-            currentColor = getSignalColor(signal.identifier);
+            currentColor = getSignalColor(signal.fullName); // CHANGE: use fullName
             break;
         }
     }
@@ -1783,7 +1783,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
 
     QAction *selectedAction = colorMenu.exec(QCursor::pos());
 
-    if (selectedAction)
+     if (selectedAction)
     {
         QColor newColor;
 
@@ -1801,13 +1801,13 @@ void WaveformWidget::changeSignalColor(int itemIndex)
             newColor = selectedAction->data().value<QColor>();
         }
 
-        // Apply the color to all selected signals
+        // Apply the color to all selected signals using fullName
         for (int index : selectedItems)
         {
             if (isSignalItem(index))
             {
                 const VCDSignal &signal = displayItems[index].signal.signal;
-                signalColors[signal.identifier] = newColor;
+                signalColors[signal.fullName] = newColor; // CHANGE: use fullName
             }
         }
         update();
@@ -2244,14 +2244,15 @@ void WaveformWidget::applySearchFilter()
     emit itemSelected(lastSelectedItem);
 }
 
-void WaveformWidget::ensureSignalLoaded(const QString &identifier)
+// Update the signal loading functions to use fullName
+void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: parameter name
 {
-    if (!loadedSignalIdentifiers.contains(identifier))
+    if (!loadedSignalIdentifiers.contains(fullName)) // CHANGE: use fullName
     {
-        // Load the signal data - FIXED: use loadSignalsData instead of loadSignalData
-        QList<QString> signalsToLoad = {identifier};
+        // Load the signal data
+        QList<QString> signalsToLoad = {fullName};
         vcdParser->loadSignalsData(signalsToLoad);
-        loadedSignalIdentifiers.insert(identifier);
+        loadedSignalIdentifiers.insert(fullName); // CHANGE: use fullName
 
         // Manage cache size
         if (loadedSignalIdentifiers.size() > MAX_CACHED_SIGNALS)

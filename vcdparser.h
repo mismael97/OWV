@@ -15,9 +15,10 @@ struct VCDSignal {
     QString scope;
     int width;
     QString type;
+    QString fullName;  // ADD THIS: unique identifier for the signal
 
     bool operator==(const VCDSignal& other) const {
-        return identifier == other.identifier;
+        return fullName == other.fullName;  // Compare using fullName instead of identifier
     }
 };
 
@@ -41,12 +42,13 @@ public:
     QString getError() const { return errorString; }
 
     const QVector<VCDSignal>& getSignals() const { return vcdSignals; }
-    QVector<VCDValueChange> getValueChangesForSignal(const QString &identifier);
+    QVector<VCDValueChange> getValueChangesForSignal(const QString &fullName);  // CHANGE: use fullName
     const QMap<QString, VCDSignal>& getIdentifierMap() const { return identifierMap; }
+    const QMap<QString, VCDSignal>& getFullNameMap() const { return fullNameMap; }  // ADD THIS
     int getEndTime() const { return endTime; }
     
     // Load specific signals on demand
-    bool loadSignalsData(const QList<QString> &identifiers);
+    bool loadSignalsData(const QList<QString> &fullNames);  // CHANGE: use fullNames
 
 private:
     bool parseHeader(QTextStream &stream);
@@ -54,10 +56,12 @@ private:
     void parseScopeLine(const QString &line);
     void parseVarLine(const QString &line);
     void parseTimescale(const QString &line);
+    QString generateFullName(const QString &scope, const QString &name);  // ADD THIS
 
     QString errorString;
     QVector<VCDSignal> vcdSignals;
     QMap<QString, VCDSignal> identifierMap;
+    QMap<QString, VCDSignal> fullNameMap;  // ADD THIS: maps fullName -> VCDSignal
     
     // Data storage
     QMap<QString, QVector<VCDValueChange>> valueChanges;

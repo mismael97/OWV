@@ -383,7 +383,6 @@ void MainWindow::showAddSignalsDialog()
     // Set signals and show dialog
     dialog.setAvailableSignals(vcdParser->getSignals(), currentSignals);
 
-    int displayedCount;
     if (dialog.exec() == QDialog::Accepted)
     {
         QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
@@ -399,7 +398,7 @@ void MainWindow::showAddSignalsDialog()
             waveformWidget->setVisibleSignals(allSignalsToDisplay);
 
             // Update status
-            displayedCount = 0;
+            int displayedCount = 0;
             for (int i = 0; i < waveformWidget->getItemCount(); i++)
             {
                 const DisplayItem *item = waveformWidget->getItem(i);
@@ -413,8 +412,6 @@ void MainWindow::showAddSignalsDialog()
             removeSignalsButton->setEnabled(false);
         }
     }
-
-    statusLabel->setText(QString("%1 signal(s) displayed").arg(displayedCount));
 }
 
 void MainWindow::removeSelectedSignals()

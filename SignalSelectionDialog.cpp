@@ -3,6 +3,8 @@
 #include <QDebug>
 #include <QApplication>
 #include <QTreeWidgetItemIterator>
+#include <QQueue>
+
 
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent), lastSelectedItem(nullptr)
@@ -93,6 +95,7 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
     if (!data.canConvert<VCDSignal>())
         return;
 
+    VCDSignal signal = data.value<VCDSignal>();
     Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
 
     // Block signals to prevent recursive calls during bulk operations
@@ -130,8 +133,8 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
                 if (i < allSignalItems.size())
                 {
                     QTreeWidgetItem *rangeItem = allSignalItems[i];
-                    VCDSignal signal = rangeItem->data(0, Qt::UserRole).value<VCDSignal>();
-                    selectedSignals.insert(signal.identifier);
+                    VCDSignal rangeSignal = rangeItem->data(0, Qt::UserRole).value<VCDSignal>();
+                    selectedSignals.insert(rangeSignal.fullName); // CHANGE: use fullName
                     rangeItem->setCheckState(0, Qt::Checked);
                 }
             }
@@ -140,15 +143,14 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
     else if (modifiers & Qt::ControlModifier)
     {
         // Ctrl+click: toggle selection of current item
-        VCDSignal signal = data.value<VCDSignal>();
-        if (selectedSignals.contains(signal.identifier))
+        if (selectedSignals.contains(signal.fullName)) // CHANGE: use fullName
         {
-            selectedSignals.remove(signal.identifier);
+            selectedSignals.remove(signal.fullName); // CHANGE: use fullName
             item->setCheckState(0, Qt::Unchecked);
         }
         else
         {
-            selectedSignals.insert(signal.identifier);
+            selectedSignals.insert(signal.fullName); // CHANGE: use fullName
             item->setCheckState(0, Qt::Checked);
         }
         lastSelectedItem = item;
@@ -164,15 +166,14 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
             if (clearData.canConvert<VCDSignal>())
             {
                 VCDSignal clearSignal = clearData.value<VCDSignal>();
-                selectedSignals.remove(clearSignal.identifier);
+                selectedSignals.remove(clearSignal.fullName); // CHANGE: use fullName
                 (*clearIt)->setCheckState(0, Qt::Unchecked);
             }
             ++clearIt;
         }
 
         // Then select the clicked item
-        VCDSignal signal = data.value<VCDSignal>();
-        selectedSignals.insert(signal.identifier);
+        selectedSignals.insert(signal.fullName); // CHANGE: use fullName
         item->setCheckState(0, Qt::Checked);
         lastSelectedItem = item;
     }
@@ -184,6 +185,7 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
 
+
 void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals)
 {
     this->allSignals = allSignals;
@@ -191,15 +193,15 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
     scopeSignals.clear();
     childScopes.clear();
     populatedScopes.clear();
-    lastSelectedItem = nullptr; // Reset last selection
+    lastSelectedItem = nullptr;
 
     signalTree->clear();
 
-    // Create a set of visible signal identifiers
+    // Create a set of visible signal fullNames
     visibleSignalIdentifiers.clear();
     for (const auto &signal : visibleSignals)
     {
-        visibleSignalIdentifiers.insert(signal.identifier);
+        visibleSignalIdentifiers.insert(signal.fullName); // CHANGE: use fullName
     }
 
     statusLabel->setText("Building scope structure...");
@@ -219,6 +221,7 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
                              .arg(scopeSignals.size()));
 }
 
+
 void SignalSelectionDialog::buildScopeStructure()
 {
     int processed = 0;
@@ -226,7 +229,7 @@ void SignalSelectionDialog::buildScopeStructure()
     for (const auto &signal : allSignals)
     {
         // Skip signals that are already visible
-        if (visibleSignalIdentifiers.contains(signal.identifier))
+        if (visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
         {
             processed++;
             continue;
@@ -271,6 +274,7 @@ void SignalSelectionDialog::buildScopeStructure()
         }
     }
 }
+
 
 void SignalSelectionDialog::populateTopLevelScopes()
 {
@@ -416,155 +420,6 @@ void SignalSelectionDialog::populateTopLevelScopes()
     qDebug() << "Displaying" << signalTree->topLevelItemCount() << "top-level items";
 }
 
-void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem)
-{
-    if (!parentItem || populatedScopes.contains(scopePath + "_POPULATED"))
-    {
-        return;
-    }
-
-    // Remove placeholder
-    while (parentItem->childCount() > 0)
-    {
-        QTreeWidgetItem *child = parentItem->child(0);
-        if (child->data(0, Qt::UserRole).toString() == "PLACEHOLDER")
-        {
-            delete child;
-            break;
-        }
-    }
-
-    // Make parent item checkable if it's a scope
-    parentItem->setFlags(parentItem->flags() | Qt::ItemIsUserCheckable);
-
-    // Update initial check state for scope
-    updateScopeCheckState(parentItem);
-
-    // Check if this is a fallback group (not a real scope path)
-    bool isFallbackGroup = !scopePath.contains('.') && scopePath != "" &&
-                           scopeSignals.contains(scopePath) &&
-                           !childScopes.contains(scopePath);
-
-    if (isFallbackGroup)
-    {
-        // This is a fallback group - just show the signals directly
-        for (const VCDSignal &signal : scopeSignals[scopePath])
-        {
-            // Apply filter if active
-            if (!currentFilter.isEmpty())
-            {
-                QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
-                if (!signalPath.contains(currentFilter.toLower()))
-                {
-                    continue;
-                }
-            }
-
-            QTreeWidgetItem *signalItem = new QTreeWidgetItem();
-            signalItem->setText(0, signal.name);
-            signalItem->setText(1, QString::number(signal.width));
-            signalItem->setText(2, signal.type);
-            signalItem->setText(3, signal.identifier);
-            signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
-            signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-
-            if (selectedSignals.contains(signal.identifier))
-            {
-                signalItem->setCheckState(0, Qt::Checked);
-            }
-            else
-            {
-                signalItem->setCheckState(0, Qt::Unchecked);
-            }
-
-            parentItem->addChild(signalItem);
-        }
-    }
-    else
-    {
-        // Normal scope processing
-        // Add child scopes
-        if (childScopes.contains(scopePath))
-        {
-            for (const QString &childScopePath : childScopes[scopePath])
-            {
-                QString displayName = childScopePath;
-                // Extract just the last part for display
-                QStringList parts = childScopePath.split('.');
-                if (!parts.isEmpty())
-                {
-                    displayName = parts.last();
-                }
-
-                QTreeWidgetItem *childScopeItem = new QTreeWidgetItem();
-                childScopeItem->setText(0, displayName);
-                childScopeItem->setToolTip(0, childScopePath); // Show full path
-                childScopeItem->setData(0, Qt::UserRole, childScopePath);
-
-                // Add placeholder
-                QTreeWidgetItem *placeholder = new QTreeWidgetItem();
-                placeholder->setText(0, "Loading...");
-                placeholder->setData(0, Qt::UserRole, "PLACEHOLDER");
-                childScopeItem->addChild(placeholder);
-
-                parentItem->addChild(childScopeItem);
-            }
-        }
-
-        // Add signals in this scope
-        if (scopeSignals.contains(scopePath))
-        {
-            for (const VCDSignal &signal : scopeSignals[scopePath])
-            {
-                // Apply filter if active
-                if (!currentFilter.isEmpty())
-                {
-                    QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
-                    if (!signalPath.contains(currentFilter.toLower()))
-                    {
-                        continue;
-                    }
-                }
-
-                QTreeWidgetItem *signalItem = new QTreeWidgetItem();
-                signalItem->setText(0, signal.name);
-                signalItem->setText(1, QString::number(signal.width));
-                signalItem->setText(2, signal.type);
-                signalItem->setText(3, signal.identifier);
-                signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
-                signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-
-                if (selectedSignals.contains(signal.identifier))
-                {
-                    signalItem->setCheckState(0, Qt::Checked);
-                }
-                else
-                {
-                    signalItem->setCheckState(0, Qt::Unchecked);
-                }
-
-                parentItem->addChild(signalItem);
-            }
-        }
-    }
-
-    // For each child scope item, make it checkable and set initial state
-    for (int i = 0; i < parentItem->childCount(); i++)
-    {
-        QTreeWidgetItem *child = parentItem->child(i);
-        QVariant childData = child->data(0, Qt::UserRole);
-
-        // Only make scope items checkable (not signal items)
-        if (!childData.canConvert<VCDSignal>() && childData.toString() != "PLACEHOLDER")
-        {
-            child->setFlags(child->flags() | Qt::ItemIsUserCheckable);
-            updateScopeCheckState(child);
-        }
-    }
-
-    populatedScopes.insert(scopePath + "_POPULATED");
-}
-
 void SignalSelectionDialog::onItemExpanded(QTreeWidgetItem *item)
 {
     QString scopePath = item->data(0, Qt::UserRole).toString();
@@ -573,58 +428,6 @@ void SignalSelectionDialog::onItemExpanded(QTreeWidgetItem *item)
         populateScopeChildren(scopePath, item);
     }
 }
-
-void SignalSelectionDialog::updateParentScopeCheckState(QTreeWidgetItem *childItem)
-{
-    if (!childItem) return; // Safety check
-    
-    QTreeWidgetItem *parent = childItem->parent();
-    if (!parent) return;
-
-    // Count checked children
-    int checkedCount = 0;
-    int totalChildren = 0;
-
-    for (int i = 0; i < parent->childCount(); i++)
-    {
-        QTreeWidgetItem *child = parent->child(i);
-        if (!child) continue; // Safety check
-        
-        QVariant data = child->data(0, Qt::UserRole);
-
-        if (data.toString() == "PLACEHOLDER")
-            continue;
-
-        if (child->checkState(0) == Qt::Checked)
-        {
-            checkedCount++;
-        }
-        totalChildren++;
-    }
-
-    // Set parent check state
-    if (totalChildren == 0)
-    {
-        parent->setCheckState(0, Qt::Unchecked);
-    }
-    else if (checkedCount == 0)
-    {
-        parent->setCheckState(0, Qt::Unchecked);
-    }
-    else if (checkedCount == totalChildren)
-    {
-        parent->setCheckState(0, Qt::Checked);
-    }
-    else
-    {
-        parent->setCheckState(0, Qt::PartiallyChecked);
-    }
-
-    // Recursively update grandparents
-    updateParentScopeCheckState(parent);
-}
-
-
 
 void SignalSelectionDialog::onItemChanged(QTreeWidgetItem *item, int column)
 {
@@ -639,11 +442,11 @@ void SignalSelectionDialog::onItemChanged(QTreeWidgetItem *item, int column)
         VCDSignal signal = data.value<VCDSignal>();
         if (item->checkState(0) == Qt::Checked)
         {
-            selectedSignals.insert(signal.identifier);
+            selectedSignals.insert(signal.fullName); // CHANGE: use fullName
         }
         else
         {
-            selectedSignals.remove(signal.identifier);
+            selectedSignals.remove(signal.fullName); // CHANGE: use fullName
         }
 
         // Update parent scope check state
@@ -664,12 +467,12 @@ QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
 {
     QList<VCDSignal> result;
 
-    for (const QString &identifier : selectedSignals)
+    for (const QString &fullName : selectedSignals) // CHANGE: use fullName
     {
         // Find the signal in allSignals
         for (const VCDSignal &signal : allSignals)
         {
-            if (signal.identifier == identifier)
+            if (signal.fullName == fullName) // CHANGE: use fullName
             {
                 result.append(signal);
                 break;
@@ -684,6 +487,16 @@ void SignalSelectionDialog::selectAll()
 {
     signalTree->blockSignals(true);
 
+    // Select all signals in all scopes
+    for (const auto &signal : allSignals)
+    {
+        if (!visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
+        {
+            selectedSignals.insert(signal.fullName); // CHANGE: use fullName
+        }
+    }
+
+    // Update all tree items
     QTreeWidgetItemIterator it(signalTree);
     while (*it)
     {
@@ -693,13 +506,16 @@ void SignalSelectionDialog::selectAll()
         if (data.canConvert<VCDSignal>())
         {
             VCDSignal signal = data.value<VCDSignal>();
-            selectedSignals.insert(signal.identifier);
-            item->setCheckState(0, Qt::Checked);
+            if (!visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
+            {
+                item->setCheckState(0, Qt::Checked);
+            }
         }
         else if (data.toString() != "PLACEHOLDER")
         {
-            // Scope item - check it
+            // Scope item - check it and update its state
             item->setCheckState(0, Qt::Checked);
+            updateScopeCheckState(item);
         }
         ++it;
     }
@@ -707,6 +523,7 @@ void SignalSelectionDialog::selectAll()
     signalTree->blockSignals(false);
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
+
 
 void SignalSelectionDialog::deselectAll()
 {
@@ -735,6 +552,7 @@ void SignalSelectionDialog::deselectAll()
     signalTree->blockSignals(false);
     statusLabel->setText("All signals deselected");
 }
+
 void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 {
     currentFilter = text;
@@ -838,7 +656,7 @@ void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 void SignalSelectionDialog::onScopeItemChanged(QTreeWidgetItem *item, int column)
 {
     if (column != 0) return;
-    if (!item) return; // Safety check
+    if (!item) return;
 
     QVariant data = item->data(0, Qt::UserRole);
     QString scopePath = data.toString();
@@ -854,6 +672,9 @@ void SignalSelectionDialog::onScopeItemChanged(QTreeWidgetItem *item, int column
 
     // Select/deselect all signals in this scope and all sub-scopes
     setScopeSignalsSelection(scopePath, isChecked);
+
+    // Update the visual check states in the tree for this scope and all children
+    updateTreeWidgetCheckStates(scopePath, isChecked);
 
     // Update parent scopes' check states
     updateParentScopeCheckState(item);
@@ -877,7 +698,7 @@ void SignalSelectionDialog::updateTreeWidgetCheckStates(const QString &scopePath
         {
             // Signal item - update if it belongs to this scope or sub-scope
             VCDSignal signal = data.value<VCDSignal>();
-            if (signal.scope.startsWith(scopePath))
+            if (signal.scope == scopePath || signal.scope.startsWith(scopePath + "."))
             {
                 item->setCheckState(0, selected ? Qt::Checked : Qt::Unchecked);
             }
@@ -886,7 +707,7 @@ void SignalSelectionDialog::updateTreeWidgetCheckStates(const QString &scopePath
         {
             // Scope item - update if it's this scope or a sub-scope
             QString itemScope = data.toString();
-            if (itemScope.startsWith(scopePath) && itemScope != "PLACEHOLDER")
+            if ((itemScope == scopePath || itemScope.startsWith(scopePath + ".")) && itemScope != "PLACEHOLDER")
             {
                 item->setCheckState(0, selected ? Qt::Checked : Qt::Unchecked);
             }
@@ -894,7 +715,6 @@ void SignalSelectionDialog::updateTreeWidgetCheckStates(const QString &scopePath
         ++it;
     }
 }
-
 
 void SignalSelectionDialog::setScopeSignalsSelection(const QString &scopePath, bool selected)
 {
@@ -905,11 +725,11 @@ void SignalSelectionDialog::setScopeSignalsSelection(const QString &scopePath, b
         {
             if (selected)
             {
-                selectedSignals.insert(signal.identifier);
+                selectedSignals.insert(signal.fullName); // CHANGE: use fullName
             }
             else
             {
-                selectedSignals.remove(signal.identifier);
+                selectedSignals.remove(signal.fullName); // CHANGE: use fullName
             }
         }
     }
@@ -922,11 +742,7 @@ void SignalSelectionDialog::setScopeSignalsSelection(const QString &scopePath, b
             setScopeSignalsSelection(childScope, selected);
         }
     }
-
-    // Update the tree widget items
-    updateTreeWidgetCheckStates(scopePath, selected);
 }
-
 
 
 void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
@@ -938,7 +754,7 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
     if (scopePath == "PLACEHOLDER")
         return;
 
-    // Count selected signals in this scope and all sub-scopes
+    // Count ALL selected signals in this scope and ALL sub-scopes
     int totalSignals = 0;
     int selectedSignalsCount = 0;
 
@@ -948,20 +764,56 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
         totalSignals += scopeSignals[scopePath].size();
         for (const VCDSignal &signal : scopeSignals[scopePath])
         {
-            if (selectedSignals.contains(signal.identifier))
+            if (selectedSignals.contains(signal.fullName)) // CHANGE: use fullName
             {
                 selectedSignalsCount++;
             }
         }
     }
 
-    // Count signals in child scopes
+    // Count signals in all child scopes recursively using QList
+    QSet<QString> processedScopes;
+    QList<QString> scopesToProcess;
+    
     if (childScopes.contains(scopePath))
     {
         for (const QString &childScope : childScopes[scopePath])
         {
-            // This would need to be implemented to count recursively
-            // For simplicity, we'll rely on the tree structure
+            scopesToProcess.append(childScope);
+        }
+    }
+
+    while (!scopesToProcess.isEmpty())
+    {
+        QString currentScope = scopesToProcess.takeFirst();
+        if (processedScopes.contains(currentScope))
+            continue;
+            
+        processedScopes.insert(currentScope);
+
+        // Count signals in this child scope
+        if (scopeSignals.contains(currentScope))
+        {
+            totalSignals += scopeSignals[currentScope].size();
+            for (const VCDSignal &signal : scopeSignals[currentScope])
+            {
+                if (selectedSignals.contains(signal.fullName)) // CHANGE: use fullName
+                {
+                    selectedSignalsCount++;
+                }
+            }
+        }
+
+        // Add child scopes of this scope to the list
+        if (childScopes.contains(currentScope))
+        {
+            for (const QString &childScope : childScopes[currentScope])
+            {
+                if (!processedScopes.contains(childScope))
+                {
+                    scopesToProcess.append(childScope);
+                }
+            }
         }
     }
 
@@ -982,4 +834,157 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
     {
         scopeItem->setCheckState(0, Qt::PartiallyChecked);
     }
+}
+
+void SignalSelectionDialog::updateParentScopeCheckState(QTreeWidgetItem *childItem)
+{
+    if (!childItem) return;
+    
+    QTreeWidgetItem *parent = childItem->parent();
+    if (!parent) return;
+
+    // Update the parent's check state
+    updateScopeCheckState(parent);
+
+    // Recursively update grandparents
+    updateParentScopeCheckState(parent);
+}
+
+void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem)
+{
+    if (!parentItem || populatedScopes.contains(scopePath + "_POPULATED"))
+    {
+        return;
+    }
+
+    // Remove placeholder
+    while (parentItem->childCount() > 0)
+    {
+        QTreeWidgetItem *child = parentItem->child(0);
+        if (child->data(0, Qt::UserRole).toString() == "PLACEHOLDER")
+        {
+            delete child;
+            break;
+        }
+    }
+
+    // Make parent item checkable if it's a scope
+    parentItem->setFlags(parentItem->flags() | Qt::ItemIsUserCheckable);
+
+    // Update initial check state for scope
+    updateScopeCheckState(parentItem);
+
+    // Check if this is a fallback group (not a real scope path)
+    bool isFallbackGroup = !scopePath.contains('.') && scopePath != "" &&
+                           scopeSignals.contains(scopePath) &&
+                           !childScopes.contains(scopePath);
+
+    if (isFallbackGroup)
+    {
+        // This is a fallback group - just show the signals directly
+        for (const VCDSignal &signal : scopeSignals[scopePath])
+        {
+            // Apply filter if active
+            if (!currentFilter.isEmpty())
+            {
+                QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
+                if (!signalPath.contains(currentFilter.toLower()))
+                {
+                    continue;
+                }
+            }
+
+            QTreeWidgetItem *signalItem = new QTreeWidgetItem();
+            signalItem->setText(0, signal.name);
+            signalItem->setText(1, QString::number(signal.width));
+            signalItem->setText(2, signal.type);
+            signalItem->setText(3, signal.identifier);
+            signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+            signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+
+            if (selectedSignals.contains(signal.identifier))
+            {
+                signalItem->setCheckState(0, Qt::Checked);
+            }
+            else
+            {
+                signalItem->setCheckState(0, Qt::Unchecked);
+            }
+
+            parentItem->addChild(signalItem);
+        }
+    }
+    else
+    {
+        // Normal scope processing
+        // Add child scopes
+        if (childScopes.contains(scopePath))
+        {
+            for (const QString &childScopePath : childScopes[scopePath])
+            {
+                QString displayName = childScopePath;
+                // Extract just the last part for display
+                QStringList parts = childScopePath.split('.');
+                if (!parts.isEmpty())
+                {
+                    displayName = parts.last();
+                }
+
+                QTreeWidgetItem *childScopeItem = new QTreeWidgetItem();
+                childScopeItem->setText(0, displayName);
+                childScopeItem->setToolTip(0, childScopePath); // Show full path
+                childScopeItem->setData(0, Qt::UserRole, childScopePath);
+                childScopeItem->setFlags(childScopeItem->flags() | Qt::ItemIsUserCheckable);
+
+                // Set initial check state
+                updateScopeCheckState(childScopeItem);
+
+                // Add placeholder
+                QTreeWidgetItem *placeholder = new QTreeWidgetItem();
+                placeholder->setText(0, "Loading...");
+                placeholder->setData(0, Qt::UserRole, "PLACEHOLDER");
+                childScopeItem->addChild(placeholder);
+
+                parentItem->addChild(childScopeItem);
+            }
+        }
+
+        // Add signals in this scope
+        if (scopeSignals.contains(scopePath))
+        {
+            for (const VCDSignal &signal : scopeSignals[scopePath])
+            {
+                // Apply filter if active
+                if (!currentFilter.isEmpty())
+                {
+                    QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
+                    if (!signalPath.contains(currentFilter.toLower()))
+                    {
+                        continue;
+                    }
+                }
+
+                QTreeWidgetItem *signalItem = new QTreeWidgetItem();
+                signalItem->setText(0, signal.name);
+                signalItem->setText(1, QString::number(signal.width));
+                signalItem->setText(2, signal.type);
+                signalItem->setText(3, signal.identifier);
+                signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+                signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+
+                if (selectedSignals.contains(signal.identifier))
+                {
+                    signalItem->setCheckState(0, Qt::Checked);
+                }
+                else
+                {
+                    signalItem->setCheckState(0, Qt::Unchecked);
+                }
+
+                parentItem->addChild(signalItem);
+            }
+        }
+    }
+
+    populatedScopes.insert(scopePath + "_POPULATED");
 }

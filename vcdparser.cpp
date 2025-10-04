@@ -11,6 +11,16 @@ VCDParser::~VCDParser()
 {
 }
 
+
+
+QString VCDParser::generateFullName(const QString &scope, const QString &name)
+{
+    if (scope.isEmpty()) {
+        return name;
+    }
+    return scope + "." + name;
+}
+
 bool VCDParser::parseFile(const QString &filename)
 {
     // For now, use header-only parsing for performance
@@ -30,6 +40,7 @@ bool VCDParser::parseHeaderOnly(const QString &filename)
     
     vcdSignals.clear();
     identifierMap.clear();
+    fullNameMap.clear();  // ADD THIS
     currentScope.clear();
     valueChanges.clear();
     loadedSignals.clear();
@@ -44,6 +55,8 @@ bool VCDParser::parseHeaderOnly(const QString &filename)
 
     qDebug() << "VCD header parsing completed";
     qDebug() << "Signals found:" << vcdSignals.size();
+    qDebug() << "Unique identifiers:" << identifierMap.size();
+    qDebug() << "Unique full names:" << fullNameMap.size();
 
     return true;
 }
@@ -51,7 +64,7 @@ bool VCDParser::parseHeaderOnly(const QString &filename)
 bool VCDParser::parseHeader(QTextStream &stream)
 {
     QRegularExpression scopeRegex("^\\$scope\\s+(\\w+)\\s+(\\S+)\\s*\\$end$");
-    QRegularExpression varRegex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(\\S+.*\\S+)\\s*\\$end$");
+    QRegularExpression varRegex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(.+)\\s*\\$end$");
     QRegularExpression timescaleRegex("^\\$timescale\\s+(\\S+)\\s*\\$end$");
 
     while (!stream.atEnd()) {
@@ -106,9 +119,11 @@ bool VCDParser::parseHeader(QTextStream &stream)
     return true;
 }
 
-bool VCDParser::loadSignalsData(const QList<QString> &identifiers)
+
+// Update the value change functions to use fullName
+bool VCDParser::loadSignalsData(const QList<QString> &fullNames)
 {
-    if (identifiers.isEmpty()) {
+    if (fullNames.isEmpty()) {
         return true;
     }
 
@@ -120,13 +135,14 @@ bool VCDParser::loadSignalsData(const QList<QString> &identifiers)
 
     QTextStream stream(&file);
     
-    // Convert to set for fast lookup
+    // Convert to set for fast lookup - but we need to map fullNames back to identifiers
     QSet<QString> signalsToLoad;
-    for (const QString &identifier : identifiers) {
-        if (!loadedSignals.contains(identifier)) {
+    for (const QString &fullName : fullNames) {
+        if (fullNameMap.contains(fullName) && !loadedSignals.contains(fullName)) {
+            QString identifier = fullNameMap[fullName].identifier;
             signalsToLoad.insert(identifier);
-            // Initialize empty value changes
-            valueChanges[identifier] = QVector<VCDValueChange>();
+            // Initialize empty value changes using fullName as key
+            valueChanges[fullName] = QVector<VCDValueChange>();
         }
     }
 
@@ -144,14 +160,17 @@ bool VCDParser::loadSignalsData(const QList<QString> &identifiers)
 
     file.close();
 
-    // Mark signals as loaded
-    for (const QString &identifier : signalsToLoad) {
-        loadedSignals.insert(identifier);
+    // Mark signals as loaded using fullName
+    for (const QString &fullName : fullNames) {
+        if (fullNameMap.contains(fullName)) {
+            loadedSignals.insert(fullName);
+        }
     }
 
     qDebug() << "Successfully loaded data for" << signalsToLoad.size() << "signals";
     return true;
 }
+
 
 bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QString> &signalsToLoad)
 {
@@ -182,11 +201,22 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
             QString identifier = valueMatch.captured(2);
 
             if (signalsToLoad.contains(identifier)) {
-                VCDValueChange change;
-                change.timestamp = currentTime;
-                change.value = value;
-                valueChanges[identifier].append(change);
-                changesFound++;
+                // Find the fullName for this identifier
+                QString fullName;
+                for (const auto &signal : vcdSignals) {
+                    if (signal.identifier == identifier) {
+                        fullName = signal.fullName;
+                        break;
+                    }
+                }
+                
+                if (!fullName.isEmpty()) {
+                    VCDValueChange change;
+                    change.timestamp = currentTime;
+                    change.value = value;
+                    valueChanges[fullName].append(change);
+                    changesFound++;
+                }
             }
             continue;
         }
@@ -198,11 +228,22 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
             QString identifier = vectorMatch.captured(2);
 
             if (signalsToLoad.contains(identifier)) {
-                VCDValueChange change;
-                change.timestamp = currentTime;
-                change.value = value;
-                valueChanges[identifier].append(change);
-                changesFound++;
+                // Find the fullName for this identifier
+                QString fullName;
+                for (const auto &signal : vcdSignals) {
+                    if (signal.identifier == identifier) {
+                        fullName = signal.fullName;
+                        break;
+                    }
+                }
+                
+                if (!fullName.isEmpty()) {
+                    VCDValueChange change;
+                    change.timestamp = currentTime;
+                    change.value = value;
+                    valueChanges[fullName].append(change);
+                    changesFound++;
+                }
             }
             continue;
         }
@@ -215,11 +256,22 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
                 QString identifier = parts[1];
                 
                 if (signalsToLoad.contains(identifier)) {
-                    VCDValueChange change;
-                    change.timestamp = currentTime;
-                    change.value = value;
-                    valueChanges[identifier].append(change);
-                    changesFound++;
+                    // Find the fullName for this identifier
+                    QString fullName;
+                    for (const auto &signal : vcdSignals) {
+                        if (signal.identifier == identifier) {
+                            fullName = signal.fullName;
+                            break;
+                        }
+                    }
+                    
+                    if (!fullName.isEmpty()) {
+                        VCDValueChange change;
+                        change.timestamp = currentTime;
+                        change.value = value;
+                        valueChanges[fullName].append(change);
+                        changesFound++;
+                    }
                 }
             }
         }
@@ -229,15 +281,15 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
     return true;
 }
 
-QVector<VCDValueChange> VCDParser::getValueChangesForSignal(const QString &identifier)
+QVector<VCDValueChange> VCDParser::getValueChangesForSignal(const QString &fullName)
 {
     // If signal data is not loaded yet, load it now
-    if (!loadedSignals.contains(identifier)) {
-        QList<QString> signalsToLoad = {identifier};
+    if (!loadedSignals.contains(fullName)) {
+        QList<QString> signalsToLoad = {fullName};
         loadSignalsData(signalsToLoad);
     }
     
-    return valueChanges.value(identifier);
+    return valueChanges.value(fullName);
 }
 
 void VCDParser::parseTimescale(const QString &line)
@@ -280,8 +332,17 @@ void VCDParser::parseVarLine(const QString &line)
         QString signalName = match.captured(4).trimmed();
         signal.name = signalName;
         signal.scope = currentScope;
+        signal.fullName = generateFullName(currentScope, signalName);
 
         vcdSignals.append(signal);
+        
+        // Store in both maps
         identifierMap[signal.identifier] = signal;
+        fullNameMap[signal.fullName] = signal;
+        
+        // qDebug() << "Parsed signal - Full:" << signal.fullName 
+        //          << "ID:" << signal.identifier 
+        //          << "Scope:" << signal.scope 
+        //          << "Name:" << signal.name;
     }
 }
