@@ -301,23 +301,22 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     // Set up clipping to exclude pinned areas from scrolling
     painter.setClipRect(0, timeMarkersHeight, signalNamesWidth, height() - timeMarkersHeight);
 
-    int currentY = timeMarkersHeight - verticalOffset; // Start below timeline, adjusted by scroll
+    // FIXED: Start drawing signals right below the timeline header
+    int currentY = timeMarkersHeight - verticalOffset;
 
-    // Draw all signals (not just visible ones) - let clipping handle visibility
     for (int i = 0; i < displayItems.size(); i++)
     {
         const auto &item = displayItems[i];
-        // Calculate actual height based on signal type and configurable heights
         int itemHeight = (item.type == DisplayItem::Signal) ? 
-            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
 
         // Skip drawing if item is completely outside visible area
-        if (currentY + itemHeight < timeMarkersHeight) {
+        if (currentY + itemHeight <= timeMarkersHeight) {
             currentY += itemHeight;
             continue;
         }
-        if (currentY > height()) {
-            break; // Past the bottom of visible area
+        if (currentY >= height()) {
+            break;
         }
 
         // Draw background based on selection and type
@@ -350,7 +349,10 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         QString displayName = item.getName();
         int textIndent = 5;
 
-        painter.drawText(textIndent, currentY + itemHeight / 2 + 4, displayName);
+        // Center text vertically within the item
+        QFontMetrics fm(painter.font());
+        int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
+        painter.drawText(textIndent, textY, displayName);
 
         // Draw horizontal separator
         painter.setPen(QPen(QColor(80, 80, 80)));
@@ -384,6 +386,7 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
     // Set up clipping to exclude pinned areas from scrolling
     painter.setClipRect(valuesColumnStart, timeMarkersHeight, valuesColumnWidth, height() - timeMarkersHeight);
 
+    // FIXED: Use same starting position as names column
     int currentY = timeMarkersHeight - verticalOffset;
 
     for (int i = 0; i < displayItems.size(); i++)
@@ -393,11 +396,11 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
             (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
 
         // Skip drawing if item is outside visible area
-        if (currentY + itemHeight < timeMarkersHeight) {
+        if (currentY + itemHeight <= timeMarkersHeight) {
             currentY += itemHeight;
             continue;
         }
-        if (currentY > height()) {
+        if (currentY >= height()) {
             break;
         }
 
@@ -412,6 +415,7 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
         } else if (i % 2 == 0) {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
         } else {
+            // FIXED: Changed 'itemItemHeight' to 'itemHeight'
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
         }
 
@@ -427,8 +431,12 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
                 displayValue = value.toUpper();
             }
 
+            // Center text vertically within the item (same calculation as names column)
+            QFontMetrics fm(painter.font());
+            int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
+            
             painter.setPen(QPen(Qt::white));
-            painter.drawText(valuesColumnStart + 5, currentY + itemHeight / 2 + 4, displayValue);
+            painter.drawText(valuesColumnStart + 5, textY, displayValue);
         }
 
         // Draw horizontal separator
@@ -442,7 +450,6 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
     // Reset clipping
     painter.setClipping(false);
 }
-
 
 void WaveformWidget::drawWaveformArea(QPainter &painter)
 {
@@ -470,7 +477,7 @@ void WaveformWidget::drawWaveformArea(QPainter &painter)
     // Set up clipping for scrollable waveform area (exclude pinned timeline)
     painter.setClipRect(waveformStartX, timeMarkersHeight, width() - waveformStartX, height() - timeMarkersHeight);
     
-    // Apply vertical offset translation for the waveform area
+    // FIXED: Apply translation that matches the columns
     painter.translate(waveformStartX, timeMarkersHeight - verticalOffset);
 
     // Draw background for scrollable area - use the full calculated height
@@ -573,18 +580,18 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
 
 void WaveformWidget::drawSignals(QPainter &painter)
 {
-    int currentY = timeMarkersHeight; // Start below the timeline
+    // FIXED: Start at position 0 since we're already translated
+    int currentY = 0;
 
-    // Draw all signals - the clipping and translation will handle visibility
     for (int i = 0; i < displayItems.size(); i++)
     {
         const auto &item = displayItems[i];
         int itemHeight = (item.type == DisplayItem::Signal) ? 
             (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
 
-        // Skip drawing if item is completely outside visible area (considering vertical offset)
+        // Skip drawing if item is completely outside visible area
         int visibleTop = verticalOffset;
-        int visibleBottom = verticalOffset + height() - timeMarkersHeight;
+        int visibleBottom = verticalOffset + (height() - timeMarkersHeight);
         
         if (currentY + itemHeight < visibleTop) {
             currentY += itemHeight;
@@ -597,6 +604,8 @@ void WaveformWidget::drawSignals(QPainter &painter)
         if (item.type == DisplayItem::Signal)
         {
             const VCDSignal &signal = item.signal.signal;
+            
+            // FIXED: Draw at the currentY position (no additional offset needed)
             if (signal.width > 1)
             {
                 drawBusWaveform(painter, signal, currentY);
@@ -1110,11 +1119,12 @@ int WaveformWidget::getItemYPosition(int index) const
     if (index < 0 || index >= displayItems.size())
         return -1;
 
-    int yPos = topMargin + timeMarkersHeight;
+    int yPos = timeMarkersHeight; // Start below the pinned timeline
     for (int i = 0; i < index; i++)
     {
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+        int itemHeight = (item.type == DisplayItem::Signal) ? 
+            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
         yPos += itemHeight;
     }
     return yPos;
@@ -1629,23 +1639,22 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
         return -1;
 
     // Only detect items in the scrollable area (below pinned headers)
-    if (pos.y() < topMargin + timeMarkersHeight)
+    if (pos.y() < timeMarkersHeight)
         return -1;
 
-    int y = pos.y() + verticalOffset; // Add vertical offset to get actual position
-    int signalAreaTop = topMargin + timeMarkersHeight;
-
-    if (y < signalAreaTop)
+    // FIXED: Adjust for vertical offset correctly
+    int y = pos.y() + verticalOffset - timeMarkersHeight;
+    
+    if (y < 0)
         return -1;
 
-    int currentY = signalAreaTop;
+    int currentY = 0;
     for (int i = 0; i < displayItems.size(); i++)
     {
-        // Use the same height calculation as in drawing functions
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+        int itemHeight = (item.type == DisplayItem::Signal) ? 
+            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
 
-        // Check if click is within the full item height (not just the drawn area)
         if (y >= currentY && y < currentY + itemHeight)
             return i;
         currentY += itemHeight;
@@ -1653,6 +1662,7 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
 
     return -1;
 }
+
 
 QString WaveformWidget::promptForName(const QString &title, const QString &defaultName)
 {
