@@ -40,21 +40,29 @@ MainWindow::~MainWindow()
 
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_Delete) {
+    if (event->key() == Qt::Key_Delete)
+    {
         // Let the waveform widget handle deletion if it has focus
-        if (waveformWidget->hasFocus() && !waveformWidget->getSelectedItemIndices().isEmpty()) {
+        if (waveformWidget->hasFocus() && !waveformWidget->getSelectedItemIndices().isEmpty())
+        {
             waveformWidget->removeSelectedSignals();
             event->accept();
-        } else {
+        }
+        else
+        {
             // Fall back to the main window's delete handling
             removeSelectedSignals();
             event->accept();
         }
-    } else if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier) {
+    }
+    else if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier)
+    {
         waveformWidget->selectAllSignals();
         removeSignalsButton->setEnabled(true);
         event->accept();
-    } else {
+    }
+    else
+    {
         QMainWindow::keyPressEvent(event);
     }
 }
@@ -136,23 +144,23 @@ void MainWindow::createMenuBar()
 {
     // Create proper menu bar
     QMenuBar *menuBar = this->menuBar();
-    
+
     // File menu
     QMenu *fileMenu = menuBar->addMenu("File");
     fileMenu->addAction(openAction);
-    
+
     // Edit menu (empty for now)
     QMenu *editMenu = menuBar->addMenu("Edit");
-    
+
     // View menu
     QMenu *viewMenu = menuBar->addMenu("View");
     viewMenu->addAction(zoomInAction);
     viewMenu->addAction(zoomOutAction);
     viewMenu->addAction(zoomFitAction);
-    
+
     // Workspace menu (empty for now)
     QMenu *workspaceMenu = menuBar->addMenu("Workspace");
-    
+
     // Wave menu with submenus
     QMenu *waveMenu = menuBar->addMenu("Wave");
     waveMenu->addAction(increaseHeightAction);
@@ -162,19 +170,19 @@ void MainWindow::createMenuBar()
     // Help menu
     QMenu *helpMenu = menuBar->addMenu("Help");
     helpMenu->addAction(aboutAction);
-    
+
     // Signal colors submenu
     QMenu *signalColorsMenu = waveMenu->addMenu("Signal Colors");
     signalColorsMenu->addAction(defaultColorsAction);
     signalColorsMenu->addAction(highlightBussesAction);
-    
+
     // Bus format submenu
     busFormatMenu = waveMenu->addMenu("Bus Format");
     busFormatMenu->addAction(busHexAction);
     busFormatMenu->addAction(busBinaryAction);
     busFormatMenu->addAction(busOctalAction);
     busFormatMenu->addAction(busDecimalAction);
-    
+
     // Line thickness submenu
     lineThicknessMenu = waveMenu->addMenu("Line Thickness");
     lineThicknessMenu->addAction(lineThinAction);
@@ -196,11 +204,10 @@ void MainWindow::createMainToolbar()
     searchField->setPlaceholderText("Search signals...");
     searchField->setMaximumWidth(200);
     searchField->setClearButtonEnabled(true);
-    
+
     // Connect search field to waveform widget search functionality
-    connect(searchField, &QLineEdit::textChanged, this, [this](const QString &text) {
-        waveformWidget->searchSignals(text);
-    });
+    connect(searchField, &QLineEdit::textChanged, this, [this](const QString &text)
+            { waveformWidget->searchSignals(text); });
 
     // Zoom controls
     QAction *zoomInToolbarAction = new QAction("🔍+", this);
@@ -219,19 +226,18 @@ void MainWindow::createMainToolbar()
     mainToolBar->addWidget(searchLabel);
     mainToolBar->addWidget(searchField);
     mainToolBar->addSeparator();
-    
+
     // Zoom controls
     mainToolBar->addAction(zoomInToolbarAction);
     mainToolBar->addAction(zoomOutToolbarAction);
     mainToolBar->addAction(zoomFitToolbarAction);
-    
+
     // Add some spacing and stretch
     mainToolBar->addSeparator();
     QWidget *spacer = new QWidget();
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     mainToolBar->addWidget(spacer);
 }
-
 
 void MainWindow::increaseSignalHeight()
 {
@@ -275,11 +281,14 @@ void MainWindow::updateLineThicknessActions()
     lineThinAction->setChecked(false);
     lineMediumAction->setChecked(false);
     lineThickAction->setChecked(false);
-    
+
     int currentWidth = waveformWidget->getLineWidth();
-    if (currentWidth == 1) lineThinAction->setChecked(true);
-    else if (currentWidth == 2) lineMediumAction->setChecked(true);
-    else if (currentWidth == 3) lineThickAction->setChecked(true);
+    if (currentWidth == 1)
+        lineThinAction->setChecked(true);
+    else if (currentWidth == 2)
+        lineMediumAction->setChecked(true);
+    else if (currentWidth == 3)
+        lineThickAction->setChecked(true);
 }
 
 void MainWindow::createStatusBar()
@@ -303,10 +312,10 @@ void MainWindow::setupUI()
     waveformWidget = new WaveformWidget();
     connect(waveformWidget, &WaveformWidget::timeChanged,
             this, &MainWindow::updateTimeDisplay);
-    connect(waveformWidget, &WaveformWidget::itemSelected, this, [this](int index) {
+    connect(waveformWidget, &WaveformWidget::itemSelected, this, [this](int index)
+            {
         // Enable/disable remove button based on selection
-        removeSignalsButton->setEnabled(index >= 0);
-    });
+        removeSignalsButton->setEnabled(index >= 0); });
 
     // === BOTTOM CONTROLS ===
     QWidget *bottomControls = new QWidget();
@@ -336,79 +345,93 @@ void MainWindow::setupUI()
 
 void MainWindow::showAddSignalsDialog()
 {
-    if (!vcdParser) return;
+    if (!vcdParser)
+        return;
 
     int signalCount = vcdParser->getSignals().size();
-    
+
     // Show immediate feedback for large files
-    if (signalCount > 10000) {
+    if (signalCount > 10000)
+    {
         statusLabel->setText(QString("Loading signal selection dialog (%1 signals)...").arg(signalCount));
         QApplication::processEvents();
-        
+
         // Use a simple message box for very large files
-        if (signalCount > 50000) {
-            QMessageBox::information(this, "Large File", 
-                QString("This file contains %1 signals.\n\n"
-                       "The signal selection will load in batches for better performance.\n"
-                       "Use the search filter to find specific signals quickly.").arg(signalCount));
+        if (signalCount > 50000)
+        {
+            QMessageBox::information(this, "Large File",
+                                     QString("This file contains %1 signals.\n\n"
+                                             "The signal selection will load in batches for better performance.\n"
+                                             "Use the search filter to find specific signals quickly.")
+                                         .arg(signalCount));
         }
     }
 
     SignalSelectionDialog dialog(this);
-    
+
     // Get current signals
     QList<VCDSignal> currentSignals;
-    for (int i = 0; i < waveformWidget->getItemCount(); i++) {
-        const DisplayItem* item = waveformWidget->getItem(i);
-        if (item && item->type == DisplayItem::Signal) {
+    for (int i = 0; i < waveformWidget->getItemCount(); i++)
+    {
+        const DisplayItem *item = waveformWidget->getItem(i);
+        if (item && item->type == DisplayItem::Signal)
+        {
             currentSignals.append(item->signal.signal);
         }
     }
-    
+
     // Set signals and show dialog
     dialog.setAvailableSignals(vcdParser->getSignals(), currentSignals);
 
-    if (dialog.exec() == QDialog::Accepted) {
+    int displayedCount;
+    if (dialog.exec() == QDialog::Accepted)
+    {
         QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
-        if (!newSignalsToAdd.isEmpty()) {
+        if (!newSignalsToAdd.isEmpty())
+        {
             statusLabel->setText(QString("Loading %1 signals...").arg(newSignalsToAdd.size()));
             QApplication::processEvents();
-            
+
             // Add to current signals
             QList<VCDSignal> allSignalsToDisplay = currentSignals;
             allSignalsToDisplay.append(newSignalsToAdd);
-            
+
             waveformWidget->setVisibleSignals(allSignalsToDisplay);
-            
+
             // Update status
-            int displayedCount = 0;
-            for (int i = 0; i < waveformWidget->getItemCount(); i++) {
-                const DisplayItem* item = waveformWidget->getItem(i);
-                if (item && item->type == DisplayItem::Signal) {
+            displayedCount = 0;
+            for (int i = 0; i < waveformWidget->getItemCount(); i++)
+            {
+                const DisplayItem *item = waveformWidget->getItem(i);
+                if (item && item->type == DisplayItem::Signal)
+                {
                     displayedCount++;
                 }
             }
-            
+
             statusLabel->setText(QString("%1 signal(s) displayed").arg(displayedCount));
             removeSignalsButton->setEnabled(false);
         }
     }
-    
-    statusLabel->setText("Ready");
+
+    statusLabel->setText(QString("%1 signal(s) displayed").arg(displayedCount));
 }
 
 void MainWindow::removeSelectedSignals()
 {
     // Check if there are any selected items in the waveform widget
-    if (!waveformWidget->getSelectedItemIndices().isEmpty()) {
+    if (!waveformWidget->getSelectedItemIndices().isEmpty())
+    {
         waveformWidget->removeSelectedSignals();
         removeSignalsButton->setEnabled(false);
 
         // Count only signals for display (not spaces)
         int signalCount = 0;
-        for (int i = 0; i < waveformWidget->getItemCount(); i++) {
-            const DisplayItem* item = waveformWidget->getItem(i);
-            if (item && item->type == DisplayItem::Signal) {
+        for (int i = 0; i < waveformWidget->getItemCount(); i++)
+        {
+            const DisplayItem *item = waveformWidget->getItem(i);
+            if (item && item->type == DisplayItem::Signal)
+            {
                 signalCount++;
             }
         }
@@ -421,9 +444,12 @@ void MainWindow::loadDefaultVcdFile()
 {
     QString defaultPath = "F:/OWV/test.vcd";
 
-    if (QFile::exists(defaultPath)) {
+    if (QFile::exists(defaultPath))
+    {
         loadVcdFile(defaultPath);
-    } else {
+    }
+    else
+    {
         statusLabel->setText("Default VCD file not found. Use File → Open to load a VCD file.");
         qDebug() << "Default VCD file not found:" << defaultPath;
     }
@@ -434,7 +460,8 @@ void MainWindow::openFile()
     QString filename = QFileDialog::getOpenFileName(
         this, "Open VCD File", "C:/Users/mismael/Desktop/OWV", "VCD Files (*.vcd)");
 
-    if (!filename.isEmpty()) {
+    if (!filename.isEmpty())
+    {
         loadVcdFile(filename);
     }
 }
@@ -445,19 +472,22 @@ void MainWindow::loadVcdFile(const QString &filename)
     QApplication::processEvents();
 
     // Use header-only parsing for fast loading
-    if (vcdParser->parseHeaderOnly(filename)) {
+    if (vcdParser->parseHeaderOnly(filename))
+    {
         statusLabel->setText(QString("Loaded: %1 (%2 signals) - Ready to display")
-                            .arg(QFileInfo(filename).fileName())
-                            .arg(vcdParser->getSignals().size()));
-        
+                                 .arg(QFileInfo(filename).fileName())
+                                 .arg(vcdParser->getSignals().size()));
+
         // Pass parser to waveform widget but don't load all signals
         waveformWidget->setVcdData(vcdParser);
-        
+
         // Clear any existing signals from previous file
         waveformWidget->setVisibleSignals(QList<VCDSignal>());
-    } else {
+    }
+    else
+    {
         QMessageBox::critical(this, "Error",
-                            "Failed to parse VCD file: " + vcdParser->getError());
+                              "Failed to parse VCD file: " + vcdParser->getError());
         statusLabel->setText("Ready");
     }
 }
@@ -498,11 +528,14 @@ void MainWindow::about()
 
 void MainWindow::toggleBusDisplayFormat()
 {
-    if (sender() == busHexAction) {
+    if (sender() == busHexAction)
+    {
         waveformWidget->setBusDisplayFormat(WaveformWidget::Hex);
         busHexAction->setChecked(true);
         busBinaryAction->setChecked(false);
-    } else if (sender() == busBinaryAction) {
+    }
+    else if (sender() == busBinaryAction)
+    {
         waveformWidget->setBusDisplayFormat(WaveformWidget::Binary);
         busHexAction->setChecked(false);
         busBinaryAction->setChecked(true);
@@ -544,11 +577,20 @@ void MainWindow::updateBusFormatActions()
     busBinaryAction->setChecked(false);
     busOctalAction->setChecked(false);
     busDecimalAction->setChecked(false);
-    
-    switch(waveformWidget->getBusDisplayFormat()) {
-        case WaveformWidget::Hex: busHexAction->setChecked(true); break;
-        case WaveformWidget::Binary: busBinaryAction->setChecked(true); break;
-        case WaveformWidget::Octal: busOctalAction->setChecked(true); break;
-        case WaveformWidget::Decimal: busDecimalAction->setChecked(true); break;
+
+    switch (waveformWidget->getBusDisplayFormat())
+    {
+    case WaveformWidget::Hex:
+        busHexAction->setChecked(true);
+        break;
+    case WaveformWidget::Binary:
+        busBinaryAction->setChecked(true);
+        break;
+    case WaveformWidget::Octal:
+        busOctalAction->setChecked(true);
+        break;
+    case WaveformWidget::Decimal:
+        busDecimalAction->setChecked(true);
+        break;
     }
 }
