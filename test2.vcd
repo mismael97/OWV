@@ -1,0 +1,68 @@
+$date
+	Sun Oct  5 09:09:23 2025
+$end
+
+$version
+	Synopsys VCS version U-2023.03-SP2_Full64
+$end
+
+$timescale
+	1ns
+$end
+
+$comment Csum: 1 1336ca24c77ae40f $end
+
+
+$scope module tb_four_bit_adder $end
+$var reg 4 ! a [3:0] $end
+$var reg 4 " b [3:0] $end
+$var reg 1 # cin $end
+$var wire 4 $ sum [3:0] $end
+$var wire 1 % cout $end
+$var wire 4 & bus_x [3:0] $end
+$var wire 1 ' signle_x $end
+$var reg 4 ( bus_y [3:0] $end
+$var reg 1 ) signle_y $end
+$upscope $end
+
+$enddefinitions $end
+
+#0
+$dumpvars
+0#
+x)
+x%
+b0000 !
+b0000 "
+bxxxx (
+bxxxx $
+z'
+bzzzz &
+$end
+b0000 $
+0%
+#10
+b0011 !
+b0101 "
+b1000 $
+#20
+b0011 (
+#30
+b1111 !
+b0001 "
+b0000 $
+1%
+#40
+b1010 !
+b0101 "
+1#
+#50
+1)
+#60
+b1111 !
+b1111 "
+b1111 $
+#70
+z)
+#90
+0)

@@ -691,7 +691,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         }
         // For '1' values, it will use the default #ffe6cd
 
-        painter.setPen(QPen(drawColor, lineWidth));
+        painter.setPen(QPen(drawColor, lineWidth)); // Uses lineWidth
 
         // Draw the segment based on previous value
         if (prevIsX || prevIsZ)
@@ -709,7 +709,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
             painter.drawLine(prevX, lowLevel, currentX, lowLevel);
         }
 
-        // Draw transition line if value changed
+        // Draw transition line if value changed - uses the same lineWidth
         if (prevValue != change.value)
         {
             int fromY, toY;
@@ -769,7 +769,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for zero
     }
 
-    painter.setPen(QPen(finalColor, lineWidth));
+    painter.setPen(QPen(finalColor, lineWidth)); // Uses lineWidth
 
     int endX = timeToX(vcdParser->getEndTime());
 
@@ -787,16 +787,17 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     }
 }
 
+
 void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor)
 {
     int height = bottom - top;
 
-    // Draw a prominent vertical line
-    painter.setPen(QPen(signalColor.lighter(150), 2));
+    // Draw a prominent vertical line with the same line width
+    painter.setPen(QPen(signalColor.lighter(150), lineWidth));
     painter.drawLine(x, top, x, bottom);
 
     // Add small cross markers for visibility
-    int crossSize = 2;
+    int crossSize = 3;
 
     // Top cross
     painter.drawLine(x - crossSize, top + crossSize, x + crossSize, top + crossSize);
@@ -879,7 +880,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
             painter.drawText(centerX - textWidth / 2, textY, displayValue);
         }
 
-        // Draw clear transition line - using same vertical bounds as signals
+        // Draw clean transition line - using same line width as signals
         if (i > 0) // Don't draw transition for first value
         {
             drawCleanTransition(painter, currentX, busTop, busBottom, signalColor);
@@ -917,10 +918,11 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         }
     }
 
-    // Draw clean bus outline - using same thickness as signal transitions
-    painter.setPen(QPen(signalColor, lineWidth)); // Use the same lineWidth as signals
+    // Draw clean bus outline - using same line width as signal transitions
+    painter.setPen(QPen(signalColor, lineWidth)); // Use lineWidth instead of hardcoded 2
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
+
 
 
 void WaveformWidget::updateScrollBar()
