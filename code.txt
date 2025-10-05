@@ -32,6 +32,9 @@ private slots:
     void onItemClicked(QTreeWidgetItem *item, int column);
 
 private:
+    QVector<VCDSignal> allSignals;
+    QSet<QString> visibleSignalIdentifiers; // CHANGE: store fullNames instead of identifiers
+    QSet<QString> selectedSignals;          // CHANGE: store fullNames instead of identifiers
     void buildScopeStructure();
     void populateTopLevelScopes();
     void populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem);
@@ -50,9 +53,6 @@ private:
     QLabel *statusLabel;
 
     // Data storage
-    QVector<VCDSignal> allSignals;
-    QSet<QString> visibleSignalIdentifiers;
-    QSet<QString> selectedSignals;
 
     // Scope structure: scopePath -> list of signals in that scope
     QMap<QString, QVector<VCDSignal>> scopeSignals;
@@ -202,9 +202,10 @@ struct VCDSignal {
     QString scope;
     int width;
     QString type;
+    QString fullName;  // ADD THIS: unique identifier for the signal
 
     bool operator==(const VCDSignal& other) const {
-        return identifier == other.identifier;
+        return fullName == other.fullName;  // Compare using fullName instead of identifier
     }
 };
 
@@ -228,12 +229,13 @@ public:
     QString getError() const { return errorString; }
 
     const QVector<VCDSignal>& getSignals() const { return vcdSignals; }
-    QVector<VCDValueChange> getValueChangesForSignal(const QString &identifier);
+    QVector<VCDValueChange> getValueChangesForSignal(const QString &fullName);  // CHANGE: use fullName
     const QMap<QString, VCDSignal>& getIdentifierMap() const { return identifierMap; }
+    const QMap<QString, VCDSignal>& getFullNameMap() const { return fullNameMap; }  // ADD THIS
     int getEndTime() const { return endTime; }
     
     // Load specific signals on demand
-    bool loadSignalsData(const QList<QString> &identifiers);
+    bool loadSignalsData(const QList<QString> &fullNames);  // CHANGE: use fullNames
 
 private:
     bool parseHeader(QTextStream &stream);
@@ -241,10 +243,12 @@ private:
     void parseScopeLine(const QString &line);
     void parseVarLine(const QString &line);
     void parseTimescale(const QString &line);
+    QString generateFullName(const QString &scope, const QString &name);  // ADD THIS
 
     QString errorString;
     QVector<VCDSignal> vcdSignals;
     QMap<QString, VCDSignal> identifierMap;
+    QMap<QString, VCDSignal> fullNameMap;  // ADD THIS: maps fullName -> VCDSignal
     
     // Data storage
     QMap<QString, QVector<VCDValueChange>> valueChanges;
@@ -475,7 +479,7 @@ private:
     int calculateTotalHeight() const;
     void updateCursorTime(const QPoint &pos);
     void drawSignalNamesColumn(QPainter &painter);
-    void drawSignalValuesColumn(QPainter &painter);
+    void drawSignalValuesColumn(QPainter &painter, int cursorTime);
     void drawWaveformArea(QPainter &painter);
     void drawTimeCursor(QPainter &painter);
     void drawGrid(QPainter &painter);
@@ -592,6 +596,8 @@ private:
 #include <QDebug>
 #include <QApplication>
 #include <QTreeWidgetItemIterator>
+#include <QQueue>
+
 
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent), lastSelectedItem(nullptr)
@@ -682,6 +688,7 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
     if (!data.canConvert<VCDSignal>())
         return;
 
+    VCDSignal signal = data.value<VCDSignal>();
     Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
 
     // Block signals to prevent recursive calls during bulk operations
@@ -719,8 +726,8 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
                 if (i < allSignalItems.size())
                 {
                     QTreeWidgetItem *rangeItem = allSignalItems[i];
-                    VCDSignal signal = rangeItem->data(0, Qt::UserRole).value<VCDSignal>();
-                    selectedSignals.insert(signal.identifier);
+                    VCDSignal rangeSignal = rangeItem->data(0, Qt::UserRole).value<VCDSignal>();
+                    selectedSignals.insert(rangeSignal.fullName); // CHANGE: use fullName
                     rangeItem->setCheckState(0, Qt::Checked);
                 }
             }
@@ -729,15 +736,14 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
     else if (modifiers & Qt::ControlModifier)
     {
         // Ctrl+click: toggle selection of current item
-        VCDSignal signal = data.value<VCDSignal>();
-        if (selectedSignals.contains(signal.identifier))
+        if (selectedSignals.contains(signal.fullName)) // CHANGE: use fullName
         {
-            selectedSignals.remove(signal.identifier);
+            selectedSignals.remove(signal.fullName); // CHANGE: use fullName
             item->setCheckState(0, Qt::Unchecked);
         }
         else
         {
-            selectedSignals.insert(signal.identifier);
+            selectedSignals.insert(signal.fullName); // CHANGE: use fullName
             item->setCheckState(0, Qt::Checked);
         }
         lastSelectedItem = item;
@@ -753,15 +759,14 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
             if (clearData.canConvert<VCDSignal>())
             {
                 VCDSignal clearSignal = clearData.value<VCDSignal>();
-                selectedSignals.remove(clearSignal.identifier);
+                selectedSignals.remove(clearSignal.fullName); // CHANGE: use fullName
                 (*clearIt)->setCheckState(0, Qt::Unchecked);
             }
             ++clearIt;
         }
 
         // Then select the clicked item
-        VCDSignal signal = data.value<VCDSignal>();
-        selectedSignals.insert(signal.identifier);
+        selectedSignals.insert(signal.fullName); // CHANGE: use fullName
         item->setCheckState(0, Qt::Checked);
         lastSelectedItem = item;
     }
@@ -773,6 +778,7 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
 
+
 void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals)
 {
     this->allSignals = allSignals;
@@ -780,15 +786,15 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
     scopeSignals.clear();
     childScopes.clear();
     populatedScopes.clear();
-    lastSelectedItem = nullptr; // Reset last selection
+    lastSelectedItem = nullptr;
 
     signalTree->clear();
 
-    // Create a set of visible signal identifiers
+    // Create a set of visible signal fullNames
     visibleSignalIdentifiers.clear();
     for (const auto &signal : visibleSignals)
     {
-        visibleSignalIdentifiers.insert(signal.identifier);
+        visibleSignalIdentifiers.insert(signal.fullName); // CHANGE: use fullName
     }
 
     statusLabel->setText("Building scope structure...");
@@ -808,6 +814,7 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
                              .arg(scopeSignals.size()));
 }
 
+
 void SignalSelectionDialog::buildScopeStructure()
 {
     int processed = 0;
@@ -815,7 +822,7 @@ void SignalSelectionDialog::buildScopeStructure()
     for (const auto &signal : allSignals)
     {
         // Skip signals that are already visible
-        if (visibleSignalIdentifiers.contains(signal.identifier))
+        if (visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
         {
             processed++;
             continue;
@@ -860,6 +867,7 @@ void SignalSelectionDialog::buildScopeStructure()
         }
     }
 }
+
 
 void SignalSelectionDialog::populateTopLevelScopes()
 {
@@ -1005,155 +1013,6 @@ void SignalSelectionDialog::populateTopLevelScopes()
     qDebug() << "Displaying" << signalTree->topLevelItemCount() << "top-level items";
 }
 
-void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem)
-{
-    if (!parentItem || populatedScopes.contains(scopePath + "_POPULATED"))
-    {
-        return;
-    }
-
-    // Remove placeholder
-    while (parentItem->childCount() > 0)
-    {
-        QTreeWidgetItem *child = parentItem->child(0);
-        if (child->data(0, Qt::UserRole).toString() == "PLACEHOLDER")
-        {
-            delete child;
-            break;
-        }
-    }
-
-    // Make parent item checkable if it's a scope
-    parentItem->setFlags(parentItem->flags() | Qt::ItemIsUserCheckable);
-
-    // Update initial check state for scope
-    updateScopeCheckState(parentItem);
-
-    // Check if this is a fallback group (not a real scope path)
-    bool isFallbackGroup = !scopePath.contains('.') && scopePath != "" &&
-                           scopeSignals.contains(scopePath) &&
-                           !childScopes.contains(scopePath);
-
-    if (isFallbackGroup)
-    {
-        // This is a fallback group - just show the signals directly
-        for (const VCDSignal &signal : scopeSignals[scopePath])
-        {
-            // Apply filter if active
-            if (!currentFilter.isEmpty())
-            {
-                QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
-                if (!signalPath.contains(currentFilter.toLower()))
-                {
-                    continue;
-                }
-            }
-
-            QTreeWidgetItem *signalItem = new QTreeWidgetItem();
-            signalItem->setText(0, signal.name);
-            signalItem->setText(1, QString::number(signal.width));
-            signalItem->setText(2, signal.type);
-            signalItem->setText(3, signal.identifier);
-            signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
-            signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-
-            if (selectedSignals.contains(signal.identifier))
-            {
-                signalItem->setCheckState(0, Qt::Checked);
-            }
-            else
-            {
-                signalItem->setCheckState(0, Qt::Unchecked);
-            }
-
-            parentItem->addChild(signalItem);
-        }
-    }
-    else
-    {
-        // Normal scope processing
-        // Add child scopes
-        if (childScopes.contains(scopePath))
-        {
-            for (const QString &childScopePath : childScopes[scopePath])
-            {
-                QString displayName = childScopePath;
-                // Extract just the last part for display
-                QStringList parts = childScopePath.split('.');
-                if (!parts.isEmpty())
-                {
-                    displayName = parts.last();
-                }
-
-                QTreeWidgetItem *childScopeItem = new QTreeWidgetItem();
-                childScopeItem->setText(0, displayName);
-                childScopeItem->setToolTip(0, childScopePath); // Show full path
-                childScopeItem->setData(0, Qt::UserRole, childScopePath);
-
-                // Add placeholder
-                QTreeWidgetItem *placeholder = new QTreeWidgetItem();
-                placeholder->setText(0, "Loading...");
-                placeholder->setData(0, Qt::UserRole, "PLACEHOLDER");
-                childScopeItem->addChild(placeholder);
-
-                parentItem->addChild(childScopeItem);
-            }
-        }
-
-        // Add signals in this scope
-        if (scopeSignals.contains(scopePath))
-        {
-            for (const VCDSignal &signal : scopeSignals[scopePath])
-            {
-                // Apply filter if active
-                if (!currentFilter.isEmpty())
-                {
-                    QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
-                    if (!signalPath.contains(currentFilter.toLower()))
-                    {
-                        continue;
-                    }
-                }
-
-                QTreeWidgetItem *signalItem = new QTreeWidgetItem();
-                signalItem->setText(0, signal.name);
-                signalItem->setText(1, QString::number(signal.width));
-                signalItem->setText(2, signal.type);
-                signalItem->setText(3, signal.identifier);
-                signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
-                signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-
-                if (selectedSignals.contains(signal.identifier))
-                {
-                    signalItem->setCheckState(0, Qt::Checked);
-                }
-                else
-                {
-                    signalItem->setCheckState(0, Qt::Unchecked);
-                }
-
-                parentItem->addChild(signalItem);
-            }
-        }
-    }
-
-    // For each child scope item, make it checkable and set initial state
-    for (int i = 0; i < parentItem->childCount(); i++)
-    {
-        QTreeWidgetItem *child = parentItem->child(i);
-        QVariant childData = child->data(0, Qt::UserRole);
-
-        // Only make scope items checkable (not signal items)
-        if (!childData.canConvert<VCDSignal>() && childData.toString() != "PLACEHOLDER")
-        {
-            child->setFlags(child->flags() | Qt::ItemIsUserCheckable);
-            updateScopeCheckState(child);
-        }
-    }
-
-    populatedScopes.insert(scopePath + "_POPULATED");
-}
-
 void SignalSelectionDialog::onItemExpanded(QTreeWidgetItem *item)
 {
     QString scopePath = item->data(0, Qt::UserRole).toString();
@@ -1162,58 +1021,6 @@ void SignalSelectionDialog::onItemExpanded(QTreeWidgetItem *item)
         populateScopeChildren(scopePath, item);
     }
 }
-
-void SignalSelectionDialog::updateParentScopeCheckState(QTreeWidgetItem *childItem)
-{
-    if (!childItem) return; // Safety check
-    
-    QTreeWidgetItem *parent = childItem->parent();
-    if (!parent) return;
-
-    // Count checked children
-    int checkedCount = 0;
-    int totalChildren = 0;
-
-    for (int i = 0; i < parent->childCount(); i++)
-    {
-        QTreeWidgetItem *child = parent->child(i);
-        if (!child) continue; // Safety check
-        
-        QVariant data = child->data(0, Qt::UserRole);
-
-        if (data.toString() == "PLACEHOLDER")
-            continue;
-
-        if (child->checkState(0) == Qt::Checked)
-        {
-            checkedCount++;
-        }
-        totalChildren++;
-    }
-
-    // Set parent check state
-    if (totalChildren == 0)
-    {
-        parent->setCheckState(0, Qt::Unchecked);
-    }
-    else if (checkedCount == 0)
-    {
-        parent->setCheckState(0, Qt::Unchecked);
-    }
-    else if (checkedCount == totalChildren)
-    {
-        parent->setCheckState(0, Qt::Checked);
-    }
-    else
-    {
-        parent->setCheckState(0, Qt::PartiallyChecked);
-    }
-
-    // Recursively update grandparents
-    updateParentScopeCheckState(parent);
-}
-
-
 
 void SignalSelectionDialog::onItemChanged(QTreeWidgetItem *item, int column)
 {
@@ -1228,11 +1035,11 @@ void SignalSelectionDialog::onItemChanged(QTreeWidgetItem *item, int column)
         VCDSignal signal = data.value<VCDSignal>();
         if (item->checkState(0) == Qt::Checked)
         {
-            selectedSignals.insert(signal.identifier);
+            selectedSignals.insert(signal.fullName); // CHANGE: use fullName
         }
         else
         {
-            selectedSignals.remove(signal.identifier);
+            selectedSignals.remove(signal.fullName); // CHANGE: use fullName
         }
 
         // Update parent scope check state
@@ -1253,12 +1060,12 @@ QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
 {
     QList<VCDSignal> result;
 
-    for (const QString &identifier : selectedSignals)
+    for (const QString &fullName : selectedSignals) // CHANGE: use fullName
     {
         // Find the signal in allSignals
         for (const VCDSignal &signal : allSignals)
         {
-            if (signal.identifier == identifier)
+            if (signal.fullName == fullName) // CHANGE: use fullName
             {
                 result.append(signal);
                 break;
@@ -1273,6 +1080,16 @@ void SignalSelectionDialog::selectAll()
 {
     signalTree->blockSignals(true);
 
+    // Select all signals in all scopes
+    for (const auto &signal : allSignals)
+    {
+        if (!visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
+        {
+            selectedSignals.insert(signal.fullName); // CHANGE: use fullName
+        }
+    }
+
+    // Update all tree items
     QTreeWidgetItemIterator it(signalTree);
     while (*it)
     {
@@ -1282,13 +1099,16 @@ void SignalSelectionDialog::selectAll()
         if (data.canConvert<VCDSignal>())
         {
             VCDSignal signal = data.value<VCDSignal>();
-            selectedSignals.insert(signal.identifier);
-            item->setCheckState(0, Qt::Checked);
+            if (!visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
+            {
+                item->setCheckState(0, Qt::Checked);
+            }
         }
         else if (data.toString() != "PLACEHOLDER")
         {
-            // Scope item - check it
+            // Scope item - check it and update its state
             item->setCheckState(0, Qt::Checked);
+            updateScopeCheckState(item);
         }
         ++it;
     }
@@ -1296,6 +1116,7 @@ void SignalSelectionDialog::selectAll()
     signalTree->blockSignals(false);
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
+
 
 void SignalSelectionDialog::deselectAll()
 {
@@ -1324,6 +1145,7 @@ void SignalSelectionDialog::deselectAll()
     signalTree->blockSignals(false);
     statusLabel->setText("All signals deselected");
 }
+
 void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 {
     currentFilter = text;
@@ -1427,7 +1249,7 @@ void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 void SignalSelectionDialog::onScopeItemChanged(QTreeWidgetItem *item, int column)
 {
     if (column != 0) return;
-    if (!item) return; // Safety check
+    if (!item) return;
 
     QVariant data = item->data(0, Qt::UserRole);
     QString scopePath = data.toString();
@@ -1443,6 +1265,9 @@ void SignalSelectionDialog::onScopeItemChanged(QTreeWidgetItem *item, int column
 
     // Select/deselect all signals in this scope and all sub-scopes
     setScopeSignalsSelection(scopePath, isChecked);
+
+    // Update the visual check states in the tree for this scope and all children
+    updateTreeWidgetCheckStates(scopePath, isChecked);
 
     // Update parent scopes' check states
     updateParentScopeCheckState(item);
@@ -1466,7 +1291,7 @@ void SignalSelectionDialog::updateTreeWidgetCheckStates(const QString &scopePath
         {
             // Signal item - update if it belongs to this scope or sub-scope
             VCDSignal signal = data.value<VCDSignal>();
-            if (signal.scope.startsWith(scopePath))
+            if (signal.scope == scopePath || signal.scope.startsWith(scopePath + "."))
             {
                 item->setCheckState(0, selected ? Qt::Checked : Qt::Unchecked);
             }
@@ -1475,7 +1300,7 @@ void SignalSelectionDialog::updateTreeWidgetCheckStates(const QString &scopePath
         {
             // Scope item - update if it's this scope or a sub-scope
             QString itemScope = data.toString();
-            if (itemScope.startsWith(scopePath) && itemScope != "PLACEHOLDER")
+            if ((itemScope == scopePath || itemScope.startsWith(scopePath + ".")) && itemScope != "PLACEHOLDER")
             {
                 item->setCheckState(0, selected ? Qt::Checked : Qt::Unchecked);
             }
@@ -1483,7 +1308,6 @@ void SignalSelectionDialog::updateTreeWidgetCheckStates(const QString &scopePath
         ++it;
     }
 }
-
 
 void SignalSelectionDialog::setScopeSignalsSelection(const QString &scopePath, bool selected)
 {
@@ -1494,11 +1318,11 @@ void SignalSelectionDialog::setScopeSignalsSelection(const QString &scopePath, b
         {
             if (selected)
             {
-                selectedSignals.insert(signal.identifier);
+                selectedSignals.insert(signal.fullName); // CHANGE: use fullName
             }
             else
             {
-                selectedSignals.remove(signal.identifier);
+                selectedSignals.remove(signal.fullName); // CHANGE: use fullName
             }
         }
     }
@@ -1511,11 +1335,7 @@ void SignalSelectionDialog::setScopeSignalsSelection(const QString &scopePath, b
             setScopeSignalsSelection(childScope, selected);
         }
     }
-
-    // Update the tree widget items
-    updateTreeWidgetCheckStates(scopePath, selected);
 }
-
 
 
 void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
@@ -1527,7 +1347,7 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
     if (scopePath == "PLACEHOLDER")
         return;
 
-    // Count selected signals in this scope and all sub-scopes
+    // Count ALL selected signals in this scope and ALL sub-scopes
     int totalSignals = 0;
     int selectedSignalsCount = 0;
 
@@ -1537,20 +1357,56 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
         totalSignals += scopeSignals[scopePath].size();
         for (const VCDSignal &signal : scopeSignals[scopePath])
         {
-            if (selectedSignals.contains(signal.identifier))
+            if (selectedSignals.contains(signal.fullName)) // CHANGE: use fullName
             {
                 selectedSignalsCount++;
             }
         }
     }
 
-    // Count signals in child scopes
+    // Count signals in all child scopes recursively using QList
+    QSet<QString> processedScopes;
+    QList<QString> scopesToProcess;
+    
     if (childScopes.contains(scopePath))
     {
         for (const QString &childScope : childScopes[scopePath])
         {
-            // This would need to be implemented to count recursively
-            // For simplicity, we'll rely on the tree structure
+            scopesToProcess.append(childScope);
+        }
+    }
+
+    while (!scopesToProcess.isEmpty())
+    {
+        QString currentScope = scopesToProcess.takeFirst();
+        if (processedScopes.contains(currentScope))
+            continue;
+            
+        processedScopes.insert(currentScope);
+
+        // Count signals in this child scope
+        if (scopeSignals.contains(currentScope))
+        {
+            totalSignals += scopeSignals[currentScope].size();
+            for (const VCDSignal &signal : scopeSignals[currentScope])
+            {
+                if (selectedSignals.contains(signal.fullName)) // CHANGE: use fullName
+                {
+                    selectedSignalsCount++;
+                }
+            }
+        }
+
+        // Add child scopes of this scope to the list
+        if (childScopes.contains(currentScope))
+        {
+            for (const QString &childScope : childScopes[currentScope])
+            {
+                if (!processedScopes.contains(childScope))
+                {
+                    scopesToProcess.append(childScope);
+                }
+            }
         }
     }
 
@@ -1571,6 +1427,159 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
     {
         scopeItem->setCheckState(0, Qt::PartiallyChecked);
     }
+}
+
+void SignalSelectionDialog::updateParentScopeCheckState(QTreeWidgetItem *childItem)
+{
+    if (!childItem) return;
+    
+    QTreeWidgetItem *parent = childItem->parent();
+    if (!parent) return;
+
+    // Update the parent's check state
+    updateScopeCheckState(parent);
+
+    // Recursively update grandparents
+    updateParentScopeCheckState(parent);
+}
+
+void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem)
+{
+    if (!parentItem || populatedScopes.contains(scopePath + "_POPULATED"))
+    {
+        return;
+    }
+
+    // Remove placeholder
+    while (parentItem->childCount() > 0)
+    {
+        QTreeWidgetItem *child = parentItem->child(0);
+        if (child->data(0, Qt::UserRole).toString() == "PLACEHOLDER")
+        {
+            delete child;
+            break;
+        }
+    }
+
+    // Make parent item checkable if it's a scope
+    parentItem->setFlags(parentItem->flags() | Qt::ItemIsUserCheckable);
+
+    // Update initial check state for scope
+    updateScopeCheckState(parentItem);
+
+    // Check if this is a fallback group (not a real scope path)
+    bool isFallbackGroup = !scopePath.contains('.') && scopePath != "" &&
+                           scopeSignals.contains(scopePath) &&
+                           !childScopes.contains(scopePath);
+
+    if (isFallbackGroup)
+    {
+        // This is a fallback group - just show the signals directly
+        for (const VCDSignal &signal : scopeSignals[scopePath])
+        {
+            // Apply filter if active
+            if (!currentFilter.isEmpty())
+            {
+                QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
+                if (!signalPath.contains(currentFilter.toLower()))
+                {
+                    continue;
+                }
+            }
+
+            QTreeWidgetItem *signalItem = new QTreeWidgetItem();
+            signalItem->setText(0, signal.name);
+            signalItem->setText(1, QString::number(signal.width));
+            signalItem->setText(2, signal.type);
+            signalItem->setText(3, signal.identifier);
+            signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+            signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+
+            if (selectedSignals.contains(signal.identifier))
+            {
+                signalItem->setCheckState(0, Qt::Checked);
+            }
+            else
+            {
+                signalItem->setCheckState(0, Qt::Unchecked);
+            }
+
+            parentItem->addChild(signalItem);
+        }
+    }
+    else
+    {
+        // Normal scope processing
+        // Add child scopes
+        if (childScopes.contains(scopePath))
+        {
+            for (const QString &childScopePath : childScopes[scopePath])
+            {
+                QString displayName = childScopePath;
+                // Extract just the last part for display
+                QStringList parts = childScopePath.split('.');
+                if (!parts.isEmpty())
+                {
+                    displayName = parts.last();
+                }
+
+                QTreeWidgetItem *childScopeItem = new QTreeWidgetItem();
+                childScopeItem->setText(0, displayName);
+                childScopeItem->setToolTip(0, childScopePath); // Show full path
+                childScopeItem->setData(0, Qt::UserRole, childScopePath);
+                childScopeItem->setFlags(childScopeItem->flags() | Qt::ItemIsUserCheckable);
+
+                // Set initial check state
+                updateScopeCheckState(childScopeItem);
+
+                // Add placeholder
+                QTreeWidgetItem *placeholder = new QTreeWidgetItem();
+                placeholder->setText(0, "Loading...");
+                placeholder->setData(0, Qt::UserRole, "PLACEHOLDER");
+                childScopeItem->addChild(placeholder);
+
+                parentItem->addChild(childScopeItem);
+            }
+        }
+
+        // Add signals in this scope
+        if (scopeSignals.contains(scopePath))
+        {
+            for (const VCDSignal &signal : scopeSignals[scopePath])
+            {
+                // Apply filter if active
+                if (!currentFilter.isEmpty())
+                {
+                    QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
+                    if (!signalPath.contains(currentFilter.toLower()))
+                    {
+                        continue;
+                    }
+                }
+
+                QTreeWidgetItem *signalItem = new QTreeWidgetItem();
+                signalItem->setText(0, signal.name);
+                signalItem->setText(1, QString::number(signal.width));
+                signalItem->setText(2, signal.type);
+                signalItem->setText(3, signal.identifier);
+                signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+                signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+
+                if (selectedSignals.contains(signal.identifier))
+                {
+                    signalItem->setCheckState(0, Qt::Checked);
+                }
+                else
+                {
+                    signalItem->setCheckState(0, Qt::Unchecked);
+                }
+
+                parentItem->addChild(signalItem);
+            }
+        }
+    }
+
+    populatedScopes.insert(scopePath + "_POPULATED");
 }// file: main.cpp
 #include "mainwindow.h"
 #include <QApplication>
@@ -1974,7 +1983,6 @@ void MainWindow::showAddSignalsDialog()
     // Set signals and show dialog
     dialog.setAvailableSignals(vcdParser->getSignals(), currentSignals);
 
-    int displayedCount;
     if (dialog.exec() == QDialog::Accepted)
     {
         QList<VCDSignal> newSignalsToAdd = dialog.getSelectedSignals();
@@ -1990,7 +1998,7 @@ void MainWindow::showAddSignalsDialog()
             waveformWidget->setVisibleSignals(allSignalsToDisplay);
 
             // Update status
-            displayedCount = 0;
+            int displayedCount = 0;
             for (int i = 0; i < waveformWidget->getItemCount(); i++)
             {
                 const DisplayItem *item = waveformWidget->getItem(i);
@@ -2004,8 +2012,6 @@ void MainWindow::showAddSignalsDialog()
             removeSignalsButton->setEnabled(false);
         }
     }
-
-    statusLabel->setText(QString("%1 signal(s) displayed").arg(displayedCount));
 }
 
 void MainWindow::removeSelectedSignals()
@@ -2197,6 +2203,16 @@ VCDParser::~VCDParser()
 {
 }
 
+
+
+QString VCDParser::generateFullName(const QString &scope, const QString &name)
+{
+    if (scope.isEmpty()) {
+        return name;
+    }
+    return scope + "." + name;
+}
+
 bool VCDParser::parseFile(const QString &filename)
 {
     // For now, use header-only parsing for performance
@@ -2216,6 +2232,7 @@ bool VCDParser::parseHeaderOnly(const QString &filename)
     
     vcdSignals.clear();
     identifierMap.clear();
+    fullNameMap.clear();  // ADD THIS
     currentScope.clear();
     valueChanges.clear();
     loadedSignals.clear();
@@ -2230,6 +2247,8 @@ bool VCDParser::parseHeaderOnly(const QString &filename)
 
     qDebug() << "VCD header parsing completed";
     qDebug() << "Signals found:" << vcdSignals.size();
+    qDebug() << "Unique identifiers:" << identifierMap.size();
+    qDebug() << "Unique full names:" << fullNameMap.size();
 
     return true;
 }
@@ -2237,7 +2256,7 @@ bool VCDParser::parseHeaderOnly(const QString &filename)
 bool VCDParser::parseHeader(QTextStream &stream)
 {
     QRegularExpression scopeRegex("^\\$scope\\s+(\\w+)\\s+(\\S+)\\s*\\$end$");
-    QRegularExpression varRegex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(\\S+.*\\S+)\\s*\\$end$");
+    QRegularExpression varRegex("^\\$var\\s+(\\w+)\\s+(\\d+)\\s+(\\S+)\\s+(.+)\\s*\\$end$");
     QRegularExpression timescaleRegex("^\\$timescale\\s+(\\S+)\\s*\\$end$");
 
     while (!stream.atEnd()) {
@@ -2292,9 +2311,11 @@ bool VCDParser::parseHeader(QTextStream &stream)
     return true;
 }
 
-bool VCDParser::loadSignalsData(const QList<QString> &identifiers)
+
+// Update the value change functions to use fullName
+bool VCDParser::loadSignalsData(const QList<QString> &fullNames)
 {
-    if (identifiers.isEmpty()) {
+    if (fullNames.isEmpty()) {
         return true;
     }
 
@@ -2306,13 +2327,14 @@ bool VCDParser::loadSignalsData(const QList<QString> &identifiers)
 
     QTextStream stream(&file);
     
-    // Convert to set for fast lookup
+    // Convert to set for fast lookup - but we need to map fullNames back to identifiers
     QSet<QString> signalsToLoad;
-    for (const QString &identifier : identifiers) {
-        if (!loadedSignals.contains(identifier)) {
+    for (const QString &fullName : fullNames) {
+        if (fullNameMap.contains(fullName) && !loadedSignals.contains(fullName)) {
+            QString identifier = fullNameMap[fullName].identifier;
             signalsToLoad.insert(identifier);
-            // Initialize empty value changes
-            valueChanges[identifier] = QVector<VCDValueChange>();
+            // Initialize empty value changes using fullName as key
+            valueChanges[fullName] = QVector<VCDValueChange>();
         }
     }
 
@@ -2330,14 +2352,17 @@ bool VCDParser::loadSignalsData(const QList<QString> &identifiers)
 
     file.close();
 
-    // Mark signals as loaded
-    for (const QString &identifier : signalsToLoad) {
-        loadedSignals.insert(identifier);
+    // Mark signals as loaded using fullName
+    for (const QString &fullName : fullNames) {
+        if (fullNameMap.contains(fullName)) {
+            loadedSignals.insert(fullName);
+        }
     }
 
     qDebug() << "Successfully loaded data for" << signalsToLoad.size() << "signals";
     return true;
 }
+
 
 bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QString> &signalsToLoad)
 {
@@ -2347,6 +2372,12 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
 
     int currentTime = 0;
     int changesFound = 0;
+
+    // Create a reverse mapping from identifier to all possible fullNames
+    QMap<QString, QList<QString>> identifierToFullNames;
+    for (const auto &signal : vcdSignals) {
+        identifierToFullNames[signal.identifier].append(signal.fullName);
+    }
 
     while (!stream.atEnd()) {
         QString line = stream.readLine().trimmed();
@@ -2368,11 +2399,16 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
             QString identifier = valueMatch.captured(2);
 
             if (signalsToLoad.contains(identifier)) {
-                VCDValueChange change;
-                change.timestamp = currentTime;
-                change.value = value;
-                valueChanges[identifier].append(change);
-                changesFound++;
+                // Apply this value change to ALL signals with this identifier
+                if (identifierToFullNames.contains(identifier)) {
+                    for (const QString &fullName : identifierToFullNames[identifier]) {
+                        VCDValueChange change;
+                        change.timestamp = currentTime;
+                        change.value = value;
+                        valueChanges[fullName].append(change);
+                        changesFound++;
+                    }
+                }
             }
             continue;
         }
@@ -2384,11 +2420,16 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
             QString identifier = vectorMatch.captured(2);
 
             if (signalsToLoad.contains(identifier)) {
-                VCDValueChange change;
-                change.timestamp = currentTime;
-                change.value = value;
-                valueChanges[identifier].append(change);
-                changesFound++;
+                // Apply this value change to ALL signals with this identifier
+                if (identifierToFullNames.contains(identifier)) {
+                    for (const QString &fullName : identifierToFullNames[identifier]) {
+                        VCDValueChange change;
+                        change.timestamp = currentTime;
+                        change.value = value;
+                        valueChanges[fullName].append(change);
+                        changesFound++;
+                    }
+                }
             }
             continue;
         }
@@ -2401,11 +2442,16 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
                 QString identifier = parts[1];
                 
                 if (signalsToLoad.contains(identifier)) {
-                    VCDValueChange change;
-                    change.timestamp = currentTime;
-                    change.value = value;
-                    valueChanges[identifier].append(change);
-                    changesFound++;
+                    // Apply this value change to ALL signals with this identifier
+                    if (identifierToFullNames.contains(identifier)) {
+                        for (const QString &fullName : identifierToFullNames[identifier]) {
+                            VCDValueChange change;
+                            change.timestamp = currentTime;
+                            change.value = value;
+                            valueChanges[fullName].append(change);
+                            changesFound++;
+                        }
+                    }
                 }
             }
         }
@@ -2414,16 +2460,15 @@ bool VCDParser::parseValueChangesForSignals(QTextStream &stream, const QSet<QStr
     qDebug() << "Found" << changesFound << "value changes for requested signals";
     return true;
 }
-
-QVector<VCDValueChange> VCDParser::getValueChangesForSignal(const QString &identifier)
+QVector<VCDValueChange> VCDParser::getValueChangesForSignal(const QString &fullName)
 {
     // If signal data is not loaded yet, load it now
-    if (!loadedSignals.contains(identifier)) {
-        QList<QString> signalsToLoad = {identifier};
+    if (!loadedSignals.contains(fullName)) {
+        QList<QString> signalsToLoad = {fullName};
         loadSignalsData(signalsToLoad);
     }
     
-    return valueChanges.value(identifier);
+    return valueChanges.value(fullName);
 }
 
 void VCDParser::parseTimescale(const QString &line)
@@ -2466,9 +2511,18 @@ void VCDParser::parseVarLine(const QString &line)
         QString signalName = match.captured(4).trimmed();
         signal.name = signalName;
         signal.scope = currentScope;
+        signal.fullName = generateFullName(currentScope, signalName);
 
         vcdSignals.append(signal);
+        
+        // Store in both maps
         identifierMap[signal.identifier] = signal;
+        fullNameMap[signal.fullName] = signal;
+        
+        // qDebug() << "Parsed signal - Full:" << signal.fullName 
+        //          << "ID:" << signal.identifier 
+        //          << "Scope:" << signal.scope 
+        //          << "Name:" << signal.name;
     }
 }#include "waveformwidget.h"
 #include <QScrollBar>
@@ -2721,6 +2775,94 @@ void WaveformWidget::setBusDisplayFormat(BusFormat format)
     update();
 }
 
+void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
+{
+    if (!showCursor || cursorTime < 0 || !vcdParser)
+        return;
+
+    int valuesColumnStart = signalNamesWidth;
+
+    // Draw values column background
+    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
+
+    // Draw values splitter
+    painter.fillRect(valuesColumnStart + valuesColumnWidth - 1, 0, 2, height(), QColor(100, 100, 100));
+
+    // Draw pinned header (always visible)
+    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
+    painter.setPen(QPen(Qt::white));
+    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value @ Time");
+
+    // Set up clipping to exclude pinned areas from scrolling
+    painter.setClipRect(valuesColumnStart, timeMarkersHeight, valuesColumnWidth, height() - timeMarkersHeight);
+
+    // FIXED: Use same starting position as names column
+    int currentY = timeMarkersHeight - verticalOffset;
+
+    for (int i = 0; i < displayItems.size(); i++)
+    {
+        const auto &item = displayItems[i];
+        int itemHeight = (item.type == DisplayItem::Signal) ? 
+            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
+
+        // Skip drawing if item is outside visible area
+        if (currentY + itemHeight <= timeMarkersHeight) {
+            currentY += itemHeight;
+            continue;
+        }
+        if (currentY >= height()) {
+            break;
+        }
+
+        // Draw background for this row
+        bool isSelected = selectedItems.contains(i);
+        bool isSearchMatch = searchResults.contains(i);
+
+        if (isSelected) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
+        } else if (isSearchActive && isSearchMatch) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(80, 80, 120, 150));
+        } else if (i % 2 == 0) {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
+        } else {
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
+        }
+
+        if (item.type == DisplayItem::Signal) {
+            const VCDSignal &signal = item.signal.signal;
+            
+            // FIX: Use the signal's fullName to get the value
+            QString value = getSignalValueAtTime(signal.fullName, cursorTime);
+
+            // Format the value based on signal type
+            QString displayValue;
+            if (signal.width > 1) {
+                displayValue = formatBusValue(value);
+            } else {
+                displayValue = value.toUpper();
+            }
+
+            // Center text vertically within the item
+            QFontMetrics fm(painter.font());
+            int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
+            
+            painter.setPen(QPen(Qt::white));
+            painter.drawText(valuesColumnStart + 5, textY, displayValue);
+        }
+
+        // Draw horizontal separator
+        painter.setPen(QPen(QColor(80, 80, 80)));
+        painter.drawLine(valuesColumnStart, currentY + itemHeight,
+                         valuesColumnStart + valuesColumnWidth, currentY + itemHeight);
+
+        currentY += itemHeight;
+    }
+
+    // Reset clipping
+    painter.setClipping(false);
+}
+
+
 void WaveformWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
@@ -2731,9 +2873,6 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
         timeScale = 1.0;
         timeOffset = 0;
     }
-
-    // Update which signals are visible before painting
-    
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
@@ -2748,13 +2887,9 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     }
 
     drawSignalNamesColumn(painter);
-    drawSignalValuesColumn(painter);
+    drawSignalValuesColumn(painter, cursorTime); // FIX: Pass cursorTime here
     drawWaveformArea(painter);
     drawTimeCursor(painter);
-    
-    // Debug: show scroll info
-    // painter.setPen(QPen(Qt::yellow));
-    // painter.drawText(10, 20, QString("VOffset: %1/%2").arg(verticalOffset).arg(verticalScrollBar->maximum()));
 }
 
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
@@ -2837,91 +2972,6 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     painter.setClipping(false);
 }
 
-void WaveformWidget::drawSignalValuesColumn(QPainter &painter)
-{
-    if (!showCursor || cursorTime < 0 || !vcdParser)
-        return;
-
-    int valuesColumnStart = signalNamesWidth;
-
-    // Draw values column background
-    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
-
-    // Draw values splitter
-    painter.fillRect(valuesColumnStart + valuesColumnWidth - 1, 0, 2, height(), QColor(100, 100, 100));
-
-    // Draw pinned header (always visible)
-    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
-    painter.setPen(QPen(Qt::white));
-    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value @ Time");
-
-    // Set up clipping to exclude pinned areas from scrolling
-    painter.setClipRect(valuesColumnStart, timeMarkersHeight, valuesColumnWidth, height() - timeMarkersHeight);
-
-    // FIXED: Use same starting position as names column
-    int currentY = timeMarkersHeight - verticalOffset;
-
-    for (int i = 0; i < displayItems.size(); i++)
-    {
-        const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? 
-            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
-
-        // Skip drawing if item is outside visible area
-        if (currentY + itemHeight <= timeMarkersHeight) {
-            currentY += itemHeight;
-            continue;
-        }
-        if (currentY >= height()) {
-            break;
-        }
-
-        // Draw background for this row
-        bool isSelected = selectedItems.contains(i);
-        bool isSearchMatch = searchResults.contains(i);
-
-        if (isSelected) {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
-        } else if (isSearchActive && isSearchMatch) {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(80, 80, 120, 150));
-        } else if (i % 2 == 0) {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
-        } else {
-            // FIXED: Changed 'itemItemHeight' to 'itemHeight'
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
-        }
-
-        if (item.type == DisplayItem::Signal) {
-            const VCDSignal &signal = item.signal.signal;
-            QString value = getSignalValueAtTime(signal.identifier, cursorTime);
-
-            // Format the value based on signal type
-            QString displayValue;
-            if (signal.width > 1) {
-                displayValue = formatBusValue(value);
-            } else {
-                displayValue = value.toUpper();
-            }
-
-            // Center text vertically within the item (same calculation as names column)
-            QFontMetrics fm(painter.font());
-            int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
-            
-            painter.setPen(QPen(Qt::white));
-            painter.drawText(valuesColumnStart + 5, textY, displayValue);
-        }
-
-        // Draw horizontal separator
-        painter.setPen(QPen(QColor(80, 80, 80)));
-        painter.drawLine(valuesColumnStart, currentY + itemHeight,
-                         valuesColumnStart + valuesColumnWidth, currentY + itemHeight);
-
-        currentY += itemHeight;
-    }
-
-    // Reset clipping
-    painter.setClipping(false);
-}
 
 void WaveformWidget::drawWaveformArea(QPainter &painter)
 {
@@ -3096,7 +3146,7 @@ void WaveformWidget::drawSignals(QPainter &painter)
 void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
     // Use lazy loading to get value changes
-    const auto changes = vcdParser->getValueChangesForSignal(signal.identifier);
+    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName); // CHANGE: use fullNa
     if (changes.isEmpty())
         return;
 
@@ -3271,7 +3321,7 @@ void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int 
 void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
     // Use lazy loading to get value changes
-    const auto changes = vcdParser->getValueChangesForSignal(signal.identifier);
+    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName); 
     if (changes.isEmpty())
         return;
 
@@ -3491,10 +3541,10 @@ int WaveformWidget::xToTime(int x) const
     return static_cast<int>(result);
 }
 
-QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time) const
+QString WaveformWidget::getSignalValueAtTime(const QString &fullName, int time) const // CHANGE: parameter name
 {
-    // Use lazy loading
-    const auto changes = vcdParser->getValueChangesForSignal(identifier);
+    // Use lazy loading - use fullName
+    const auto changes = vcdParser->getValueChangesForSignal(fullName); // CHANGE: use fullName
     QString value = "0";
 
     for (const auto &change : changes)
@@ -3507,10 +3557,10 @@ QString WaveformWidget::getSignalValueAtTime(const QString &identifier, int time
     return value;
 }
 
-QString WaveformWidget::getBusValueAtTime(const QString &identifier, int time) const
+QString WaveformWidget::getBusValueAtTime(const QString &fullName, int time) const // CHANGE: parameter name
 {
-    // Use lazy loading
-    const auto changes = vcdParser->getValueChangesForSignal(identifier);
+    // Use lazy loading - use fullName
+    const auto changes = vcdParser->getValueChangesForSignal(fullName); // CHANGE: use fullName
     QString value = "0";
 
     for (const auto &change : changes)
@@ -4036,14 +4086,14 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     // Load data for the selected signals
     if (vcdParser && !visibleSignals.isEmpty())
     {
-        QList<QString> identifiers;
+        QList<QString> fullNames; // CHANGE: use fullNames
         for (const auto &signal : visibleSignals)
         {
-            identifiers.append(signal.identifier);
+            fullNames.append(signal.fullName); // CHANGE: use fullName
         }
 
         // Load signal data before displaying
-        vcdParser->loadSignalsData(identifiers);
+        vcdParser->loadSignalsData(fullNames); // This now uses fullNames
     }
 
     for (const auto &signal : visibleSignals)
@@ -4059,8 +4109,7 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
         zoomFit();
     }
 
-    
-    updateScrollBar(); // Make sure scrollbar is updated
+    updateScrollBar();
     update();
     emit itemSelected(-1);
 }
@@ -4189,12 +4238,13 @@ void WaveformWidget::renameItem(int itemIndex)
     }
 }
 
-QColor WaveformWidget::getSignalColor(const QString &identifier) const
+// Update the color management to use fullName
+QColor WaveformWidget::getSignalColor(const QString &fullName) const // CHANGE: parameter name
 {
     // If user has set a custom color, use it
-    if (signalColors.contains(identifier))
+    if (signalColors.contains(fullName)) // CHANGE: use fullName
     {
-        return signalColors[identifier];
+        return signalColors[fullName]; // CHANGE: use fullName
     }
 
     // Default to #ffe6cd for all signals
@@ -4213,7 +4263,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
         if (isSignalItem(index))
         {
             const VCDSignal &signal = displayItems[index].signal.signal;
-            currentColor = getSignalColor(signal.identifier);
+            currentColor = getSignalColor(signal.fullName); // CHANGE: use fullName
             break;
         }
     }
@@ -4255,7 +4305,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
 
     QAction *selectedAction = colorMenu.exec(QCursor::pos());
 
-    if (selectedAction)
+     if (selectedAction)
     {
         QColor newColor;
 
@@ -4273,13 +4323,13 @@ void WaveformWidget::changeSignalColor(int itemIndex)
             newColor = selectedAction->data().value<QColor>();
         }
 
-        // Apply the color to all selected signals
+        // Apply the color to all selected signals using fullName
         for (int index : selectedItems)
         {
             if (isSignalItem(index))
             {
                 const VCDSignal &signal = displayItems[index].signal.signal;
-                signalColors[signal.identifier] = newColor;
+                signalColors[signal.fullName] = newColor; // CHANGE: use fullName
             }
         }
         update();
@@ -4716,14 +4766,15 @@ void WaveformWidget::applySearchFilter()
     emit itemSelected(lastSelectedItem);
 }
 
-void WaveformWidget::ensureSignalLoaded(const QString &identifier)
+// Update the signal loading functions to use fullName
+void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: parameter name
 {
-    if (!loadedSignalIdentifiers.contains(identifier))
+    if (!loadedSignalIdentifiers.contains(fullName)) // CHANGE: use fullName
     {
-        // Load the signal data - FIXED: use loadSignalsData instead of loadSignalData
-        QList<QString> signalsToLoad = {identifier};
+        // Load the signal data
+        QList<QString> signalsToLoad = {fullName};
         vcdParser->loadSignalsData(signalsToLoad);
-        loadedSignalIdentifiers.insert(identifier);
+        loadedSignalIdentifiers.insert(fullName); // CHANGE: use fullName
 
         // Manage cache size
         if (loadedSignalIdentifiers.size() > MAX_CACHED_SIGNALS)

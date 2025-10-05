@@ -130,21 +130,15 @@ public:
 
     // Add these to the public section of WaveformWidget class
     int getSignalHeight() const { return signalHeight; }
-    int getBusHeight() const { return busHeight; }
     int getLineWidth() const { return lineWidth; }
     void setSignalHeight(int height)
     {
         signalHeight = qMax(5, qMin(50, height)); // Clamp between 5 and 50
         update();
     }
-    void setBusHeight(int height)
-    {
-        busHeight = qMax(5, qMin(50, height)); // Clamp between 5 and 50
-        update();
-    }
     void setLineWidth(int width)
     {
-        lineWidth = qMax(1, qMin(5, width)); // Clamp between 1 and 5 (was 1 and 1)
+        lineWidth = qMax(1, qMin(5, width)); // Clamp between 1 and 5
         update();
     }
     enum BusFormat
@@ -204,16 +198,10 @@ private:
     void updateSearchResults();
     void applySearchFilter();
     // Add these to the private section of WaveformWidget class
-    int signalHeight = 24; // Configurable signal height
-    int busHeight = 30;    // Configurable bus height
+    int signalHeight = 24; // Configurable signal height for both signals and buses
     int lineWidth = 1;     // Configurable line width
-    // Virtual rendering optimization
-    // int visibleSignalBuffer = 50;    // Number of signals to render above/below viewport
-    // QList<int> visibleSignalIndices; // Indices of currently visible signals
 
     // Helper methods for virtual rendering
-    // void updateVisibleSignals();
-    // QList<int> getVisibleSignalIndices() const;
     int calculateTotalHeight() const;
     void updateCursorTime(const QPoint &pos);
     void drawSignalNamesColumn(QPainter &painter);

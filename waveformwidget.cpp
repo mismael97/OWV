@@ -19,8 +19,7 @@ WaveformWidget::WaveformWidget(QWidget *parent)
       valuesColumnWidth(120),
       timeMarkersHeight(30),
       topMargin(0),
-      signalHeight(24),
-      busHeight(30),
+      signalHeight(24), // Only signalHeight remains
       lineWidth(1),
       isDragging(false),
       isDraggingItem(false),
@@ -37,7 +36,7 @@ WaveformWidget::WaveformWidget(QWidget *parent)
       showCursor(true),
       verticalOffset(0),
       isSearchActive(false),
-      MAX_CACHED_SIGNALS(1000) // Add this initialization
+      MAX_CACHED_SIGNALS(1000)
 {
     qDebug() << "WaveformWidget constructor started";
     setFocusPolicy(Qt::StrongFocus);
@@ -60,14 +59,6 @@ WaveformWidget::WaveformWidget(QWidget *parent)
         
         update(); });
     qDebug() << "WaveformWidget constructor completed";
-
-    // Add vertical scrollbar
-    verticalScrollBar = new QScrollBar(Qt::Vertical, this);
-    connect(verticalScrollBar, &QScrollBar::valueChanged, [this](int value)
-            {
-        verticalOffset = value;
-        
-        update(); });
 }
 
 void WaveformWidget::setVcdData(VCDParser *parser)
@@ -276,15 +267,16 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
     for (int i = 0; i < displayItems.size(); i++)
     {
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? 
-            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
 
         // Skip drawing if item is outside visible area
-        if (currentY + itemHeight <= timeMarkersHeight) {
+        if (currentY + itemHeight <= timeMarkersHeight)
+        {
             currentY += itemHeight;
             continue;
         }
-        if (currentY >= height()) {
+        if (currentY >= height())
+        {
             break;
         }
 
@@ -292,34 +284,45 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
         bool isSelected = selectedItems.contains(i);
         bool isSearchMatch = searchResults.contains(i);
 
-        if (isSelected) {
+        if (isSelected)
+        {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
-        } else if (isSearchActive && isSearchMatch) {
+        }
+        else if (isSearchActive && isSearchMatch)
+        {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(80, 80, 120, 150));
-        } else if (i % 2 == 0) {
+        }
+        else if (i % 2 == 0)
+        {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
-        } else {
+        }
+        else
+        {
             painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
         }
 
-        if (item.type == DisplayItem::Signal) {
+        if (item.type == DisplayItem::Signal)
+        {
             const VCDSignal &signal = item.signal.signal;
-            
+
             // FIX: Use the signal's fullName to get the value
             QString value = getSignalValueAtTime(signal.fullName, cursorTime);
 
             // Format the value based on signal type
             QString displayValue;
-            if (signal.width > 1) {
+            if (signal.width > 1)
+            {
                 displayValue = formatBusValue(value);
-            } else {
+            }
+            else
+            {
                 displayValue = value.toUpper();
             }
 
             // Center text vertically within the item
             QFontMetrics fm(painter.font());
             int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
-            
+
             painter.setPen(QPen(Qt::white));
             painter.drawText(valuesColumnStart + 5, textY, displayValue);
         }
@@ -336,13 +339,13 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
     painter.setClipping(false);
 }
 
-
 void WaveformWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
 
     // Global safety check - reset if zoom is completely unreasonable
-    if (timeScale > 1000.0 || timeScale < 0.001) {
+    if (timeScale > 1000.0 || timeScale < 0.001)
+    {
         qDebug() << "Global emergency: Resetting unreasonable zoom:" << timeScale;
         timeScale = 1.0;
         timeOffset = 0;
@@ -354,7 +357,8 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     // Fill entire background with dark theme
     painter.fillRect(rect(), QColor(45, 45, 48));
 
-    if (!vcdParser || displayItems.isEmpty()) {
+    if (!vcdParser || displayItems.isEmpty())
+    {
         painter.setPen(QPen(Qt::white));
         painter.drawText(rect(), Qt::AlignCenter, "No signals selected");
         return;
@@ -388,15 +392,16 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     for (int i = 0; i < displayItems.size(); i++)
     {
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? 
-            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
 
         // Skip drawing if item is completely outside visible area
-        if (currentY + itemHeight <= timeMarkersHeight) {
+        if (currentY + itemHeight <= timeMarkersHeight)
+        {
             currentY += itemHeight;
             continue;
         }
-        if (currentY >= height()) {
+        if (currentY >= height())
+        {
             break;
         }
 
@@ -404,26 +409,42 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         bool isSelected = selectedItems.contains(i);
         bool isSearchMatch = searchResults.contains(i);
 
-        if (isSelected) {
+        if (isSelected)
+        {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(60, 60, 90));
-        } else if (isSearchActive && isSearchMatch) {
+        }
+        else if (isSearchActive && isSearchMatch)
+        {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 80, 120, 150));
-        } else if (item.type == DisplayItem::Space) {
+        }
+        else if (item.type == DisplayItem::Space)
+        {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 160, 80, 120));
-        } else if (i % 2 == 0) {
+        }
+        else if (i % 2 == 0)
+        {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(45, 45, 48));
-        } else {
+        }
+        else
+        {
             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(40, 40, 43));
         }
 
         // Draw item name with appropriate styling
-        if (isSelected) {
+        if (isSelected)
+        {
             painter.setPen(QPen(Qt::white));
-        } else if (isSearchActive && isSearchMatch) {
+        }
+        else if (isSearchActive && isSearchMatch)
+        {
             painter.setPen(QPen(QColor(200, 200, 255)));
-        } else if (item.type == DisplayItem::Space) {
+        }
+        else if (item.type == DisplayItem::Space)
+        {
             painter.setPen(QPen(QColor(150, 255, 150)));
-        } else {
+        }
+        else
+        {
             painter.setPen(QPen(Qt::white));
         }
 
@@ -445,7 +466,6 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     // Reset clipping
     painter.setClipping(false);
 }
-
 
 void WaveformWidget::drawWaveformArea(QPainter &painter)
 {
@@ -472,7 +492,7 @@ void WaveformWidget::drawWaveformArea(QPainter &painter)
 
     // Set up clipping for scrollable waveform area (exclude pinned timeline)
     painter.setClipRect(waveformStartX, timeMarkersHeight, width() - waveformStartX, height() - timeMarkersHeight);
-    
+
     // FIXED: Apply translation that matches the columns
     painter.translate(waveformStartX, timeMarkersHeight - verticalOffset);
 
@@ -489,7 +509,6 @@ void WaveformWidget::drawWaveformArea(QPainter &painter)
     painter.translate(-waveformStartX, -timeMarkersHeight + verticalOffset);
     painter.setClipping(false);
 }
-
 
 void WaveformWidget::drawTimeCursor(QPainter &painter)
 {
@@ -582,25 +601,26 @@ void WaveformWidget::drawSignals(QPainter &painter)
     for (int i = 0; i < displayItems.size(); i++)
     {
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? 
-            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
 
         // Skip drawing if item is completely outside visible area
         int visibleTop = verticalOffset;
         int visibleBottom = verticalOffset + (height() - timeMarkersHeight);
-        
-        if (currentY + itemHeight < visibleTop) {
+
+        if (currentY + itemHeight < visibleTop)
+        {
             currentY += itemHeight;
             continue;
         }
-        if (currentY > visibleBottom) {
+        if (currentY > visibleBottom)
+        {
             break;
         }
 
         if (item.type == DisplayItem::Signal)
         {
             const VCDSignal &signal = item.signal.signal;
-            
+
             // FIXED: Draw at the currentY position (no additional offset needed)
             if (signal.width > 1)
             {
@@ -616,11 +636,10 @@ void WaveformWidget::drawSignals(QPainter &painter)
     }
 }
 
-
 void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
     // Use lazy loading to get value changes
-    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName); // CHANGE: use fullNa
+    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName);
     if (changes.isEmpty())
         return;
 
@@ -808,18 +827,18 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
 
     QColor signalColor = getSignalColor(signal.identifier);
 
-    // Clean styling parameters
-    int busTop = yPos + 2;
-    int busBottom = yPos + busHeight - 2;
-    int busMidY = yPos + busHeight / 2;
+    // USE EXACTLY THE SAME DIMENSIONS AS drawSignalWaveform
+    int busTop = yPos + 3;                    // Same as signalTop
+    int busBottom = yPos + signalHeight - 3;  // Same as signalBottom  
+    int busMidY = yPos + signalHeight / 2;    // Same as signalMidY
     int textY = busMidY + 4;
-    int waveformHeight = busBottom - busTop;
+    int waveformHeight = busBottom - busTop;  // This should now be identical to signal waveform height
 
     int prevTime = 0;
     QString prevValue = getBusValueAtTime(signal.identifier, 0);
     int prevX = timeToX(prevTime);
 
-    // Draw clean bus background
+    // Draw clean bus background - but make it the same visual thickness
     painter.fillRect(prevX, busTop, width() - signalNamesWidth - valuesColumnWidth, waveformHeight, QColor(45, 45, 50));
 
     // Draw value regions with clear transitions
@@ -845,7 +864,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
             regionColor = QColor(70, 70, 90);
         }
 
-        // Draw the value region
+        // Draw the value region - using same height as signals
         painter.fillRect(prevX, busTop, currentX - prevX, waveformHeight, regionColor);
 
         // Draw the value text with clean styling
@@ -860,7 +879,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
             painter.drawText(centerX - textWidth / 2, textY, displayValue);
         }
 
-        // Draw clear transition line
+        // Draw clear transition line - using same vertical bounds as signals
         if (i > 0) // Don't draw transition for first value
         {
             drawCleanTransition(painter, currentX, busTop, busBottom, signalColor);
@@ -898,14 +917,16 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         }
     }
 
-    // Draw clean bus outline
-    painter.setPen(QPen(signalColor, 2));
+    // Draw clean bus outline - using same thickness as signal transitions
+    painter.setPen(QPen(signalColor, lineWidth)); // Use the same lineWidth as signals
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
 
+
 void WaveformWidget::updateScrollBar()
 {
-    if (!vcdParser) {
+    if (!vcdParser)
+    {
         horizontalScrollBar->setRange(0, 0);
         verticalScrollBar->setRange(0, 0);
         return;
@@ -913,10 +934,12 @@ void WaveformWidget::updateScrollBar()
 
     // Calculate viewport dimensions safely
     int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
-    if (viewportWidth < 10) viewportWidth = 10;
-    
+    if (viewportWidth < 10)
+        viewportWidth = 10;
+
     int viewportHeight = height();
-    if (viewportHeight < 10) viewportHeight = 10;
+    if (viewportHeight < 10)
+        viewportHeight = 10;
 
     // Horizontal scrolling (unchanged)
     const int LEFT_MARGIN_PIXELS = static_cast<int>(-10 * timeScale);
@@ -924,7 +947,7 @@ void WaveformWidget::updateScrollBar()
     int timelinePixelWidth = static_cast<int>(vcdParser->getEndTime() * timeScale);
     int totalPixelWidth = timelinePixelWidth + LEFT_MARGIN_PIXELS + RIGHT_MARGIN_PIXELS;
     int maxScrollOffset = qMax(0, totalPixelWidth - viewportWidth);
-    
+
     horizontalScrollBar->setRange(0, maxScrollOffset);
     horizontalScrollBar->setPageStep(viewportWidth);
     horizontalScrollBar->setSingleStep(viewportWidth / 10);
@@ -932,29 +955,33 @@ void WaveformWidget::updateScrollBar()
     // Vertical scrolling - calculate total content height
     int totalHeight = calculateTotalHeight();
     int visibleHeight = height() - timeMarkersHeight; // Subtract pinned timeline
-    
+
     // Only enable vertical scrollbar if content is taller than visible area
-    if (totalHeight > visibleHeight) {
+    if (totalHeight > visibleHeight)
+    {
         int maxVerticalOffset = totalHeight - visibleHeight;
         verticalScrollBar->setRange(0, maxVerticalOffset);
         verticalScrollBar->setPageStep(visibleHeight);
         verticalScrollBar->setSingleStep(30);
         verticalScrollBar->setVisible(true);
-        
+
         // Ensure current offset is within bounds
-        if (verticalOffset > maxVerticalOffset) {
+        if (verticalOffset > maxVerticalOffset)
+        {
             verticalOffset = maxVerticalOffset;
             verticalScrollBar->setValue(verticalOffset);
         }
-    } else {
+    }
+    else
+    {
         verticalScrollBar->setRange(0, 0);
         verticalScrollBar->setVisible(false);
         verticalOffset = 0;
     }
 
-    qDebug() << "Scrollbar - Total height:" << totalHeight 
-             << "Visible height:" << visibleHeight 
-             << "Vertical offset:" << verticalOffset 
+    qDebug() << "Scrollbar - Total height:" << totalHeight
+             << "Visible height:" << visibleHeight
+             << "Vertical offset:" << verticalOffset
              << "Max vertical:" << verticalScrollBar->maximum();
 }
 
@@ -966,7 +993,7 @@ int WaveformWidget::calculateTotalHeight() const
     int totalHeight = topMargin + timeMarkersHeight;
     for (const auto &item : displayItems)
     {
-        int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
         totalHeight += itemHeight;
     }
 
@@ -1119,8 +1146,7 @@ int WaveformWidget::getItemYPosition(int index) const
     for (int i = 0; i < index; i++)
     {
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? 
-            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
         yPos += itemHeight;
     }
     return yPos;
@@ -1153,7 +1179,7 @@ void WaveformWidget::performDrag(int mouseY)
     for (int i = 0; i < displayItems.size(); i++)
     {
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
 
         // Check if mouse is within the first half of the item height (insert above)
         if (adjustedMouseY >= currentY && adjustedMouseY < currentY + itemHeight / 2)
@@ -1290,7 +1316,7 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
                 handleMultiSelection(itemIndex, event);
 
                 // Prepare for drag - update visible signals first
-                
+
                 startDrag(itemIndex);
                 update();
                 emit itemSelected(itemIndex);
@@ -1358,7 +1384,7 @@ void WaveformWidget::mouseMoveEvent(QMouseEvent *event)
         if (isDraggingItem)
         {
             performDrag(event->pos().y());
-            
+
             update();
         }
         else if (isDragging)
@@ -1432,7 +1458,7 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
     {
         // Clear search on Escape and lose focus
         handleSearchInput("");
-        isSearchFocused = false; // Lose focus
+        isSearchFocused = false;
         event->accept();
     }
     else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
@@ -1462,22 +1488,18 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
             QWidget::keyPressEvent(event);
         }
     }
-    // Add signal height adjustment shortcuts - UPDATED
+    // Signal height adjustment shortcuts
     else if (event->modifiers() & Qt::ControlModifier)
     {
         if (event->key() == Qt::Key_Up)
         {
-            // Ctrl+Up to increase signal heights
             setSignalHeight(signalHeight + 2);
-            setBusHeight(busHeight + 2);
             event->accept();
             return;
         }
         else if (event->key() == Qt::Key_Down)
         {
-            // Ctrl+Down to decrease signal heights
             setSignalHeight(signalHeight - 2);
-            setBusHeight(busHeight - 2);
             event->accept();
             return;
         }
@@ -1487,12 +1509,10 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
         // Handle regular text input for search
         if (!isSearchActive)
         {
-            // Start new search
             handleSearchInput(event->text());
         }
         else
         {
-            // Append to existing search
             handleSearchInput(searchText + event->text());
         }
         event->accept();
@@ -1502,6 +1522,8 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
         QWidget::keyPressEvent(event);
     }
 }
+
+
 
 void WaveformWidget::wheelEvent(QWheelEvent *event)
 {
@@ -1538,7 +1560,6 @@ void WaveformWidget::wheelEvent(QWheelEvent *event)
         // Update scrollbar position
         verticalScrollBar->setValue(verticalOffset);
 
-        
         update();
 
         qDebug() << "Vertical scroll - Offset:" << verticalOffset << "Max:" << maxVerticalOffset;
@@ -1639,7 +1660,7 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
 
     // FIXED: Adjust for vertical offset correctly
     int y = pos.y() + verticalOffset - timeMarkersHeight;
-    
+
     if (y < 0)
         return -1;
 
@@ -1647,8 +1668,7 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
     for (int i = 0; i < displayItems.size(); i++)
     {
         const auto &item = displayItems[i];
-        int itemHeight = (item.type == DisplayItem::Signal) ? 
-            (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30;
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
 
         if (y >= currentY && y < currentY + itemHeight)
             return i;
@@ -1657,7 +1677,6 @@ int WaveformWidget::getItemAtPosition(const QPoint &pos) const
 
     return -1;
 }
-
 
 QString WaveformWidget::promptForName(const QString &title, const QString &defaultName)
 {
@@ -1779,7 +1798,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
 
     QAction *selectedAction = colorMenu.exec(QCursor::pos());
 
-     if (selectedAction)
+    if (selectedAction)
     {
         QColor newColor;
 
@@ -2159,8 +2178,6 @@ void WaveformWidget::drawSearchBar(QPainter &painter)
     // topMargin = searchBarHeight;
 }
 
-
-
 void WaveformWidget::searchSignals(const QString &searchText)
 {
     handleSearchInput(searchText);
@@ -2262,4 +2279,3 @@ void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: para
         }
     }
 }
-

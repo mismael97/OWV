@@ -242,14 +242,13 @@ void MainWindow::createMainToolbar()
 void MainWindow::increaseSignalHeight()
 {
     waveformWidget->setSignalHeight(waveformWidget->getSignalHeight() + 2);
-    waveformWidget->setBusHeight(waveformWidget->getBusHeight() + 2);
     statusLabel->setText(QString("Signal height increased to %1").arg(waveformWidget->getSignalHeight()));
 }
+
 
 void MainWindow::decreaseSignalHeight()
 {
     waveformWidget->setSignalHeight(waveformWidget->getSignalHeight() - 2);
-    waveformWidget->setBusHeight(waveformWidget->getBusHeight() - 2);
     statusLabel->setText(QString("Signal height decreased to %1").arg(waveformWidget->getSignalHeight()));
 }
 
