@@ -200,6 +200,19 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+
+bool isSignalSelected(const VCDSignal& signal) const {
+        for (int i = 0; i < displayItems.size(); i++) {
+            if (selectedItems.contains(i) && 
+                displayItems[i].type == DisplayItem::Signal && 
+                displayItems[i].signal.signal.fullName == signal.fullName) {
+                return true;
+            }
+        }
+        return false;
+    }
+    int selectedLineWidth = 3;
+
     // Navigation
     NavigationMode navigationMode = ValueChange;
     int currentEventIndex = -1;

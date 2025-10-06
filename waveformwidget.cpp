@@ -636,6 +636,20 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     if (changes.isEmpty())
         return;
 
+    // Check if this signal is selected
+    bool isSelected = false;
+    for (int i = 0; i < displayItems.size(); i++) {
+        if (selectedItems.contains(i) && 
+            displayItems[i].type == DisplayItem::Signal && 
+            displayItems[i].signal.signal.fullName == signal.fullName) {
+            isSelected = true;
+            break;
+        }
+    }
+
+    // Use thicker line for selected signals
+    int currentLineWidth = isSelected ? selectedLineWidth : lineWidth;
+
     // Emergency check for extreme zoom
     if (timeScale > 1000.0 || timeScale < 0.001)
     {
@@ -701,8 +715,8 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
             }
         }
 
-        // Draw the HORIZONTAL segment based on previous value
-        painter.setPen(QPen(horizontalColor, lineWidth));
+        // Draw the HORIZONTAL segment based on previous value - use currentLineWidth
+        painter.setPen(QPen(horizontalColor, currentLineWidth));
         if (prevIsX || prevIsZ)
         {
             // Previous value was X or Z - draw at middle level
@@ -764,7 +778,8 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
                 verticalColor = QColor(0x01, 0xFF, 0xFF); // Cyan
             }
 
-            painter.setPen(QPen(verticalColor, lineWidth));
+            // Use currentLineWidth for vertical transitions too
+            painter.setPen(QPen(verticalColor, currentLineWidth));
             painter.drawLine(currentX, fromY, currentX, toY);
         }
 
@@ -809,7 +824,8 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         }
     }
 
-    painter.setPen(QPen(finalColor, lineWidth));
+    // Use currentLineWidth for the final segment
+    painter.setPen(QPen(finalColor, currentLineWidth));
 
     int endX = timeToX(vcdParser->getEndTime());
 
@@ -857,6 +873,20 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     const auto changes = vcdParser->getValueChangesForSignal(signal.fullName);
     if (changes.isEmpty())
         return;
+
+        // Check if this signal is selected
+    bool isSelected = false;
+    for (int i = 0; i < displayItems.size(); i++) {
+        if (selectedItems.contains(i) && 
+            displayItems[i].type == DisplayItem::Signal && 
+            displayItems[i].signal.signal.fullName == signal.fullName) {
+            isSelected = true;
+            break;
+        }
+    }
+
+        int currentLineWidth = isSelected ? selectedLineWidth : lineWidth;
+
 
     // Emergency check for extreme zoom
     if (timeScale > 1000.0 || timeScale < 0.001)
@@ -958,8 +988,8 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         }
     }
 
-    // Draw clean bus outline - using same line width as signal transitions
-    painter.setPen(QPen(signalColor, lineWidth)); // Use lineWidth instead of hardcoded 2
+// Draw clean bus outline - use currentLineWidth for selected signals
+    painter.setPen(QPen(signalColor, currentLineWidth));
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
 
