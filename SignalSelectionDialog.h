@@ -12,6 +12,7 @@
 #include <QProgressBar>
 #include <QMap>
 #include <QSet>
+#include <QTimer>
 #include "vcdparser.h"
 
 class SignalSelectionDialog : public QDialog
@@ -32,6 +33,9 @@ private slots:
     void onItemClicked(QTreeWidgetItem *item, int column);
 
 private:
+
+    QTimer *searchTimer;
+    QString pendingSearchText;
     QVector<VCDSignal> allSignals;
     QSet<QString> visibleSignalIdentifiers; // CHANGE: store fullNames instead of identifiers
     QSet<QString> selectedSignals;          // CHANGE: store fullNames instead of identifiers
