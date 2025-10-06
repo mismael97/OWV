@@ -553,37 +553,62 @@ void SignalSelectionDialog::selectAll()
 {
     signalTree->blockSignals(true);
 
-    // Select all signals in all scopes
-    for (const auto &signal : allSignals)
-    {
-        if (!visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
+    if (currentFilter.isEmpty()) {
+        // Original behavior when no search filter
+        for (const auto &signal : allSignals)
         {
-            selectedSignals.insert(signal.fullName); // CHANGE: use fullName
-        }
-    }
-
-    // Update all tree items
-    QTreeWidgetItemIterator it(signalTree);
-    while (*it)
-    {
-        QTreeWidgetItem *item = *it;
-        QVariant data = item->data(0, Qt::UserRole);
-
-        if (data.canConvert<VCDSignal>())
-        {
-            VCDSignal signal = data.value<VCDSignal>();
-            if (!visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
+            if (!visibleSignalIdentifiers.contains(signal.fullName))
             {
-                item->setCheckState(0, Qt::Checked);
+                selectedSignals.insert(signal.fullName);
             }
         }
-        else if (data.toString() != "PLACEHOLDER")
+
+        // Update all tree items
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it)
         {
-            // Scope item - check it and update its state
-            item->setCheckState(0, Qt::Checked);
-            updateScopeCheckState(item);
+            QTreeWidgetItem *item = *it;
+            QVariant data = item->data(0, Qt::UserRole);
+
+            if (data.canConvert<VCDSignal>())
+            {
+                VCDSignal signal = data.value<VCDSignal>();
+                if (!visibleSignalIdentifiers.contains(signal.fullName))
+                {
+                    item->setCheckState(0, Qt::Checked);
+                }
+            }
+            else if (data.toString() != "PLACEHOLDER")
+            {
+                // Scope item - check it and update its state
+                item->setCheckState(0, Qt::Checked);
+                updateScopeCheckState(item);
+            }
+            ++it;
         }
-        ++it;
+    } else {
+        // NEW: When search is active, only select currently displayed signals
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it)
+        {
+            QTreeWidgetItem *item = *it;
+            QVariant data = item->data(0, Qt::UserRole);
+
+            if (data.canConvert<VCDSignal>())
+            {
+                VCDSignal signal = data.value<VCDSignal>();
+                selectedSignals.insert(signal.fullName);
+                item->setCheckState(0, Qt::Checked);
+            }
+            ++it;
+        }
+
+        // Update scope check states for search results
+        for (int i = 0; i < signalTree->topLevelItemCount(); ++i)
+        {
+            QTreeWidgetItem *topLevelItem = signalTree->topLevelItem(i);
+            updateScopeCheckState(topLevelItem);
+        }
     }
 
     signalTree->blockSignals(false);
@@ -595,28 +620,59 @@ void SignalSelectionDialog::deselectAll()
 {
     signalTree->blockSignals(true);
 
-    selectedSignals.clear();
-    QTreeWidgetItemIterator it(signalTree);
-    while (*it)
-    {
-        QTreeWidgetItem *item = *it;
-        QVariant data = item->data(0, Qt::UserRole);
+    if (currentFilter.isEmpty()) {
+        // Original behavior when no search filter
+        selectedSignals.clear();
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it)
+        {
+            QTreeWidgetItem *item = *it;
+            QVariant data = item->data(0, Qt::UserRole);
 
-        if (data.canConvert<VCDSignal>())
-        {
-            item->setCheckState(0, Qt::Unchecked);
+            if (data.canConvert<VCDSignal>())
+            {
+                item->setCheckState(0, Qt::Unchecked);
+            }
+            else if (data.toString() != "PLACEHOLDER")
+            {
+                // Scope item - uncheck it
+                item->setCheckState(0, Qt::Unchecked);
+            }
+            ++it;
         }
-        else if (data.toString() != "PLACEHOLDER")
+    } else {
+        // NEW: When search is active, only deselect currently displayed signals
+        QTreeWidgetItemIterator it(signalTree);
+        while (*it)
         {
-            // Scope item - uncheck it
-            item->setCheckState(0, Qt::Unchecked);
+            QTreeWidgetItem *item = *it;
+            QVariant data = item->data(0, Qt::UserRole);
+
+            if (data.canConvert<VCDSignal>())
+            {
+                VCDSignal signal = data.value<VCDSignal>();
+                selectedSignals.remove(signal.fullName);
+                item->setCheckState(0, Qt::Unchecked);
+            }
+            ++it;
         }
-        ++it;
+
+        // Update scope check states for search results
+        for (int i = 0; i < signalTree->topLevelItemCount(); ++i)
+        {
+            QTreeWidgetItem *topLevelItem = signalTree->topLevelItem(i);
+            updateScopeCheckState(topLevelItem);
+        }
     }
 
     lastSelectedItem = nullptr;
     signalTree->blockSignals(false);
-    statusLabel->setText("All signals deselected");
+    
+    if (currentFilter.isEmpty()) {
+        statusLabel->setText("All signals deselected");
+    } else {
+        statusLabel->setText("All displayed signals deselected");
+    }
 }
 
 void SignalSelectionDialog::displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope)
@@ -672,11 +728,15 @@ void SignalSelectionDialog::displaySearchResults(const QString &text, int matche
 
     signalTree->blockSignals(false);
     signalTree->setUpdatesEnabled(true);
-    
-    // Always show the found count
-    statusLabel->setText(QString("Found %1 signals matching '%2'").arg(matches).arg(text));
-}
 
+    // Updated status message to indicate search mode
+    if (matches > 0) {
+        statusLabel->setText(QString("Found %1 signals matching '%2' - Use Select All/Deselect All for displayed signals only")
+                             .arg(matches).arg(text));
+    } else {
+        statusLabel->setText(QString("No signals found matching '%1'").arg(text));
+    }
+}
 
 void SignalSelectionDialog::performSearch(const QString &text)
 {
