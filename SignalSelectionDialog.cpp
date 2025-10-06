@@ -4,10 +4,16 @@
 #include <QApplication>
 #include <QTreeWidgetItemIterator>
 #include <QQueue>
-#include <QTimer>
+#include <QCloseEvent>
+
+
+void SignalSelectionDialog::onSearchFinished()
+{
+    isSearchInProgress = false;
+}
 
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
-    : QDialog(parent), lastSelectedItem(nullptr)
+    : QDialog(parent), lastSelectedItem(nullptr), isSearchInProgress(false)
 {
     setWindowTitle("Add Signals to Waveform");
     setMinimumSize(800, 600);
@@ -21,31 +27,25 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     searchEdit->setPlaceholderText("Type to search signals...");
     searchEdit->setClearButtonEnabled(true);
 
-    // connect(searchEdit, &QLineEdit::textChanged, this, &SignalSelectionDialog::onSearchTextChanged);
+    // Setup search timer with 300ms delay
     searchTimer = new QTimer(this);
     searchTimer->setSingleShot(true);
-    searchTimer->setInterval(200); // 300ms delay
-    // In SignalSelectionDialog constructor:
-    connect(searchEdit, &QLineEdit::textChanged, this, [this](const QString &text)
-            {
-    // Store the current text
-    pendingSearchText = text;
-    
-    // If text is empty, process immediately (user wants to clear search now)
-    if (text.isEmpty()) {
-        searchTimer->stop(); // Cancel any pending delayed search
-        onSearchTextChanged(text);
-    } else {
-        // For non-empty text, use the 300ms delay
-        searchTimer->start();
-    } });
+    searchTimer->setInterval(300);
 
-    connect(searchTimer, &QTimer::timeout, this, [this]()
-            {
-    // Only process if there's pending text (timer might fire after clear)
-    if (!pendingSearchText.isNull()) {
-        onSearchTextChanged(pendingSearchText);
-    } });
+    connect(searchEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+        pendingSearchText = text;
+        
+        // If text is empty, process immediately
+        if (text.isEmpty()) {
+            searchTimer->stop();
+            onSearchTextChanged(text);
+        } else {
+            // For non-empty text, use the delay
+            searchTimer->start();
+        }
+    });
+
+    connect(searchTimer, &QTimer::timeout, this, &SignalSelectionDialog::onSearchTimerTimeout);
 
     searchLayout->addWidget(searchLabel);
     searchLayout->addWidget(searchEdit);
@@ -68,7 +68,7 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     signalTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     signalTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
 
-    // Connect signals for lazy loading and selection - REMOVE DUPLICATE CONNECTION
+    // Connect signals for lazy loading and selection
     connect(signalTree, &QTreeWidget::itemExpanded, this, &SignalSelectionDialog::onItemExpanded);
     connect(signalTree, &QTreeWidget::itemChanged, this, &SignalSelectionDialog::onItemChanged);
     connect(signalTree, &QTreeWidget::itemClicked, this, &SignalSelectionDialog::onItemClicked);
@@ -209,6 +209,7 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
 
+
 void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals)
 {
     this->allSignals = allSignals;
@@ -243,6 +244,7 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
                              .arg(allSignals.size())
                              .arg(scopeSignals.size()));
 }
+
 
 void SignalSelectionDialog::buildScopeStructure()
 {
@@ -296,6 +298,7 @@ void SignalSelectionDialog::buildScopeStructure()
         }
     }
 }
+
 
 void SignalSelectionDialog::populateTopLevelScopes()
 {
@@ -508,268 +511,247 @@ void SignalSelectionDialog::selectAll()
 {
     signalTree->blockSignals(true);
 
-    if (currentFilter.isEmpty())
+    // Select all signals in all scopes
+    for (const auto &signal : allSignals)
     {
-        // Original behavior when no search filter
-        for (const auto &signal : allSignals)
+        if (!visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
         {
-            if (!visibleSignalIdentifiers.contains(signal.fullName))
-            {
-                selectedSignals.insert(signal.fullName);
-            }
-        }
-
-        // Update all tree items
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it)
-        {
-            QTreeWidgetItem *item = *it;
-            QVariant data = item->data(0, Qt::UserRole);
-
-            if (data.canConvert<VCDSignal>())
-            {
-                VCDSignal signal = data.value<VCDSignal>();
-                if (!visibleSignalIdentifiers.contains(signal.fullName))
-                {
-                    item->setCheckState(0, Qt::Checked);
-                }
-            }
-            else if (data.toString() != "PLACEHOLDER")
-            {
-                // Scope item - check it and update its state
-                item->setCheckState(0, Qt::Checked);
-                updateScopeCheckState(item);
-            }
-            ++it;
+            selectedSignals.insert(signal.fullName); // CHANGE: use fullName
         }
     }
-    else
-    {
-        // NEW: When search is active, only select currently displayed signals
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it)
-        {
-            QTreeWidgetItem *item = *it;
-            QVariant data = item->data(0, Qt::UserRole);
 
-            if (data.canConvert<VCDSignal>())
+    // Update all tree items
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it)
+    {
+        QTreeWidgetItem *item = *it;
+        QVariant data = item->data(0, Qt::UserRole);
+
+        if (data.canConvert<VCDSignal>())
+        {
+            VCDSignal signal = data.value<VCDSignal>();
+            if (!visibleSignalIdentifiers.contains(signal.fullName)) // CHANGE: use fullName
             {
-                VCDSignal signal = data.value<VCDSignal>();
-                selectedSignals.insert(signal.fullName);
                 item->setCheckState(0, Qt::Checked);
             }
-            ++it;
         }
-
-        // Update scope check states for search results
-        for (int i = 0; i < signalTree->topLevelItemCount(); ++i)
+        else if (data.toString() != "PLACEHOLDER")
         {
-            QTreeWidgetItem *topLevelItem = signalTree->topLevelItem(i);
-            updateScopeCheckState(topLevelItem);
+            // Scope item - check it and update its state
+            item->setCheckState(0, Qt::Checked);
+            updateScopeCheckState(item);
         }
+        ++it;
     }
 
     signalTree->blockSignals(false);
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
 
+
 void SignalSelectionDialog::deselectAll()
 {
     signalTree->blockSignals(true);
 
-    if (currentFilter.isEmpty())
+    selectedSignals.clear();
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it)
     {
-        // Original behavior when no search filter
-        selectedSignals.clear();
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it)
-        {
-            QTreeWidgetItem *item = *it;
-            QVariant data = item->data(0, Qt::UserRole);
+        QTreeWidgetItem *item = *it;
+        QVariant data = item->data(0, Qt::UserRole);
 
-            if (data.canConvert<VCDSignal>())
-            {
-                item->setCheckState(0, Qt::Unchecked);
-            }
-            else if (data.toString() != "PLACEHOLDER")
-            {
-                // Scope item - uncheck it
-                item->setCheckState(0, Qt::Unchecked);
-            }
-            ++it;
-        }
-    }
-    else
-    {
-        // NEW: When search is active, only deselect currently displayed signals
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it)
+        if (data.canConvert<VCDSignal>())
         {
-            QTreeWidgetItem *item = *it;
-            QVariant data = item->data(0, Qt::UserRole);
-
-            if (data.canConvert<VCDSignal>())
-            {
-                VCDSignal signal = data.value<VCDSignal>();
-                selectedSignals.remove(signal.fullName);
-                item->setCheckState(0, Qt::Unchecked);
-            }
-            ++it;
+            item->setCheckState(0, Qt::Unchecked);
         }
-
-        // Update scope check states for search results
-        for (int i = 0; i < signalTree->topLevelItemCount(); ++i)
+        else if (data.toString() != "PLACEHOLDER")
         {
-            QTreeWidgetItem *topLevelItem = signalTree->topLevelItem(i);
-            updateScopeCheckState(topLevelItem);
+            // Scope item - uncheck it
+            item->setCheckState(0, Qt::Unchecked);
         }
+        ++it;
     }
 
     lastSelectedItem = nullptr;
     signalTree->blockSignals(false);
-    statusLabel->setText("All displayed signals deselected");
+    statusLabel->setText("All signals deselected");
 }
+
+void SignalSelectionDialog::displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope)
+{
+    if (text != currentFilter) {
+        return; // Stale results
+    }
+
+    signalTree->setUpdatesEnabled(false);
+    signalTree->blockSignals(true);
+    signalTree->clear();
+
+    if (!matchingSignalsByScope.isEmpty()) {
+        for (auto it = matchingSignalsByScope.begin(); it != matchingSignalsByScope.end(); ++it) {
+            QString scopePath = it.key();
+            QVector<VCDSignal> signalsInScope = it.value();
+
+            QTreeWidgetItem *scopeItem;
+            if (scopePath.isEmpty()) {
+                scopeItem = new QTreeWidgetItem(signalTree);
+                scopeItem->setText(0, "Global Signals");
+            } else {
+                scopeItem = new QTreeWidgetItem(signalTree);
+                scopeItem->setText(0, scopePath);
+            }
+
+            scopeItem->setFlags(scopeItem->flags() | Qt::ItemIsUserCheckable);
+            scopeItem->setData(0, Qt::UserRole, scopePath);
+            updateScopeCheckState(scopeItem);
+
+            for (const VCDSignal &signal : signalsInScope) {
+                QTreeWidgetItem *signalItem = new QTreeWidgetItem(scopeItem);
+                signalItem->setText(0, signal.name);
+                signalItem->setText(1, QString::number(signal.width));
+                signalItem->setText(2, signal.type);
+                signalItem->setText(3, signal.identifier);
+                signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+                signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+
+                if (selectedSignals.contains(signal.fullName)) {
+                    signalItem->setCheckState(0, Qt::Checked);
+                } else {
+                    signalItem->setCheckState(0, Qt::Unchecked);
+                }
+            }
+            scopeItem->setExpanded(true);
+        }
+    } else {
+        QTreeWidgetItem *noResultsItem = new QTreeWidgetItem(signalTree);
+        noResultsItem->setText(0, "No signals found matching: " + text);
+        noResultsItem->setFlags(noResultsItem->flags() & ~Qt::ItemIsSelectable);
+    }
+
+    signalTree->blockSignals(false);
+    signalTree->setUpdatesEnabled(true);
+    
+    statusLabel->setText(QString("Found %1 signals matching '%2'").arg(matches).arg(text));
+    progressBar->setVisible(false);
+}
+
+
+void SignalSelectionDialog::performSearch(const QString &text)
+{
+    isSearchInProgress = true;
+    
+    QString searchLower = text.toLower();
+    QMap<QString, QVector<VCDSignal>> matchingSignalsByScope;
+    int matches = 0;
+    int processed = 0;
+
+    const int CHUNK_SIZE = 500; // Process 500 signals at a time
+
+    for (const auto &signal : allSignals) {
+        if (visibleSignalIdentifiers.contains(signal.fullName)) {
+            processed++;
+            continue;
+        }
+
+        QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
+        if (signalPath.contains(searchLower)) {
+            matchingSignalsByScope[signal.scope].append(signal);
+            matches++;
+        }
+
+        processed++;
+        
+        // Process events every CHUNK_SIZE to keep UI responsive
+        if (processed % CHUNK_SIZE == 0) {
+            progressBar->setValue(processed % 100); // Simple progress indication
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            
+            // Check if search was cancelled (new text entered)
+            if (text != currentFilter) {
+                isSearchInProgress = false;
+                return;
+            }
+        }
+    }
+
+    // Display results
+    displaySearchResults(text, matches, matchingSignalsByScope);
+    isSearchInProgress = false;
+    
+    // Check if there's a pending search
+    if (!pendingSearchText.isNull() && pendingSearchText != text) {
+        QTimer::singleShot(0, this, [this]() {
+            onSearchTextChanged(pendingSearchText);
+        });
+    }
+}
+
 
 void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 {
-    // Show searching status for immediate feedback
-    statusLabel->setText("Searching...");
-    QApplication::processEvents(); // Allow UI to update
+    if (isSearchInProgress) {
+        // If a search is already running, we'll let it finish
+        // The new search will be handled when the current one completes
+        pendingSearchText = text;
+        return;
+    }
 
     currentFilter = text;
 
-    // Block signals to prevent recursive updates during tree reconstruction
-    signalTree->blockSignals(true);
-
-    if (text.isEmpty())
-    {
-        // Clear any existing filtering - rebuild the tree
+    // For immediate feedback on empty search
+    if (text.isEmpty()) {
+        signalTree->setUpdatesEnabled(false);
+        signalTree->blockSignals(true);
+        
         signalTree->clear();
         populatedScopes.clear();
         populateTopLevelScopes();
-    }
-    else
-    {
-        // For search, we'll do a simpler flat display of matching signals
-        signalTree->clear();
-
-        progressBar->setVisible(true);
-        progressBar->setRange(0, allSignals.size());
-
-        QString searchLower = text.toLower();
-        int matches = 0;
-        int processed = 0;
-
-        // Group matching signals by scope for the tree display
-        QMap<QString, QVector<VCDSignal>> matchingSignalsByScope;
-
-        for (const auto &signal : allSignals)
-        {
-            // FIX: Use fullName instead of identifier for visibility check
-            if (visibleSignalIdentifiers.contains(signal.fullName))
-            {
-                processed++;
-                continue;
-            }
-
-            // FIX: Use the full path for searching (scope + name)
-            QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
-            if (signalPath.contains(searchLower))
-            {
-                matchingSignalsByScope[signal.scope].append(signal);
-                matches++;
-            }
-
-            processed++;
-            if (processed % 1000 == 0)
-            {
-                progressBar->setValue(processed);
-                QApplication::processEvents();
-            }
-        }
-
-        progressBar->setVisible(false);
-
-        // FIX: Check if matchingSignalsByScope is not empty before iterating
-        if (!matchingSignalsByScope.isEmpty())
-        {
-            QMap<QString, QVector<VCDSignal>>::iterator it;
-            for (it = matchingSignalsByScope.begin(); it != matchingSignalsByScope.end(); ++it)
-            {
-                QString scopePath = it.key();
-                QVector<VCDSignal> signalsInScope = it.value();
-
-                QTreeWidgetItem *scopeItem;
-                if (scopePath.isEmpty())
-                {
-                    scopeItem = new QTreeWidgetItem(signalTree);
-                    scopeItem->setText(0, "Global Signals");
-                }
-                else
-                {
-                    scopeItem = new QTreeWidgetItem(signalTree);
-                    scopeItem->setText(0, scopePath);
-                }
-
-                // Make scope items checkable in search mode too
-                scopeItem->setFlags(scopeItem->flags() | Qt::ItemIsUserCheckable);
-                scopeItem->setData(0, Qt::UserRole, scopePath);
-
-                // FIX: Initialize scope check state
-                updateScopeCheckState(scopeItem);
-
-                for (const VCDSignal &signal : signalsInScope)
-                {
-                    QTreeWidgetItem *signalItem = new QTreeWidgetItem(scopeItem);
-                    signalItem->setText(0, signal.name);
-                    signalItem->setText(1, QString::number(signal.width));
-                    signalItem->setText(2, signal.type);
-                    signalItem->setText(3, signal.identifier);
-                    signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
-                    signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
-
-                    // FIX: Use fullName instead of identifier for selection check
-                    if (selectedSignals.contains(signal.fullName))
-                    {
-                        signalItem->setCheckState(0, Qt::Checked);
-                    }
-                    else
-                    {
-                        signalItem->setCheckState(0, Qt::Unchecked);
-                    }
-                }
-
-                scopeItem->setExpanded(true);
-            }
-        }
-        else
-        {
-            // FIX: Add a "No results" item if no matches found
-            QTreeWidgetItem *noResultsItem = new QTreeWidgetItem(signalTree);
-            noResultsItem->setText(0, "No signals found matching: " + text);
-            noResultsItem->setFlags(noResultsItem->flags() & ~Qt::ItemIsSelectable);
-        }
-
-        if (matches > 0)
-        {
-            statusLabel->setText(QString("Found %1 signals matching '%2' - Use Select All/Deselect All for displayed signals only").arg(matches).arg(text));
-        }
-        else
-        {
-            statusLabel->setText(QString("No signals found matching '%2'").arg(text));
-        }
+        
+        signalTree->blockSignals(false);
+        signalTree->setUpdatesEnabled(true);
+        statusLabel->setText("Ready");
+        return;
     }
 
-    // Unblock signals after tree reconstruction
-    signalTree->blockSignals(false);
+    // Show searching status
+    statusLabel->setText("Searching...");
+    progressBar->setVisible(true);
+    progressBar->setRange(0, 0); // Indeterminate progress
+    
+    QApplication::processEvents(); // Update UI
+
+    // Perform search in main thread but with chunked processing
+    performSearch(text);
+}
+
+SignalSelectionDialog::~SignalSelectionDialog()
+{
+    // Stop any pending search timer
+    if (searchTimer && searchTimer->isActive()) {
+        searchTimer->stop();
+    }
+}
+
+void SignalSelectionDialog::closeEvent(QCloseEvent *event)
+{
+    // Stop any pending search timer
+    if (searchTimer && searchTimer->isActive()) {
+        searchTimer->stop();
+    }
+    QDialog::closeEvent(event);
+}
+
+void SignalSelectionDialog::onSearchTimerTimeout()
+{
+    if (!pendingSearchText.isNull()) {
+        onSearchTextChanged(pendingSearchText);
+    }
 }
 
 void SignalSelectionDialog::onScopeItemChanged(QTreeWidgetItem *item, int column)
 {
-    if (column != 0)
-        return;
-    if (!item)
-        return;
+    if (column != 0) return;
+    if (!item) return;
 
     QVariant data = item->data(0, Qt::UserRole);
     QString scopePath = data.toString();
@@ -857,6 +839,7 @@ void SignalSelectionDialog::setScopeSignalsSelection(const QString &scopePath, b
     }
 }
 
+
 void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
 {
     if (!scopeItem)
@@ -886,7 +869,7 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
     // Count signals in all child scopes recursively using QList
     QSet<QString> processedScopes;
     QList<QString> scopesToProcess;
-
+    
     if (childScopes.contains(scopePath))
     {
         for (const QString &childScope : childScopes[scopePath])
@@ -900,7 +883,7 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
         QString currentScope = scopesToProcess.takeFirst();
         if (processedScopes.contains(currentScope))
             continue;
-
+            
         processedScopes.insert(currentScope);
 
         // Count signals in this child scope
@@ -950,12 +933,10 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
 
 void SignalSelectionDialog::updateParentScopeCheckState(QTreeWidgetItem *childItem)
 {
-    if (!childItem)
-        return;
-
+    if (!childItem) return;
+    
     QTreeWidgetItem *parent = childItem->parent();
-    if (!parent)
-        return;
+    if (!parent) return;
 
     // Update the parent's check state
     updateScopeCheckState(parent);
@@ -1016,8 +997,7 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
             signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
             signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
 
-            // FIX: Use fullName instead of identifier for selection check
-            if (selectedSignals.contains(signal.fullName))
+            if (selectedSignals.contains(signal.identifier))
             {
                 signalItem->setCheckState(0, Qt::Checked);
             }
@@ -1087,8 +1067,7 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
                 signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
                 signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
 
-                // FIX: Use fullName instead of identifier for selection check
-                if (selectedSignals.contains(signal.fullName))
+                if (selectedSignals.contains(signal.identifier))
                 {
                     signalItem->setCheckState(0, Qt::Checked);
                 }

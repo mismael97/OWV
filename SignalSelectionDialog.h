@@ -13,6 +13,8 @@
 #include <QMap>
 #include <QSet>
 #include <QTimer>
+#include <QFuture>
+#include <QFutureWatcher>
 #include "vcdparser.h"
 
 class SignalSelectionDialog : public QDialog
@@ -20,11 +22,16 @@ class SignalSelectionDialog : public QDialog
     Q_OBJECT
 public:
     explicit SignalSelectionDialog(QWidget *parent = nullptr);
+    ~SignalSelectionDialog(); // Add destructor declaration
+
     void setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals);
     QList<VCDSignal> getSelectedSignals() const;
 
+protected:
+    void closeEvent(QCloseEvent *event) override; // Add closeEvent declaration
+
 private slots:
-    void onScopeItemChanged(QTreeWidgetItem *item, int column); // Add this
+    void onScopeItemChanged(QTreeWidgetItem *item, int column);
     void selectAll();
     void deselectAll();
     void onSearchTextChanged(const QString &text);
@@ -32,10 +39,25 @@ private slots:
     void onItemChanged(QTreeWidgetItem *item, int column);
     void onItemClicked(QTreeWidgetItem *item, int column);
 
-private:
+    // Add this new slot
+    void onSearchTimerTimeout();
 
+private:
+    // Remove the QtConcurrent members and add these:
     QTimer *searchTimer;
     QString pendingSearchText;
+    bool isSearchInProgress;
+
+    // Add this method declaration
+    void performSearch(const QString &text);
+    void displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope);
+
+    void onSearchFinished();
+    // Add these
+    QFuture<void> searchFuture;
+    QFutureWatcher<void> searchWatcher;
+    QString currentSearchText;
+
     QVector<VCDSignal> allSignals;
     QSet<QString> visibleSignalIdentifiers; // CHANGE: store fullNames instead of identifiers
     QSet<QString> selectedSignals;          // CHANGE: store fullNames instead of identifiers
