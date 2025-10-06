@@ -15,6 +15,7 @@
 #include <QTimer>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <QtConcurrent>
 #include "vcdparser.h"
 
 class SignalSelectionDialog : public QDialog
@@ -22,13 +23,14 @@ class SignalSelectionDialog : public QDialog
     Q_OBJECT
 public:
     explicit SignalSelectionDialog(QWidget *parent = nullptr);
-    ~SignalSelectionDialog(); // Add destructor declaration
+    ~SignalSelectionDialog();
 
     void setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals);
     QList<VCDSignal> getSelectedSignals() const;
 
 protected:
-    void closeEvent(QCloseEvent *event) override; // Add closeEvent declaration
+    void closeEvent(QCloseEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private slots:
     void onScopeItemChanged(QTreeWidgetItem *item, int column);
@@ -38,38 +40,20 @@ private slots:
     void onItemExpanded(QTreeWidgetItem *item);
     void onItemChanged(QTreeWidgetItem *item, int column);
     void onItemClicked(QTreeWidgetItem *item, int column);
-
-    // Add this new slot
     void onSearchTimerTimeout();
+    void onLoadProgress(int percentage);
+    void onLoadFinished();
 
 private:
-    // Remove the QtConcurrent members and add these:
-    QTimer *searchTimer;
-    QString pendingSearchText;
-    bool isSearchInProgress;
-
-    // Add this method declaration
+ void processNextChunk(); // Add this declaration
+    void populateTopLevelScopes();
     void performSearch(const QString &text);
+    void populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem);
     void displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope);
 
     void onSearchFinished();
-    // Add these
-    QFuture<void> searchFuture;
-    QFutureWatcher<void> searchWatcher;
-    QString currentSearchText;
 
-    QVector<VCDSignal> allSignals;
-    QSet<QString> visibleSignalIdentifiers; // CHANGE: store fullNames instead of identifiers
-    QSet<QString> selectedSignals;          // CHANGE: store fullNames instead of identifiers
-    void buildScopeStructure();
-    void populateTopLevelScopes();
-    void populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem);
-    void filterTree(const QString &filter);
-    void handleMultiSelection(QTreeWidgetItem *item);
-    void updateScopeCheckState(QTreeWidgetItem *scopeItem);                 // Add this
-    void setScopeSignalsSelection(const QString &scopePath, bool selected); // Add this
-    void updateParentScopeCheckState(QTreeWidgetItem *childItem);
-    void updateTreeWidgetCheckStates(const QString &scopePath, bool selected);
+    // UI Components
     QTreeWidget *signalTree;
     QPushButton *selectAllButton;
     QPushButton *deselectAllButton;
@@ -78,19 +62,48 @@ private:
     QProgressBar *progressBar;
     QLabel *statusLabel;
 
-    // Data storage
+    // Loading and search management
+    QTimer *searchTimer;
+    QString pendingSearchText;
+    bool isSearchInProgress;
+    bool isLoadingInProgress;
+    bool isInitialLoadComplete;
 
-    // Scope structure: scopePath -> list of signals in that scope
+        // Loading state variables
+    int currentLoadIndex;
+    int totalSignalsToProcess;
+
+    // Data storage with caching
+    QVector<VCDSignal> allSignals;
+    QSet<QString> visibleSignalIdentifiers;
+    QSet<QString> selectedSignals;
+
+    // Scope structure with loading state
     QMap<QString, QVector<VCDSignal>> scopeSignals;
-    QMap<QString, QStringList> childScopes; // scopePath -> list of immediate child scopes
-
-    // Track which scopes have been populated
+    QMap<QString, QStringList> childScopes;
     QSet<QString> populatedScopes;
+    QSet<QString> loadingScopes; // Scopes currently being loaded
 
     // Multi-selection support
     QTreeWidgetItem *lastSelectedItem;
-
     QString currentFilter;
+
+    // Async loading
+    QFutureWatcher<void> *loadWatcher;
+    QFuture<void> loadFuture;
+
+    // Methods
+    void startInitialLoad();
+    void performInitialLoad();
+    void buildScopeStructure();
+    void populateTopLevelScopesLazy();
+    void buildScopeStructureChunked();
+    void populateScopeChildrenLazy(const QString &scopePath, QTreeWidgetItem *parentItem);
+    void updateScopeCheckState(QTreeWidgetItem *scopeItem);
+    void updateParentScopeCheckState(QTreeWidgetItem *childItem);
+    void setScopeSignalsSelection(const QString &scopePath, bool selected);
+    void updateTreeWidgetCheckStates(const QString &scopePath, bool selected);
+    void handleMultiSelection(QTreeWidgetItem *item);
 };
 
 #endif // SIGNALSELECTIONDIALOG_H

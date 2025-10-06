@@ -31,12 +31,31 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         ${PROJECT_SOURCES}
     )
     
-    # For Qt6, we need to explicitly link Concurrent
+    # For Qt6
     target_link_libraries(OWV PRIVATE 
         Qt${QT_VERSION_MAJOR}::Widgets 
         Qt${QT_VERSION_MAJOR}::Concurrent
     )
+    
+    # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
+    # If you are developing for iOS or macOS you should consider setting an
+    # explicit, fixed bundle identifier manually though.
+    if(${QT_VERSION} VERSION_LESS 6.1.0)
+      set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.OWV)
+    endif()
+    set_target_properties(OWV PROPERTIES
+        ${BUNDLE_ID_OPTION}
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+        MACOSX_BUNDLE TRUE
+        WIN32_EXECUTABLE TRUE
+    )
+    
+    if(QT_VERSION_MAJOR EQUAL 6)
+        qt_finalize_executable(OWV)
+    endif()
 else()
+    # For Qt5
     if(ANDROID)
         add_library(OWV SHARED
             ${PROJECT_SOURCES}
@@ -47,28 +66,20 @@ else()
         add_executable(OWV
             ${PROJECT_SOURCES}
         )
+        
+        set_target_properties(OWV PROPERTIES
+            MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+            MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+            MACOSX_BUNDLE TRUE
+            WIN32_EXECUTABLE TRUE
+        )
     endif()
     
-    # For Qt5, link Concurrent
     target_link_libraries(OWV PRIVATE 
         Qt${QT_VERSION_MAJOR}::Widgets 
         Qt${QT_VERSION_MAJOR}::Concurrent
     )
 endif()
-
-# Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
-# If you are developing for iOS or macOS you should consider setting an
-# explicit, fixed bundle identifier manually though.
-if(${QT_VERSION} VERSION_LESS 6.1.0)
-  set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.OWV)
-endif()
-set_target_properties(OWV PROPERTIES
-    ${BUNDLE_ID_OPTION}
-    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
-    MACOSX_BUNDLE TRUE
-    WIN32_EXECUTABLE TRUE
-)
 
 include(GNUInstallDirs)
 install(TARGETS OWV
@@ -76,7 +87,3 @@ install(TARGETS OWV
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-if(QT_VERSION_MAJOR EQUAL 6)
-    qt_finalize_executable(OWV)
-endif()
