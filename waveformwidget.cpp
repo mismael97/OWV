@@ -650,8 +650,6 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         return;
     }
 
-    QColor defaultColor = QColor(0xFF, 0xE6, 0xCD); // Default color: #ffe6cd
-
     // Hardcoded small offset - 3 pixels from top and bottom
     int signalTop = yPos + 3;
     int signalBottom = yPos + signalHeight - 3;
@@ -668,80 +666,63 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     {
         int currentX = timeToX(change.timestamp);
 
-        // Determine color based on value
-        QColor drawColor = defaultColor; // Default to #ffe6cd
-        bool isX = (change.value == "x" || change.value == "X");
-        bool isZ = (change.value == "z" || change.value == "Z");
-        bool isZero = (change.value == "0");
+        // Determine color for the HORIZONTAL segment based on the PREVIOUS value
+        QColor horizontalColor;
+        
         bool prevIsX = (prevValue == "x" || prevValue == "X");
         bool prevIsZ = (prevValue == "z" || prevValue == "Z");
-        bool prevIsZero = (prevValue == "0");
+        bool isX = (change.value == "x" || change.value == "X");
+        bool isZ = (change.value == "z" || change.value == "Z");
 
-        if (isX)
-        {
-            drawColor = QColor(255, 0, 0); // Red for X
+        // Color for horizontal line is based on the PREVIOUS value
+        if (prevIsX) {
+            horizontalColor = QColor(255, 0, 0); // Red for X
+        } else if (prevIsZ) {
+            horizontalColor = QColor(255, 165, 0); // Orange for Z
+        } else if (prevValue == "0") {
+            horizontalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
+        } else if (prevValue == "1") {
+            horizontalColor = QColor(0, 255, 0); // Green for 1
+        } else {
+            horizontalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
         }
-        else if (isZ)
-        {
-            drawColor = QColor(255, 165, 0); // Orange for Z
-        }
-        else if (isZero)
-        {
-            drawColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for zero
-        }
-        // For '1' values, it will use the default #ffe6cd
 
-        painter.setPen(QPen(drawColor, lineWidth)); // Uses lineWidth
-
-        // Draw the segment based on previous value
-        if (prevIsX || prevIsZ)
-        {
+        // Draw the HORIZONTAL segment based on previous value
+        painter.setPen(QPen(horizontalColor, lineWidth));
+        if (prevIsX || prevIsZ) {
             // Previous value was X or Z - draw at middle level
             painter.drawLine(prevX, middleLevel, currentX, middleLevel);
-        }
-        else if (prevValue == "1")
-        {
+        } else if (prevValue == "1") {
             painter.drawLine(prevX, highLevel, currentX, highLevel);
-        }
-        else
-        {
+        } else {
             // Previous value was zero - draw at low level
             painter.drawLine(prevX, lowLevel, currentX, lowLevel);
         }
 
-        // Draw transition line if value changed - uses the same lineWidth
-        if (prevValue != change.value)
-        {
+        // Draw VERTICAL transition line if value changed - ALWAYS use CYAN color
+        if (prevValue != change.value) {
             int fromY, toY;
 
-            // Determine starting Y position
-            if (prevIsX || prevIsZ)
-            {
+            // Determine starting Y position based on PREVIOUS value
+            if (prevIsX || prevIsZ) {
                 fromY = middleLevel;
-            }
-            else if (prevValue == "1")
-            {
+            } else if (prevValue == "1") {
                 fromY = highLevel;
-            }
-            else
-            {
+            } else {
                 fromY = lowLevel;
             }
 
-            // Determine ending Y position
-            if (isX || isZ)
-            {
+            // Determine ending Y position based on CURRENT value
+            if (isX || isZ) {
                 toY = middleLevel;
-            }
-            else if (change.value == "1")
-            {
+            } else if (change.value == "1") {
                 toY = highLevel;
-            }
-            else
-            {
+            } else {
                 toY = lowLevel;
             }
 
+            // VERTICAL line ALWAYS uses CYAN color
+            painter.setPen(QPen(QColor(0x01, 0xFF, 0xFF), lineWidth)); // Cyan
             painter.drawLine(currentX, fromY, currentX, toY);
         }
 
@@ -750,43 +731,36 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         prevX = currentX;
     }
 
-    // Draw the final segment
-    QColor finalColor = defaultColor;
+    // Draw the final segment - color based on the LAST value
+    QColor finalColor;
+    
     bool finalIsX = (prevValue == "x" || prevValue == "X");
     bool finalIsZ = (prevValue == "z" || prevValue == "Z");
-    bool finalIsZero = (prevValue == "0");
 
-    if (finalIsX)
-    {
-        finalColor = QColor(255, 0, 0);
-    }
-    else if (finalIsZ)
-    {
-        finalColor = QColor(255, 165, 0);
-    }
-    else if (finalIsZero)
-    {
-        finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for zero
+    if (finalIsX) {
+        finalColor = QColor(255, 0, 0); // Red for X
+    } else if (finalIsZ) {
+        finalColor = QColor(255, 165, 0); // Orange for Z
+    } else if (prevValue == "0") {
+        finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
+    } else if (prevValue == "1") {
+        finalColor = QColor(0, 255, 0); // Green for 1
+    } else {
+        finalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
     }
 
-    painter.setPen(QPen(finalColor, lineWidth)); // Uses lineWidth
+    painter.setPen(QPen(finalColor, lineWidth));
 
     int endX = timeToX(vcdParser->getEndTime());
 
-    if (finalIsX || finalIsZ)
-    {
+    if (finalIsX || finalIsZ) {
         painter.drawLine(prevX, middleLevel, endX, middleLevel);
-    }
-    else if (prevValue == "1")
-    {
+    } else if (prevValue == "1") {
         painter.drawLine(prevX, highLevel, endX, highLevel);
-    }
-    else
-    {
+    } else {
         painter.drawLine(prevX, lowLevel, endX, lowLevel);
     }
 }
-
 
 void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor)
 {
@@ -826,7 +800,8 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         return;
     }
 
-    QColor signalColor = getSignalColor(signal.identifier);
+    // FIX: Use getSignalColor to get the color
+    QColor signalColor = getSignalColor(signal.fullName);
 
     // USE EXACTLY THE SAME DIMENSIONS AS drawSignalWaveform
     int busTop = yPos + 3;                    // Same as signalTop
@@ -836,7 +811,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     int waveformHeight = busBottom - busTop;  // This should now be identical to signal waveform height
 
     int prevTime = 0;
-    QString prevValue = getBusValueAtTime(signal.identifier, 0);
+    QString prevValue = getBusValueAtTime(signal.fullName, 0);
     int prevX = timeToX(prevTime);
 
     // Draw clean bus background - but make it the same visual thickness
@@ -922,8 +897,6 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     painter.setPen(QPen(signalColor, lineWidth)); // Use lineWidth instead of hardcoded 2
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
-
-
 
 void WaveformWidget::updateScrollBar()
 {
@@ -1525,8 +1498,6 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
     }
 }
 
-
-
 void WaveformWidget::wheelEvent(QWheelEvent *event)
 {
     if (event->modifiers() & Qt::ControlModifier)
@@ -1733,16 +1704,15 @@ void WaveformWidget::renameItem(int itemIndex)
     }
 }
 
-// Update the color management to use fullName
-QColor WaveformWidget::getSignalColor(const QString &fullName) const // CHANGE: parameter name
+QColor WaveformWidget::getSignalColor(const QString &fullName) const
 {
     // If user has set a custom color, use it
-    if (signalColors.contains(fullName)) // CHANGE: use fullName
+    if (signalColors.contains(fullName))
     {
-        return signalColors[fullName]; // CHANGE: use fullName
+        return signalColors[fullName];
     }
 
-    // Default to #ffe6cd for all signals
+    // Default to #ffe6cd for all signals (this will be overridden for 0 and 1 values)
     return QColor(0xFF, 0xE6, 0xCD);
 }
 
@@ -1758,7 +1728,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
         if (isSignalItem(index))
         {
             const VCDSignal &signal = displayItems[index].signal.signal;
-            currentColor = getSignalColor(signal.fullName); // CHANGE: use fullName
+            currentColor = getSignalColor(signal.fullName);
             break;
         }
     }
@@ -1824,7 +1794,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
             if (isSignalItem(index))
             {
                 const VCDSignal &signal = displayItems[index].signal.signal;
-                signalColors[signal.fullName] = newColor; // CHANGE: use fullName
+                signalColors[signal.fullName] = newColor;
             }
         }
         update();
