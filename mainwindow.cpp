@@ -124,10 +124,6 @@ void MainWindow::createActions()
     lineMediumAction->setChecked(true);
     connect(lineMediumAction, &QAction::triggered, this, &MainWindow::setLineThicknessMedium);
 
-    lineThickAction = new QAction("Thick (3px)", this);
-    lineThickAction->setCheckable(true);
-    connect(lineThickAction, &QAction::triggered, this, &MainWindow::setLineThicknessThick);
-
     // Signal height adjustment actions
     increaseHeightAction = new QAction("Increase Signal Height", this);
     increaseHeightAction->setShortcut(QKeySequence("Ctrl+Up"));
@@ -184,7 +180,6 @@ void MainWindow::createMenuBar()
     lineThicknessMenu = waveMenu->addMenu("Line Thickness");
     lineThicknessMenu->addAction(lineThinAction);
     lineThicknessMenu->addAction(lineMediumAction);
-    lineThicknessMenu->addAction(lineThickAction);
 }
 
 void MainWindow::createMainToolbar()
@@ -265,25 +260,16 @@ void MainWindow::setLineThicknessMedium()
     updateLineThicknessActions();
 }
 
-void MainWindow::setLineThicknessThick()
-{
-    waveformWidget->setLineWidth(3);
-    updateLineThicknessActions();
-}
-
 void MainWindow::updateLineThicknessActions()
 {
     lineThinAction->setChecked(false);
     lineMediumAction->setChecked(false);
-    lineThickAction->setChecked(false);
 
     int currentWidth = waveformWidget->getLineWidth();
     if (currentWidth == 1)
         lineThinAction->setChecked(true);
     else if (currentWidth == 2)
         lineMediumAction->setChecked(true);
-    else if (currentWidth == 3)
-        lineThickAction->setChecked(true);
 }
 
 void MainWindow::createStatusBar()

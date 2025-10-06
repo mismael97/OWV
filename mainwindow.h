@@ -38,7 +38,6 @@ protected:
 private slots:
     void setLineThicknessThin();
     void setLineThicknessMedium();
-    void setLineThicknessThick();
     void openFile();
     void zoomIn();
     void zoomOut();
