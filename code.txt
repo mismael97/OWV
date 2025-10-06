@@ -156,7 +156,6 @@ private slots:
     void removeSelectedSignals();
     void toggleBusDisplayFormat();
     void resetSignalColors();
-    void toggleHighlightBusses();
     void setBusHexFormat();
     void setBusBinaryFormat();
     void setBusOctalFormat();
@@ -166,8 +165,7 @@ private slots:
     void decreaseSignalHeight();
 
 private:
-    void createToolbarBelowMenu(); // Add this line
-
+    void createToolbarBelowMenu();
     void updateLineThicknessActions();
     QAction *increaseHeightAction;
     QAction *decreaseHeightAction;
@@ -179,7 +177,6 @@ private:
     // Wave menu actions
     QMenu *waveMenu;
     QAction *defaultColorsAction;
-    QAction *highlightBussesAction;
     QMenu *busFormatMenu;
     QAction *busHexAction;
     QAction *busBinaryAction;
@@ -193,8 +190,8 @@ private:
     void loadVcdFile(const QString &filename);
     void loadDefaultVcdFile();
 
-    void createMenuBar();     // Renamed from createToolBar()
-    void createMainToolbar(); // Renamed from createToolbarBelowMenu()
+    void createMenuBar();
+    void createMainToolbar();
 
     // Add these to private section
     QToolBar *mainToolBar;
@@ -223,8 +220,7 @@ private:
     VCDParser *vcdParser;
 };
 
-#endif // MAINWINDOW_H
-#ifndef VCDPARSER_H
+#endif // MAINWINDOW_H#ifndef VCDPARSER_H
 #define VCDPARSER_H
 
 #include <QObject>
@@ -459,7 +455,6 @@ public:
     void removeSelectedSignals();
     void selectAllSignals();
     void resetSignalColors();
-    void setHighlightBusses(bool highlight);
     void setBusDisplayFormat(BusFormat format);
     BusFormat getBusDisplayFormat() const { return busDisplayFormat; }
     int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
@@ -588,7 +583,6 @@ private:
 
     // Signal colors
     QMap<QString, QColor> signalColors;
-    bool highlightBusses = false;
     BusFormat busDisplayFormat = Hex;
 
     // Splitter state
@@ -1090,6 +1084,9 @@ void SignalSelectionDialog::populateTopLevelScopes()
 
         populatedScopes.insert("");
         updateScopeCheckState(globalItem);
+        
+        // NEW: Expand the global signals item
+        globalItem->setExpanded(true);
     }
 
     // Find top-level scopes
@@ -1132,11 +1129,13 @@ void SignalSelectionDialog::populateTopLevelScopes()
         signalTree->addTopLevelItem(scopeItem);
         populatedScopes.insert(scope);
         updateScopeCheckState(scopeItem);
+        
+        // NEW: Expand all top-level scope items
+        scopeItem->setExpanded(true);
     }
 
     signalTree->setUpdatesEnabled(true);
 }
-
 
 void SignalSelectionDialog::onItemExpanded(QTreeWidgetItem *item)
 {
@@ -1875,10 +1874,6 @@ void MainWindow::createActions()
     defaultColorsAction = new QAction("Default Colors", this);
     connect(defaultColorsAction, &QAction::triggered, this, &MainWindow::resetSignalColors);
 
-    highlightBussesAction = new QAction("Highlight Busses", this);
-    highlightBussesAction->setCheckable(true);
-    connect(highlightBussesAction, &QAction::triggered, this, &MainWindow::toggleHighlightBusses);
-
     // Bus format actions
     busHexAction = new QAction("Hexadecimal", this);
     busHexAction->setCheckable(true);
@@ -1955,7 +1950,6 @@ void MainWindow::createMenuBar()
     // Signal colors submenu
     QMenu *signalColorsMenu = waveMenu->addMenu("Signal Colors");
     signalColorsMenu->addAction(defaultColorsAction);
-    signalColorsMenu->addAction(highlightBussesAction);
 
     // Bus format submenu
     busFormatMenu = waveMenu->addMenu("Bus Format");
@@ -2349,10 +2343,6 @@ void MainWindow::toggleBusDisplayFormat()
     }
 }
 
-void MainWindow::toggleHighlightBusses()
-{
-    waveformWidget->setHighlightBusses(highlightBussesAction->isChecked());
-}
 
 void MainWindow::setBusHexFormat()
 {
@@ -2764,7 +2754,6 @@ WaveformWidget::WaveformWidget(QWidget *parent)
       dragStartOffset(0),
       dragStartY(0),
       lastSelectedItem(-1),
-      highlightBusses(false),
       busDisplayFormat(Hex),
       draggingNamesSplitter(false),
       draggingValuesSplitter(false),
@@ -2964,12 +2953,6 @@ void WaveformWidget::resetSignalColors()
     update();
 }
 
-void WaveformWidget::setHighlightBusses(bool highlight)
-{
-    highlightBusses = highlight;
-    update();
-}
-
 void WaveformWidget::setBusDisplayFormat(BusFormat format)
 {
     busDisplayFormat = format;
@@ -2992,7 +2975,7 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
     // Draw pinned header (always visible)
     painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
     painter.setPen(QPen(Qt::white));
-    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value @ Time");
+    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value");
 
     // Set up clipping to exclude pinned areas from scrolling
     painter.setClipRect(valuesColumnStart, timeMarkersHeight, valuesColumnWidth, height() - timeMarkersHeight);
@@ -3386,7 +3369,9 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         return;
     }
 
-    QColor defaultColor = QColor(0xFF, 0xE6, 0xCD); // Default color: #ffe6cd
+    // Check if user has set a custom color
+    bool hasCustomColor = signalColors.contains(signal.fullName);
+    QColor customColor = hasCustomColor ? signalColors[signal.fullName] : QColor();
 
     // Hardcoded small offset - 3 pixels from top and bottom
     int signalTop = yPos + 3;
@@ -3404,80 +3389,77 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     {
         int currentX = timeToX(change.timestamp);
 
-        // Determine color based on value
-        QColor drawColor = defaultColor; // Default to #ffe6cd
-        bool isX = (change.value == "x" || change.value == "X");
-        bool isZ = (change.value == "z" || change.value == "Z");
-        bool isZero = (change.value == "0");
+        // Determine color for the HORIZONTAL segment
+        QColor horizontalColor;
+        
         bool prevIsX = (prevValue == "x" || prevValue == "X");
         bool prevIsZ = (prevValue == "z" || prevValue == "Z");
-        bool prevIsZero = (prevValue == "0");
+        bool isX = (change.value == "x" || change.value == "X");
+        bool isZ = (change.value == "z" || change.value == "Z");
 
-        if (isX)
-        {
-            drawColor = QColor(255, 0, 0); // Red for X
+        // If user has chosen a custom color, use it for all horizontal segments
+        if (hasCustomColor) {
+            horizontalColor = customColor;
+        } else {
+            // No custom color - use value-based colors for horizontal segments
+            if (prevIsX) {
+                horizontalColor = QColor(255, 0, 0); // Red for X
+            } else if (prevIsZ) {
+                horizontalColor = QColor(255, 165, 0); // Orange for Z
+            } else if (prevValue == "0") {
+                horizontalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
+            } else if (prevValue == "1") {
+                horizontalColor = QColor(0, 255, 0); // Green for 1
+            } else {
+                horizontalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
+            }
         }
-        else if (isZ)
-        {
-            drawColor = QColor(255, 165, 0); // Orange for Z
-        }
-        else if (isZero)
-        {
-            drawColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for zero
-        }
-        // For '1' values, it will use the default #ffe6cd
 
-        painter.setPen(QPen(drawColor, lineWidth)); // Uses lineWidth
-
-        // Draw the segment based on previous value
-        if (prevIsX || prevIsZ)
-        {
+        // Draw the HORIZONTAL segment based on previous value
+        painter.setPen(QPen(horizontalColor, lineWidth));
+        if (prevIsX || prevIsZ) {
             // Previous value was X or Z - draw at middle level
             painter.drawLine(prevX, middleLevel, currentX, middleLevel);
-        }
-        else if (prevValue == "1")
-        {
+        } else if (prevValue == "1") {
             painter.drawLine(prevX, highLevel, currentX, highLevel);
-        }
-        else
-        {
+        } else {
             // Previous value was zero - draw at low level
             painter.drawLine(prevX, lowLevel, currentX, lowLevel);
         }
 
-        // Draw transition line if value changed - uses the same lineWidth
-        if (prevValue != change.value)
-        {
+        // Draw VERTICAL transition line if value changed
+        if (prevValue != change.value) {
             int fromY, toY;
 
-            // Determine starting Y position
-            if (prevIsX || prevIsZ)
-            {
+            // Determine starting Y position based on PREVIOUS value
+            if (prevIsX || prevIsZ) {
                 fromY = middleLevel;
-            }
-            else if (prevValue == "1")
-            {
+            } else if (prevValue == "1") {
                 fromY = highLevel;
-            }
-            else
-            {
+            } else {
                 fromY = lowLevel;
             }
 
-            // Determine ending Y position
-            if (isX || isZ)
-            {
+            // Determine ending Y position based on CURRENT value
+            if (isX || isZ) {
                 toY = middleLevel;
-            }
-            else if (change.value == "1")
-            {
+            } else if (change.value == "1") {
                 toY = highLevel;
-            }
-            else
-            {
+            } else {
                 toY = lowLevel;
             }
 
+            // Determine color for VERTICAL line
+            QColor verticalColor;
+            if (hasCustomColor) {
+                // Use custom color for vertical lines too
+                verticalColor = customColor;
+            } else {
+                // No custom color - vertical lines use CYAN
+                verticalColor = QColor(0x01, 0xFF, 0xFF); // Cyan
+            }
+
+            painter.setPen(QPen(verticalColor, lineWidth));
             painter.drawLine(currentX, fromY, currentX, toY);
         }
 
@@ -3487,42 +3469,41 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     }
 
     // Draw the final segment
-    QColor finalColor = defaultColor;
+    QColor finalColor;
+    
     bool finalIsX = (prevValue == "x" || prevValue == "X");
     bool finalIsZ = (prevValue == "z" || prevValue == "Z");
-    bool finalIsZero = (prevValue == "0");
 
-    if (finalIsX)
-    {
-        finalColor = QColor(255, 0, 0);
-    }
-    else if (finalIsZ)
-    {
-        finalColor = QColor(255, 165, 0);
-    }
-    else if (finalIsZero)
-    {
-        finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan #01ffff for zero
+    // If user has chosen a custom color, use it for the final segment
+    if (hasCustomColor) {
+        finalColor = customColor;
+    } else {
+        // No custom color - use value-based color for final segment
+        if (finalIsX) {
+            finalColor = QColor(255, 0, 0); // Red for X
+        } else if (finalIsZ) {
+            finalColor = QColor(255, 165, 0); // Orange for Z
+        } else if (prevValue == "0") {
+            finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
+        } else if (prevValue == "1") {
+            finalColor = QColor(0, 255, 0); // Green for 1
+        } else {
+            finalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
+        }
     }
 
-    painter.setPen(QPen(finalColor, lineWidth)); // Uses lineWidth
+    painter.setPen(QPen(finalColor, lineWidth));
 
     int endX = timeToX(vcdParser->getEndTime());
 
-    if (finalIsX || finalIsZ)
-    {
+    if (finalIsX || finalIsZ) {
         painter.drawLine(prevX, middleLevel, endX, middleLevel);
-    }
-    else if (prevValue == "1")
-    {
+    } else if (prevValue == "1") {
         painter.drawLine(prevX, highLevel, endX, highLevel);
-    }
-    else
-    {
+    } else {
         painter.drawLine(prevX, lowLevel, endX, lowLevel);
     }
 }
-
 
 void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int bottom, const QColor &signalColor)
 {
@@ -3562,7 +3543,8 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         return;
     }
 
-    QColor signalColor = getSignalColor(signal.identifier);
+    // FIX: Use getSignalColor to get the color
+    QColor signalColor = getSignalColor(signal.fullName);
 
     // USE EXACTLY THE SAME DIMENSIONS AS drawSignalWaveform
     int busTop = yPos + 3;                    // Same as signalTop
@@ -3572,7 +3554,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     int waveformHeight = busBottom - busTop;  // This should now be identical to signal waveform height
 
     int prevTime = 0;
-    QString prevValue = getBusValueAtTime(signal.identifier, 0);
+    QString prevValue = getBusValueAtTime(signal.fullName, 0);
     int prevX = timeToX(prevTime);
 
     // Draw clean bus background - but make it the same visual thickness
@@ -3658,8 +3640,6 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     painter.setPen(QPen(signalColor, lineWidth)); // Use lineWidth instead of hardcoded 2
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
-
-
 
 void WaveformWidget::updateScrollBar()
 {
@@ -4261,8 +4241,6 @@ void WaveformWidget::keyPressEvent(QKeyEvent *event)
     }
 }
 
-
-
 void WaveformWidget::wheelEvent(QWheelEvent *event)
 {
     if (event->modifiers() & Qt::ControlModifier)
@@ -4469,16 +4447,15 @@ void WaveformWidget::renameItem(int itemIndex)
     }
 }
 
-// Update the color management to use fullName
-QColor WaveformWidget::getSignalColor(const QString &fullName) const // CHANGE: parameter name
+QColor WaveformWidget::getSignalColor(const QString &fullName) const
 {
     // If user has set a custom color, use it
-    if (signalColors.contains(fullName)) // CHANGE: use fullName
+    if (signalColors.contains(fullName))
     {
-        return signalColors[fullName]; // CHANGE: use fullName
+        return signalColors[fullName];
     }
 
-    // Default to #ffe6cd for all signals
+    // Default to #ffe6cd for all signals (this will be overridden for 0 and 1 values)
     return QColor(0xFF, 0xE6, 0xCD);
 }
 
@@ -4494,7 +4471,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
         if (isSignalItem(index))
         {
             const VCDSignal &signal = displayItems[index].signal.signal;
-            currentColor = getSignalColor(signal.fullName); // CHANGE: use fullName
+            currentColor = getSignalColor(signal.fullName);
             break;
         }
     }
@@ -4560,7 +4537,7 @@ void WaveformWidget::changeSignalColor(int itemIndex)
             if (isSignalItem(index))
             {
                 const VCDSignal &signal = displayItems[index].signal.signal;
-                signalColors[signal.fullName] = newColor; // CHANGE: use fullName
+                signalColors[signal.fullName] = newColor;
             }
         }
         update();

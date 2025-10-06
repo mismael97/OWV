@@ -18,6 +18,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QKeyEvent>
+#include <QComboBox>  // ADD THIS
 #include "vcdparser.h"
 #include "waveformwidget.h"
 
@@ -55,6 +56,11 @@ private slots:
     void updateBusFormatActions();
     void increaseSignalHeight();
     void decreaseSignalHeight();
+    
+    // NEW SLOTS:
+    void onNavigationModeChanged(int index);
+    void onPrevValueClicked();
+    void onNextValueClicked();
 
 private:
     void createToolbarBelowMenu();
@@ -84,10 +90,17 @@ private:
 
     void createMenuBar();
     void createMainToolbar();
+    void setupNavigationControls();  // ADD THIS
+    void updateNavigationButtons();  // ADD THIS
 
     // Add these to private section
     QToolBar *mainToolBar;
     QLineEdit *searchField;
+    
+    // Navigation controls
+    QComboBox *navigationModeCombo;
+    QPushButton *prevValueButton;
+    QPushButton *nextValueButton;
 
     // UI Components
     WaveformWidget *waveformWidget;

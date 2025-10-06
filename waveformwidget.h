@@ -124,6 +124,22 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    enum NavigationMode
+    {
+        ValueChange,
+        SignalRise,
+        SignalFall,
+        XValues,
+        ZValues
+    };
+    void setNavigationMode(NavigationMode mode);
+    void navigateToPreviousEvent();
+    void navigateToNextEvent();
+    bool hasPreviousEvent() const;
+    bool hasNextEvent() const;
+
+    void selectSignalAtPosition(const QPoint &pos);
+
     void ensureSignalLoaded(const QString &identifier);
     void searchSignals(const QString &searchText);
     void clearSearch();
@@ -184,6 +200,17 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    // Navigation
+    NavigationMode navigationMode = ValueChange;
+    int currentEventIndex = -1;
+    QVector<int> eventTimestamps;
+
+    void updateEventList();
+    int findEventIndexForTime(int time) const;
+    int getCurrentEventTime() const;
+
+    // Signal selection from waveform area
+    void handleWaveformClick(const QPoint &pos);
     // Track which signals have been loaded to avoid reloading
     QSet<QString> loadedSignalIdentifiers;
 

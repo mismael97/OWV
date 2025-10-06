@@ -665,70 +665,101 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
 
         // Determine color for the HORIZONTAL segment
         QColor horizontalColor;
-        
+
         bool prevIsX = (prevValue == "x" || prevValue == "X");
         bool prevIsZ = (prevValue == "z" || prevValue == "Z");
         bool isX = (change.value == "x" || change.value == "X");
         bool isZ = (change.value == "z" || change.value == "Z");
 
         // If user has chosen a custom color, use it for all horizontal segments
-        if (hasCustomColor) {
+        if (hasCustomColor)
+        {
             horizontalColor = customColor;
-        } else {
+        }
+        else
+        {
             // No custom color - use value-based colors for horizontal segments
-            if (prevIsX) {
+            if (prevIsX)
+            {
                 horizontalColor = QColor(255, 0, 0); // Red for X
-            } else if (prevIsZ) {
+            }
+            else if (prevIsZ)
+            {
                 horizontalColor = QColor(255, 165, 0); // Orange for Z
-            } else if (prevValue == "0") {
+            }
+            else if (prevValue == "0")
+            {
                 horizontalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
-            } else if (prevValue == "1") {
+            }
+            else if (prevValue == "1")
+            {
                 horizontalColor = QColor(0, 255, 0); // Green for 1
-            } else {
+            }
+            else
+            {
                 horizontalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
             }
         }
 
         // Draw the HORIZONTAL segment based on previous value
         painter.setPen(QPen(horizontalColor, lineWidth));
-        if (prevIsX || prevIsZ) {
+        if (prevIsX || prevIsZ)
+        {
             // Previous value was X or Z - draw at middle level
             painter.drawLine(prevX, middleLevel, currentX, middleLevel);
-        } else if (prevValue == "1") {
+        }
+        else if (prevValue == "1")
+        {
             painter.drawLine(prevX, highLevel, currentX, highLevel);
-        } else {
+        }
+        else
+        {
             // Previous value was zero - draw at low level
             painter.drawLine(prevX, lowLevel, currentX, lowLevel);
         }
 
         // Draw VERTICAL transition line if value changed
-        if (prevValue != change.value) {
+        if (prevValue != change.value)
+        {
             int fromY, toY;
 
             // Determine starting Y position based on PREVIOUS value
-            if (prevIsX || prevIsZ) {
+            if (prevIsX || prevIsZ)
+            {
                 fromY = middleLevel;
-            } else if (prevValue == "1") {
+            }
+            else if (prevValue == "1")
+            {
                 fromY = highLevel;
-            } else {
+            }
+            else
+            {
                 fromY = lowLevel;
             }
 
             // Determine ending Y position based on CURRENT value
-            if (isX || isZ) {
+            if (isX || isZ)
+            {
                 toY = middleLevel;
-            } else if (change.value == "1") {
+            }
+            else if (change.value == "1")
+            {
                 toY = highLevel;
-            } else {
+            }
+            else
+            {
                 toY = lowLevel;
             }
 
             // Determine color for VERTICAL line
             QColor verticalColor;
-            if (hasCustomColor) {
+            if (hasCustomColor)
+            {
                 // Use custom color for vertical lines too
                 verticalColor = customColor;
-            } else {
+            }
+            else
+            {
                 // No custom color - vertical lines use CYAN
                 verticalColor = QColor(0x01, 0xFF, 0xFF); // Cyan
             }
@@ -744,24 +775,36 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
 
     // Draw the final segment
     QColor finalColor;
-    
+
     bool finalIsX = (prevValue == "x" || prevValue == "X");
     bool finalIsZ = (prevValue == "z" || prevValue == "Z");
 
     // If user has chosen a custom color, use it for the final segment
-    if (hasCustomColor) {
+    if (hasCustomColor)
+    {
         finalColor = customColor;
-    } else {
+    }
+    else
+    {
         // No custom color - use value-based color for final segment
-        if (finalIsX) {
+        if (finalIsX)
+        {
             finalColor = QColor(255, 0, 0); // Red for X
-        } else if (finalIsZ) {
+        }
+        else if (finalIsZ)
+        {
             finalColor = QColor(255, 165, 0); // Orange for Z
-        } else if (prevValue == "0") {
+        }
+        else if (prevValue == "0")
+        {
             finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
-        } else if (prevValue == "1") {
+        }
+        else if (prevValue == "1")
+        {
             finalColor = QColor(0, 255, 0); // Green for 1
-        } else {
+        }
+        else
+        {
             finalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
         }
     }
@@ -770,11 +813,16 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
 
     int endX = timeToX(vcdParser->getEndTime());
 
-    if (finalIsX || finalIsZ) {
+    if (finalIsX || finalIsZ)
+    {
         painter.drawLine(prevX, middleLevel, endX, middleLevel);
-    } else if (prevValue == "1") {
+    }
+    else if (prevValue == "1")
+    {
         painter.drawLine(prevX, highLevel, endX, highLevel);
-    } else {
+    }
+    else
+    {
         painter.drawLine(prevX, lowLevel, endX, lowLevel);
     }
 }
@@ -806,7 +854,7 @@ void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int 
 void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal, int yPos)
 {
     // Use lazy loading to get value changes
-    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName); 
+    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName);
     if (changes.isEmpty())
         return;
 
@@ -821,11 +869,11 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     QColor signalColor = getSignalColor(signal.fullName);
 
     // USE EXACTLY THE SAME DIMENSIONS AS drawSignalWaveform
-    int busTop = yPos + 3;                    // Same as signalTop
-    int busBottom = yPos + signalHeight - 3;  // Same as signalBottom  
-    int busMidY = yPos + signalHeight / 2;    // Same as signalMidY
+    int busTop = yPos + 3;                   // Same as signalTop
+    int busBottom = yPos + signalHeight - 3; // Same as signalBottom
+    int busMidY = yPos + signalHeight / 2;   // Same as signalMidY
     int textY = busMidY + 4;
-    int waveformHeight = busBottom - busTop;  // This should now be identical to signal waveform height
+    int waveformHeight = busBottom - busTop; // This should now be identical to signal waveform height
 
     int prevTime = 0;
     QString prevValue = getBusValueAtTime(signal.fullName, 0);
@@ -1281,6 +1329,8 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
     }
     else if (event->button() == Qt::LeftButton)
     {
+        handleWaveformClick(event->pos());
+
         // Also allow setting cursor time when clicking in the main waveform area (excluding pinned timeline)
         if (inWaveformArea && event->pos().y() >= timeMarkersHeight)
         {
@@ -1599,9 +1649,19 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     emit itemSelected(-1);
 }
 
+// Update WaveformWidget::contextMenuEvent to handle waveform area context menus
 void WaveformWidget::contextMenuEvent(QContextMenuEvent *event)
 {
     int itemIndex = getItemAtPosition(event->pos());
+    
+    // If no item clicked but we're in waveform area, try to find signal under cursor
+    if (itemIndex == -1) {
+        int waveformStartX = signalNamesWidth + valuesColumnWidth;
+        QPoint adjustedPos = event->pos();
+        adjustedPos.setX(adjustedPos.x() - waveformStartX);
+        itemIndex = getItemAtPosition(adjustedPos);
+    }
+    
     showContextMenu(event->globalPos(), itemIndex);
 }
 
@@ -2266,5 +2326,196 @@ void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: para
                 loadedSignalIdentifiers.remove(oldestSignal);
             }
         }
+    }
+}
+
+void WaveformWidget::setNavigationMode(NavigationMode mode)
+{
+    navigationMode = mode;
+    updateEventList();
+    currentEventIndex = -1;
+}
+
+void WaveformWidget::navigateToPreviousEvent()
+{
+    if (eventTimestamps.isEmpty() || currentEventIndex <= 0)
+        return;
+
+    currentEventIndex--;
+    int targetTime = eventTimestamps[currentEventIndex];
+
+    // Center the view on the target time
+    int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
+    int targetX = timeToX(targetTime);
+    timeOffset = qMax(0, targetX - viewportWidth / 2);
+
+    // Update cursor
+    cursorTime = targetTime;
+    showCursor = true;
+
+    updateScrollBar();
+    update();
+    emit timeChanged(cursorTime);
+}
+
+void WaveformWidget::navigateToNextEvent()
+{
+    if (eventTimestamps.isEmpty() || currentEventIndex >= eventTimestamps.size() - 1)
+        return;
+
+    if (currentEventIndex == -1)
+    {
+        currentEventIndex = 0;
+    }
+    else
+    {
+        currentEventIndex++;
+    }
+
+    int targetTime = eventTimestamps[currentEventIndex];
+
+    // Center the view on the target time
+    int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
+    int targetX = timeToX(targetTime);
+    timeOffset = qMax(0, targetX - viewportWidth / 2);
+
+    // Update cursor
+    cursorTime = targetTime;
+    showCursor = true;
+
+    updateScrollBar();
+    update();
+    emit timeChanged(cursorTime);
+}
+
+bool WaveformWidget::hasPreviousEvent() const
+{
+    return !eventTimestamps.isEmpty() && currentEventIndex > 0;
+}
+
+bool WaveformWidget::hasNextEvent() const
+{
+    return !eventTimestamps.isEmpty() &&
+           (currentEventIndex < eventTimestamps.size() - 1 || currentEventIndex == -1);
+}
+
+void WaveformWidget::updateEventList()
+{
+    eventTimestamps.clear();
+
+    if (selectedItems.isEmpty() || !vcdParser)
+        return;
+
+    // Get the first selected signal
+    int selectedIndex = *selectedItems.begin();
+    if (!isSignalItem(selectedIndex))
+        return;
+
+    const VCDSignal &signal = getSignalFromItem(selectedIndex);
+    const auto changes = vcdParser->getValueChangesForSignal(signal.fullName);
+
+    if (changes.isEmpty())
+        return;
+
+    // Collect events based on navigation mode
+    QString prevValue;
+    for (int i = 0; i < changes.size(); i++)
+    {
+        const auto &change = changes[i];
+        bool includeEvent = false;
+
+        switch (navigationMode)
+        {
+        case ValueChange:
+            includeEvent = (i > 0); // All changes except first
+            break;
+
+        case SignalRise:
+            includeEvent = (prevValue == "0" && change.value == "1");
+            break;
+
+        case SignalFall:
+            includeEvent = (prevValue == "1" && change.value == "0");
+            break;
+
+        case XValues:
+            includeEvent = (change.value.toLower() == "x");
+            break;
+
+        case ZValues:
+            includeEvent = (change.value.toLower() == "z");
+            break;
+        }
+
+        if (includeEvent)
+        {
+            eventTimestamps.append(change.timestamp);
+        }
+
+        prevValue = change.value;
+    }
+
+    // Set current index based on cursor position
+    currentEventIndex = findEventIndexForTime(cursorTime);
+}
+
+int WaveformWidget::findEventIndexForTime(int time) const
+{
+    for (int i = 0; i < eventTimestamps.size(); i++)
+    {
+        if (eventTimestamps[i] >= time)
+        {
+            return i;
+        }
+    }
+    return eventTimestamps.size() - 1;
+}
+
+int WaveformWidget::getCurrentEventTime() const
+{
+    if (currentEventIndex >= 0 && currentEventIndex < eventTimestamps.size())
+    {
+        return eventTimestamps[currentEventIndex];
+    }
+    return cursorTime;
+}
+
+void WaveformWidget::selectSignalAtPosition(const QPoint &pos)
+{
+    int itemIndex = getItemAtPosition(pos);
+    if (itemIndex >= 0 && isSignalItem(itemIndex))
+    {
+        // Single selection
+        selectedItems.clear();
+        selectedItems.insert(itemIndex);
+        lastSelectedItem = itemIndex;
+
+        updateEventList(); // Update events for newly selected signal
+
+        update();
+        emit itemSelected(itemIndex);
+    }
+}
+
+void WaveformWidget::handleWaveformClick(const QPoint &pos)
+{
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+
+    // Check if click is in waveform area (not in names or values columns)
+    if (pos.x() >= waveformStartX && pos.y() >= timeMarkersHeight)
+    {
+        // Try to select signal at this position
+        selectSignalAtPosition(pos);
+
+        // Also set cursor time
+        int clickXInWaveform = pos.x() - waveformStartX;
+        cursorTime = xToTime(clickXInWaveform);
+        showCursor = true;
+
+        // Update event index based on new cursor position
+        currentEventIndex = findEventIndexForTime(cursorTime);
+
+        update();
+        emit timeChanged(cursorTime);
     }
 }

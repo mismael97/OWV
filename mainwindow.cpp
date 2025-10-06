@@ -30,6 +30,7 @@ MainWindow::MainWindow(QWidget *parent)
     setupUI();
     createMenuBar();
     createMainToolbar();
+    setupNavigationControls();
     createStatusBar();
 
     loadDefaultVcdFile();
@@ -241,7 +242,6 @@ void MainWindow::increaseSignalHeight()
     statusLabel->setText(QString("Signal height increased to %1").arg(waveformWidget->getSignalHeight()));
 }
 
-
 void MainWindow::decreaseSignalHeight()
 {
     waveformWidget->setSignalHeight(waveformWidget->getSignalHeight() - 2);
@@ -309,8 +309,11 @@ void MainWindow::setupUI()
             this, &MainWindow::updateTimeDisplay);
     connect(waveformWidget, &WaveformWidget::itemSelected, this, [this](int index)
             {
-        // Enable/disable remove button based on selection
-        removeSignalsButton->setEnabled(index >= 0); });
+    // Enable/disable remove button based on selection
+    removeSignalsButton->setEnabled(index >= 0);
+    
+    // Update navigation buttons based on new selection
+    updateNavigationButtons(); });
 
     // === BOTTOM CONTROLS ===
     QWidget *bottomControls = new QWidget();
@@ -462,28 +465,28 @@ void MainWindow::loadVcdFile(const QString &filename)
 {
     // Show progress bar for file loading
     statusBar()->clearMessage();
-    
+
     // Create and show progress bar in status bar
     QProgressBar *progressBar = new QProgressBar();
     progressBar->setRange(0, 0); // Indeterminate progress (spinning)
     progressBar->setMaximumWidth(200);
     progressBar->setTextVisible(false);
     statusBar()->addPermanentWidget(progressBar);
-    
+
     statusLabel->setText("Loading VCD file...");
-    
+
     // Disable UI during loading to prevent user interaction
     setEnabled(false);
     QApplication::processEvents(); // Force UI update
 
     // Use QtConcurrent to run parsing in background thread
-    QFuture<bool> parseFuture = QtConcurrent::run([this, filename]() {
-        return vcdParser->parseHeaderOnly(filename);
-    });
-    
+    QFuture<bool> parseFuture = QtConcurrent::run([this, filename]()
+                                                  { return vcdParser->parseHeaderOnly(filename); });
+
     // Create a watcher to handle completion
     QFutureWatcher<bool> *watcher = new QFutureWatcher<bool>(this);
-    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, progressBar, watcher, filename]() {
+    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, progressBar, watcher, filename]()
+            {
         bool success = watcher->result();
         
         // Re-enable UI
@@ -508,9 +511,8 @@ void MainWindow::loadVcdFile(const QString &filename)
             QMessageBox::critical(this, "Error",
                                   "Failed to parse VCD file: " + vcdParser->getError());
             statusLabel->setText("Ready");
-        }
-    });
-    
+        } });
+
     watcher->setFuture(parseFuture);
 }
 
@@ -564,7 +566,6 @@ void MainWindow::toggleBusDisplayFormat()
     }
 }
 
-
 void MainWindow::setBusHexFormat()
 {
     waveformWidget->setBusDisplayFormat(WaveformWidget::Hex);
@@ -611,4 +612,74 @@ void MainWindow::updateBusFormatActions()
         busDecimalAction->setChecked(true);
         break;
     }
+}
+
+// In setupNavigationControls() method, replace the connection:
+void MainWindow::setupNavigationControls()
+{
+    // Create navigation controls
+    QWidget *navWidget = new QWidget();
+    QHBoxLayout *navLayout = new QHBoxLayout(navWidget);
+    navLayout->setContentsMargins(5, 0, 5, 0);
+    
+    QLabel *navLabel = new QLabel("Navigate:");
+    navigationModeCombo = new QComboBox();
+    navigationModeCombo->addItem("Value Change");
+    navigationModeCombo->addItem("Signal Rise");
+    navigationModeCombo->addItem("Signal Fall"); 
+    navigationModeCombo->addItem("X Values");
+    navigationModeCombo->addItem("Z Values");
+    
+    prevValueButton = new QPushButton("◀ Prev");
+    nextValueButton = new QPushButton("Next ▶");
+    
+    prevValueButton->setEnabled(false);
+    nextValueButton->setEnabled(false);
+    
+    // FIX: Use simpler connection syntax
+    connect(navigationModeCombo, SIGNAL(currentIndexChanged(int)),
+            this, SLOT(onNavigationModeChanged(int)));
+    connect(prevValueButton, &QPushButton::clicked, this, &MainWindow::onPrevValueClicked);
+    connect(nextValueButton, &QPushButton::clicked, this, &MainWindow::onNextValueClicked);
+    
+    navLayout->addWidget(navLabel);
+    navLayout->addWidget(navigationModeCombo);
+    navLayout->addWidget(prevValueButton);
+    navLayout->addWidget(nextValueButton);
+    navLayout->addStretch();
+    
+    // Add to main toolbar
+    mainToolBar->addWidget(navWidget);
+}
+void MainWindow::onNavigationModeChanged(int index)
+{
+    // Update waveform widget navigation mode
+    waveformWidget->setNavigationMode(static_cast<WaveformWidget::NavigationMode>(index));
+    updateNavigationButtons();
+}
+
+void MainWindow::onPrevValueClicked()
+{
+    waveformWidget->navigateToPreviousEvent();
+    updateNavigationButtons();
+}
+
+void MainWindow::onNextValueClicked()
+{
+    waveformWidget->navigateToNextEvent();
+    updateNavigationButtons();
+}
+
+void MainWindow::updateNavigationButtons()
+{
+    bool hasPrev = waveformWidget->hasPreviousEvent();
+    bool hasNext = waveformWidget->hasNextEvent();
+
+    prevValueButton->setEnabled(hasPrev);
+    nextValueButton->setEnabled(hasNext);
+
+    // Also update based on selection
+    bool hasSelection = !waveformWidget->getSelectedItemIndices().isEmpty();
+    prevValueButton->setEnabled(hasPrev && hasSelection);
+    nextValueButton->setEnabled(hasNext && hasSelection);
 }
