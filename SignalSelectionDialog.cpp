@@ -631,8 +631,8 @@ void SignalSelectionDialog::displaySearchResults(const QString &text, int matche
     signalTree->blockSignals(false);
     signalTree->setUpdatesEnabled(true);
     
+    // Always show the found count
     statusLabel->setText(QString("Found %1 signals matching '%2'").arg(matches).arg(text));
-    progressBar->setVisible(false);
 }
 
 
@@ -663,7 +663,6 @@ void SignalSelectionDialog::performSearch(const QString &text)
         
         // Process events every CHUNK_SIZE to keep UI responsive
         if (processed % CHUNK_SIZE == 0) {
-            progressBar->setValue(processed % 100); // Simple progress indication
             QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
             
             // Check if search was cancelled (new text entered)
@@ -685,7 +684,6 @@ void SignalSelectionDialog::performSearch(const QString &text)
         });
     }
 }
-
 
 void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 {
@@ -715,8 +713,6 @@ void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 
     // Show searching status
     statusLabel->setText("Searching...");
-    progressBar->setVisible(true);
-    progressBar->setRange(0, 0); // Indeterminate progress
     
     QApplication::processEvents(); // Update UI
 
