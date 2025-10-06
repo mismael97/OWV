@@ -241,13 +241,13 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
     int valuesColumnStart = signalNamesWidth;
 
     // Draw values column background
-    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, height(), QColor(50, 50, 60));
+    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, height(), QColor(0, 0, 0));
 
     // Draw values splitter
-    painter.fillRect(valuesColumnStart + valuesColumnWidth - 1, 0, 2, height(), QColor(100, 100, 100));
+    // painter.fillRect(valuesColumnStart + valuesColumnWidth - 1, 0, 2, height(), QColor(100, 100, 100));
 
     // Draw pinned header (always visible)
-    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
+    painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(30, 30, 30)); // Value Column | Header Color
     painter.setPen(QPen(Qt::white));
     painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value");
 
@@ -287,11 +287,11 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
         }
         else if (i % 2 == 0)
         {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(50, 50, 60));
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(0, 0, 0)); // Value Column | Color 1
         }
         else
         {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(45, 45, 55));
+            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(0, 0, 0)); // Value Column | Color 2
         }
 
         if (item.type == DisplayItem::Signal)
@@ -348,11 +348,11 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
     painter.setRenderHint(QPainter::Antialiasing);
 
     // Fill entire background with dark theme
-    painter.fillRect(rect(), QColor(45, 45, 48));
+    painter.fillRect(rect(), QColor(0, 0, 0));
 
     if (!vcdParser || displayItems.isEmpty())
     {
-        painter.setPen(QPen(Qt::white));
+        painter.fillRect(rect(), QColor(45, 45, 48));
         painter.drawText(rect(), Qt::AlignCenter, "No signals selected");
         return;
     }
@@ -366,13 +366,13 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 {
     // Draw signal names column background
-    painter.fillRect(0, 0, signalNamesWidth, height(), QColor(37, 37, 38));
+    painter.fillRect(0, 0, signalNamesWidth, height(), QColor(0, 0, 0));
 
     // Draw names splitter
-    painter.fillRect(signalNamesWidth - 1, 0, 2, height(), QColor(100, 100, 100));
+    // painter.fillRect(signalNamesWidth - 1, 0, 2, height(), QColor(100, 100, 100));
 
     // Draw pinned header (always visible)
-    painter.fillRect(0, 0, signalNamesWidth, timeMarkersHeight, QColor(60, 60, 60));
+    painter.fillRect(0, 0, signalNamesWidth, timeMarkersHeight, QColor(30, 30, 30)); // Signal Name Column | Header Color
     painter.setPen(QPen(Qt::white));
     painter.drawText(5, timeMarkersHeight - 8, "Signal Name");
 
@@ -416,11 +416,11 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         }
         else if (i % 2 == 0)
         {
-            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(45, 45, 48));
+            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(0, 0, 0)); // Signal Name Column | Color 1
         }
         else
         {
-            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(40, 40, 43));
+            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(0, 0, 0)); // Signal Name Column | Color 2
         }
 
         // Draw item name with appropriate styling
@@ -465,7 +465,7 @@ void WaveformWidget::drawWaveformArea(QPainter &painter)
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
 
     // Draw pinned timeline background
-    painter.fillRect(waveformStartX, 0, width() - waveformStartX, timeMarkersHeight, QColor(30, 30, 30));
+    painter.fillRect(waveformStartX, 0, width() - waveformStartX, timeMarkersHeight, QColor(30, 30, 30)); // Time Line Column | Header Color
 
     // Draw grid lines in timeline area
     painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
@@ -491,7 +491,7 @@ void WaveformWidget::drawWaveformArea(QPainter &painter)
 
     // Draw background for scrollable area - use the full calculated height
     int totalHeight = calculateTotalHeight();
-    painter.fillRect(0, 0, width() - waveformStartX, totalHeight, QColor(30, 30, 30));
+    painter.fillRect(0, 0, width() - waveformStartX, totalHeight, QColor(0, 0, 0));
 
     if (!displayItems.isEmpty())
     {
@@ -544,47 +544,6 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     painter.fillRect(timeRect, QColor(0, 0, 0, 200));
     painter.drawText(timeRect, Qt::AlignCenter, timeText);
 }
-
-// void WaveformWidget::drawGrid(QPainter &painter)
-// {
-//     painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
-
-//     int startTime = xToTime(0);
-//     int endTime = xToTime(width() - signalNamesWidth - valuesColumnWidth);
-
-//     int timeStep = calculateTimeStep(startTime, endTime);
-//     for (int time = (startTime / timeStep) * timeStep; time <= endTime; time += timeStep)
-//     {
-//         int x = timeToX(time);
-//         // Draw vertical lines only in the scrollable area (starting from timeMarkersHeight)
-//         painter.drawLine(x, timeMarkersHeight, x, calculateTotalHeight());
-//     }
-
-//     // Draw horizontal lines for items (only in scrollable area)
-//     int currentY = topMargin + timeMarkersHeight;
-//     for (int i = 0; i < displayItems.size(); i++)
-//     {
-//         const auto &item = displayItems[i];
-//         int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
-
-//         painter.drawLine(0, currentY, width() - signalNamesWidth - valuesColumnWidth, currentY);
-//         currentY += itemHeight;
-//     }
-
-//     // Draw selection highlight for all selected items (only in scrollable area)
-//     currentY = topMargin + timeMarkersHeight;
-//     for (int i = 0; i < displayItems.size(); i++)
-//     {
-//         const auto &item = displayItems[i];
-//         int itemHeight = (item.type == DisplayItem::Signal) ? (item.signal.signal.width > 1 ? busHeight : signalHeight) : 30; // Space height
-
-//         if (selectedItems.contains(i))
-//         {
-//             painter.fillRect(0, currentY, width() - signalNamesWidth - valuesColumnWidth, itemHeight, QColor(60, 60, 90));
-//         }
-//         currentY += itemHeight;
-//     }
-// }
 
 void WaveformWidget::drawSignals(QPainter &painter)
 {
@@ -910,7 +869,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     int prevX = timeToX(prevTime);
 
     // Draw clean bus background - but make it the same visual thickness
-    painter.fillRect(prevX, busTop, width() - signalNamesWidth - valuesColumnWidth, waveformHeight, QColor(45, 45, 50));
+    painter.fillRect(prevX, busTop, width() - signalNamesWidth - valuesColumnWidth, waveformHeight, QColor(0, 0, 0));
 
     // Draw value regions with clear transitions
     for (int i = 0; i < changes.size(); i++)
@@ -919,7 +878,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         int currentX = timeToX(change.timestamp);
 
         // Clean region coloring
-        QColor regionColor = QColor(60, 60, 70);
+        QColor regionColor = QColor(0, 0, 0);
 
         if (prevValue.contains('x') || prevValue.contains('X'))
         {
@@ -932,7 +891,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         else if (!prevValue.isEmpty() && prevValue != "0")
         {
             // Active value - slightly brighter
-            regionColor = QColor(70, 70, 90);
+            regionColor = QColor(0, 0, 0);
         }
 
         // Draw the value region - using same height as signals
@@ -946,7 +905,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
             int centerX = prevX + (currentX - prevX) / 2;
 
             // Simple text with good contrast
-            painter.setPen(QPen(Qt::white));
+            painter.setPen(QPen(Qt::cyan));
             painter.drawText(centerX - textWidth / 2, textY, displayValue);
         }
 
@@ -965,7 +924,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     int endX = timeToX(vcdParser->getEndTime());
     if (endX > prevX)
     {
-        QColor finalRegionColor = QColor(60, 60, 70);
+        QColor finalRegionColor = QColor(0, 0, 0);
         if (prevValue.contains('x') || prevValue.contains('X'))
         {
             finalRegionColor = QColor(120, 60, 60);
@@ -983,7 +942,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
             int textWidth = painter.fontMetrics().horizontalAdvance(displayValue);
             int centerX = prevX + (endX - prevX) / 2;
 
-            painter.setPen(QPen(Qt::white));
+            painter.setPen(QPen(Qt::cyan));
             painter.drawText(centerX - textWidth / 2, textY, displayValue);
         }
     }

@@ -146,7 +146,6 @@ protected:
 private slots:
     void setLineThicknessThin();
     void setLineThicknessMedium();
-    void setLineThicknessThick();
     void openFile();
     void zoomIn();
     void zoomOut();
@@ -510,7 +509,30 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+void resetNavigationForCurrentSignal();
+
+    void navigateToTime(int targetTime);
+    int findEventIndexForTime(int time, const QString &signalFullName) const;
+
+    bool isSignalSelected(const VCDSignal &signal) const
+    {
+        for (int i = 0; i < displayItems.size(); i++)
+        {
+            if (selectedItems.contains(i) &&
+                displayItems[i].type == DisplayItem::Signal &&
+                displayItems[i].signal.signal.fullName == signal.fullName)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    int selectedLineWidth = 3;
+
     // Navigation
+    QMap<QString, QVector<int>> signalEventTimestamps; // Maps signal fullName to its events
+    QMap<QString, int> signalCurrentEventIndex;        // Maps signal fullName to its current event index
+    QString currentlyNavigatedSignal;                  // Which signal we're currently navigating
     NavigationMode navigationMode = ValueChange;
     int currentEventIndex = -1;
     QVector<int> eventTimestamps;
@@ -1943,10 +1965,6 @@ void MainWindow::createActions()
     lineMediumAction->setChecked(true);
     connect(lineMediumAction, &QAction::triggered, this, &MainWindow::setLineThicknessMedium);
 
-    lineThickAction = new QAction("Thick (3px)", this);
-    lineThickAction->setCheckable(true);
-    connect(lineThickAction, &QAction::triggered, this, &MainWindow::setLineThicknessThick);
-
     // Signal height adjustment actions
     increaseHeightAction = new QAction("Increase Signal Height", this);
     increaseHeightAction->setShortcut(QKeySequence("Ctrl+Up"));
@@ -2003,7 +2021,6 @@ void MainWindow::createMenuBar()
     lineThicknessMenu = waveMenu->addMenu("Line Thickness");
     lineThicknessMenu->addAction(lineThinAction);
     lineThicknessMenu->addAction(lineMediumAction);
-    lineThicknessMenu->addAction(lineThickAction);
 }
 
 void MainWindow::createMainToolbar()
@@ -2084,25 +2101,16 @@ void MainWindow::setLineThicknessMedium()
     updateLineThicknessActions();
 }
 
-void MainWindow::setLineThicknessThick()
-{
-    waveformWidget->setLineWidth(3);
-    updateLineThicknessActions();
-}
-
 void MainWindow::updateLineThicknessActions()
 {
     lineThinAction->setChecked(false);
     lineMediumAction->setChecked(false);
-    lineThickAction->setChecked(false);
 
     int currentWidth = waveformWidget->getLineWidth();
     if (currentWidth == 1)
         lineThinAction->setChecked(true);
     else if (currentWidth == 2)
         lineMediumAction->setChecked(true);
-    else if (currentWidth == 3)
-        lineThickAction->setChecked(true);
 }
 
 void MainWindow::createStatusBar()
@@ -2491,16 +2499,18 @@ void MainWindow::onNextValueClicked()
 
 void MainWindow::updateNavigationButtons()
 {
-    bool hasPrev = waveformWidget->hasPreviousEvent();
-    bool hasNext = waveformWidget->hasNextEvent();
-
-    prevValueButton->setEnabled(hasPrev);
-    nextValueButton->setEnabled(hasNext);
-
-    // Also update based on selection
     bool hasSelection = !waveformWidget->getSelectedItemIndices().isEmpty();
-    prevValueButton->setEnabled(hasPrev && hasSelection);
-    nextValueButton->setEnabled(hasNext && hasSelection);
+    
+    if (hasSelection) {
+        bool hasPrev = waveformWidget->hasPreviousEvent();
+        bool hasNext = waveformWidget->hasNextEvent();
+
+        prevValueButton->setEnabled(hasPrev);
+        nextValueButton->setEnabled(hasNext);
+    } else {
+        prevValueButton->setEnabled(false);
+        nextValueButton->setEnabled(false);
+    }
 }#include "vcdparser.h"
 #include <QRegularExpression>
 #include <QDebug>
@@ -3473,6 +3483,20 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     if (changes.isEmpty())
         return;
 
+    // Check if this signal is selected
+    bool isSelected = false;
+    for (int i = 0; i < displayItems.size(); i++) {
+        if (selectedItems.contains(i) && 
+            displayItems[i].type == DisplayItem::Signal && 
+            displayItems[i].signal.signal.fullName == signal.fullName) {
+            isSelected = true;
+            break;
+        }
+    }
+
+    // Use thicker line for selected signals
+    int currentLineWidth = isSelected ? selectedLineWidth : lineWidth;
+
     // Emergency check for extreme zoom
     if (timeScale > 1000.0 || timeScale < 0.001)
     {
@@ -3538,8 +3562,8 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
             }
         }
 
-        // Draw the HORIZONTAL segment based on previous value
-        painter.setPen(QPen(horizontalColor, lineWidth));
+        // Draw the HORIZONTAL segment based on previous value - use currentLineWidth
+        painter.setPen(QPen(horizontalColor, currentLineWidth));
         if (prevIsX || prevIsZ)
         {
             // Previous value was X or Z - draw at middle level
@@ -3601,7 +3625,8 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
                 verticalColor = QColor(0x01, 0xFF, 0xFF); // Cyan
             }
 
-            painter.setPen(QPen(verticalColor, lineWidth));
+            // Use currentLineWidth for vertical transitions too
+            painter.setPen(QPen(verticalColor, currentLineWidth));
             painter.drawLine(currentX, fromY, currentX, toY);
         }
 
@@ -3646,7 +3671,8 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         }
     }
 
-    painter.setPen(QPen(finalColor, lineWidth));
+    // Use currentLineWidth for the final segment
+    painter.setPen(QPen(finalColor, currentLineWidth));
 
     int endX = timeToX(vcdParser->getEndTime());
 
@@ -3694,6 +3720,20 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     const auto changes = vcdParser->getValueChangesForSignal(signal.fullName);
     if (changes.isEmpty())
         return;
+
+        // Check if this signal is selected
+    bool isSelected = false;
+    for (int i = 0; i < displayItems.size(); i++) {
+        if (selectedItems.contains(i) && 
+            displayItems[i].type == DisplayItem::Signal && 
+            displayItems[i].signal.signal.fullName == signal.fullName) {
+            isSelected = true;
+            break;
+        }
+    }
+
+        int currentLineWidth = isSelected ? selectedLineWidth : lineWidth;
+
 
     // Emergency check for extreme zoom
     if (timeScale > 1000.0 || timeScale < 0.001)
@@ -3795,8 +3835,8 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         }
     }
 
-    // Draw clean bus outline - using same line width as signal transitions
-    painter.setPen(QPen(signalColor, lineWidth)); // Use lineWidth instead of hardcoded 2
+// Draw clean bus outline - use currentLineWidth for selected signals
+    painter.setPen(QPen(signalColor, currentLineWidth));
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
 
@@ -4200,9 +4240,10 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
                 update();
                 emit itemSelected(itemIndex);
             }
-            else if (!inNamesColumn && inWaveformArea)
+            else 
             {
-                // Clear selection when clicking empty space
+                // NEW: Clear selection when clicking empty space
+                // Only clear if not using Ctrl or Shift modifiers (which are for multi-selection)
                 if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
                 {
                     selectedItems.clear();
@@ -4216,6 +4257,17 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
                 dragStartX = event->pos().x() - waveformStartX;
                 dragStartOffset = timeOffset;
                 setCursor(Qt::ClosedHandCursor);
+            }
+        }
+        else
+        {
+            // NEW: Also clear selection when clicking in the pinned header area
+            if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
+            {
+                selectedItems.clear();
+                lastSelectedItem = -1;
+                update();
+                emit itemSelected(-1);
             }
         }
     }
@@ -4742,6 +4794,18 @@ void WaveformWidget::updateSplitterPositions()
     update();
 }
 
+
+void WaveformWidget::resetNavigationForCurrentSignal()
+{
+    if (currentlyNavigatedSignal.isEmpty())
+        return;
+        
+    // Reset the current index based on cursor position
+    int newIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
+    signalCurrentEventIndex[currentlyNavigatedSignal] = newIndex;
+    currentEventIndex = newIndex;
+}
+
 void WaveformWidget::updateCursorTime(const QPoint &pos)
 {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
@@ -4759,6 +4823,12 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
     cursorTime = xToTime(clickXInWaveform);
 
     showCursor = true;
+    
+    // Reset navigation for current signal when cursor moves
+    if (!currentlyNavigatedSignal.isEmpty()) {
+        resetNavigationForCurrentSignal();
+    }
+    
     update();
 }
 
@@ -5169,18 +5239,22 @@ void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: para
 void WaveformWidget::setNavigationMode(NavigationMode mode)
 {
     navigationMode = mode;
-    updateEventList();
-    currentEventIndex = -1;
+    
+    // Clear cached events when navigation mode changes
+    signalEventTimestamps.clear();
+    signalCurrentEventIndex.clear();
+    
+    // Update events for currently selected signal
+    if (!selectedItems.isEmpty()) {
+        updateEventList();
+    }
+    else {
+        currentEventIndex = -1;
+    }
 }
 
-void WaveformWidget::navigateToPreviousEvent()
+void WaveformWidget::navigateToTime(int targetTime)
 {
-    if (eventTimestamps.isEmpty() || currentEventIndex <= 0)
-        return;
-
-    currentEventIndex--;
-    int targetTime = eventTimestamps[currentEventIndex];
-
     // Center the view on the target time
     int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
     int targetX = timeToX(targetTime);
@@ -5193,69 +5267,112 @@ void WaveformWidget::navigateToPreviousEvent()
     updateScrollBar();
     update();
     emit timeChanged(cursorTime);
+}
+
+
+void WaveformWidget::navigateToPreviousEvent()
+{
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+        return;
+
+    QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int& currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
+    
+    if (events.isEmpty() || currentIndex <= 0)
+        return;
+
+    currentIndex--;
+    int targetTime = events[currentIndex];
+    currentEventIndex = currentIndex;
+
+    // Center the view on the target time
+    navigateToTime(targetTime);
 }
 
 void WaveformWidget::navigateToNextEvent()
 {
-    if (eventTimestamps.isEmpty() || currentEventIndex >= eventTimestamps.size() - 1)
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
         return;
 
-    if (currentEventIndex == -1)
-    {
-        currentEventIndex = 0;
-    }
-    else
-    {
-        currentEventIndex++;
-    }
+    QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int& currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
+    
+    if (events.isEmpty())
+        return;
 
-    int targetTime = eventTimestamps[currentEventIndex];
+    // If no current index set, find the first event after cursor
+    if (currentIndex == -1) {
+        currentIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
+    }
+    
+    // If we're at the end, don't move
+    if (currentIndex >= events.size() - 1)
+        return;
+
+    currentIndex++;
+    int targetTime = events[currentIndex];
+    currentEventIndex = currentIndex;
 
     // Center the view on the target time
-    int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
-    int targetX = timeToX(targetTime);
-    timeOffset = qMax(0, targetX - viewportWidth / 2);
-
-    // Update cursor
-    cursorTime = targetTime;
-    showCursor = true;
-
-    updateScrollBar();
-    update();
-    emit timeChanged(cursorTime);
+    navigateToTime(targetTime);
 }
-
 bool WaveformWidget::hasPreviousEvent() const
 {
-    return !eventTimestamps.isEmpty() && currentEventIndex > 0;
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+        return false;
+        
+    const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
+    
+    return !events.isEmpty() && currentIndex > 0;
 }
 
 bool WaveformWidget::hasNextEvent() const
 {
-    return !eventTimestamps.isEmpty() &&
-           (currentEventIndex < eventTimestamps.size() - 1 || currentEventIndex == -1);
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+        return false;
+        
+    const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
+    
+    return !events.isEmpty() && 
+           (currentIndex < events.size() - 1 || currentIndex == -1);
 }
 
 void WaveformWidget::updateEventList()
 {
-    eventTimestamps.clear();
-
     if (selectedItems.isEmpty() || !vcdParser)
         return;
 
-    // Get the first selected signal
+    // Get the first selected signal for navigation
     int selectedIndex = *selectedItems.begin();
     if (!isSignalItem(selectedIndex))
         return;
 
     const VCDSignal &signal = getSignalFromItem(selectedIndex);
+    
+    // Store which signal we're navigating
+    currentlyNavigatedSignal = signal.fullName;
+    
     const auto changes = vcdParser->getValueChangesForSignal(signal.fullName);
-
     if (changes.isEmpty())
         return;
 
-    // Collect events based on navigation mode
+    // Only recompute events if we don't have them or if navigation mode changed
+    bool needsUpdate = !signalEventTimestamps.contains(signal.fullName);
+    
+    if (!needsUpdate) {
+        // Update current index based on cursor position for this signal
+        int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
+        signalCurrentEventIndex[signal.fullName] = newIndex;
+        currentEventIndex = newIndex;
+        return;
+    }
+
+    // Collect events based on navigation mode for this specific signal
+    QVector<int> events;
     QString prevValue;
+    
     for (int i = 0; i < changes.size(); i++)
     {
         const auto &change = changes[i];
@@ -5286,26 +5403,50 @@ void WaveformWidget::updateEventList()
 
         if (includeEvent)
         {
-            eventTimestamps.append(change.timestamp);
+            events.append(change.timestamp);
         }
 
         prevValue = change.value;
     }
 
-    // Set current index based on cursor position
-    currentEventIndex = findEventIndexForTime(cursorTime);
+    // Store events for this signal
+    signalEventTimestamps[signal.fullName] = events;
+    
+    // Set current index based on cursor position for this signal
+    int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
+    signalCurrentEventIndex[signal.fullName] = newIndex;
+    currentEventIndex = newIndex;
 }
 
-int WaveformWidget::findEventIndexForTime(int time) const
+int WaveformWidget::findEventIndexForTime(int time, const QString& signalFullName) const
 {
-    for (int i = 0; i < eventTimestamps.size(); i++)
+    if (!signalEventTimestamps.contains(signalFullName))
+        return -1;
+        
+    const QVector<int>& events = signalEventTimestamps[signalFullName];
+    
+    if (events.isEmpty())
+        return -1;
+        
+    // Find the first event that is >= the given time
+    for (int i = 0; i < events.size(); i++)
     {
-        if (eventTimestamps[i] >= time)
+        if (events[i] >= time)
         {
             return i;
         }
     }
-    return eventTimestamps.size() - 1;
+    
+    // If no event found after the time, return the last event
+    return events.size() - 1;
+}
+
+// Overload for currently navigated signal
+int WaveformWidget::findEventIndexForTime(int time) const
+{
+    if (currentlyNavigatedSignal.isEmpty())
+        return -1;
+    return findEventIndexForTime(time, currentlyNavigatedSignal);
 }
 
 int WaveformWidget::getCurrentEventTime() const
@@ -5322,15 +5463,49 @@ void WaveformWidget::selectSignalAtPosition(const QPoint &pos)
     int itemIndex = getItemAtPosition(pos);
     if (itemIndex >= 0 && isSignalItem(itemIndex))
     {
-        // Single selection
-        selectedItems.clear();
+        // Single selection - clear previous selection unless using modifiers
+        Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
+        if (!(modifiers & (Qt::ControlModifier | Qt::ShiftModifier)))
+        {
+            selectedItems.clear();
+        }
         selectedItems.insert(itemIndex);
         lastSelectedItem = itemIndex;
 
-        updateEventList(); // Update events for newly selected signal
+        // Update navigation for the newly selected signal
+        const VCDSignal &signal = getSignalFromItem(itemIndex);
+        
+        // If switching to a different signal, reset its navigation state based on cursor
+        if (currentlyNavigatedSignal != signal.fullName) {
+            currentlyNavigatedSignal = signal.fullName;
+            
+            // Force update of event list to recompute for new signal
+            if (signalEventTimestamps.contains(signal.fullName)) {
+                // Just update the current index based on cursor
+                int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
+                signalCurrentEventIndex[signal.fullName] = newIndex;
+                currentEventIndex = newIndex;
+            } else {
+                // Compute events for this signal
+                updateEventList();
+            }
+        }
 
         update();
         emit itemSelected(itemIndex);
+    }
+    else
+    {
+        // Clear selection when clicking empty space
+        if (!(QApplication::keyboardModifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
+        {
+            selectedItems.clear();
+            lastSelectedItem = -1;
+            currentlyNavigatedSignal.clear();
+            currentEventIndex = -1;
+            update();
+            emit itemSelected(-1);
+        }
     }
 }
 
@@ -5341,21 +5516,27 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
     // Check if click is in waveform area (not in names or values columns)
     if (pos.x() >= waveformStartX && pos.y() >= timeMarkersHeight)
     {
-        // Try to select signal at this position
-        selectSignalAtPosition(pos);
-
+        // Store old cursor time to detect changes
+        int oldCursorTime = cursorTime;
+        
         // Also set cursor time
         int clickXInWaveform = pos.x() - waveformStartX;
         cursorTime = xToTime(clickXInWaveform);
         showCursor = true;
 
-        // Update event index based on new cursor position
-        currentEventIndex = findEventIndexForTime(cursorTime);
+        // Try to select signal at this position
+        selectSignalAtPosition(pos);
+
+        // If cursor time changed and we have a selected signal, update navigation
+        if (cursorTime != oldCursorTime && !currentlyNavigatedSignal.isEmpty()) {
+            resetNavigationForCurrentSignal();
+        }
 
         update();
         emit timeChanged(cursorTime);
     }
-}# File: CMakeLists.txt
+}
+# File: CMakeLists.txt
 cmake_minimum_required(VERSION 3.16)
 
 project(OWV VERSION 0.1 LANGUAGES CXX)
