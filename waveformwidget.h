@@ -200,7 +200,29 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
-void resetNavigationForCurrentSignal();
+    double calculateZoomFitScale() const
+    {
+        if (!vcdParser || vcdParser->getEndTime() <= 0)
+        {
+            return 1.0;
+        }
+
+        int availableWidth = width() - signalNamesWidth - valuesColumnWidth;
+
+        // Use the same calculation as zoomFit but just return the scale
+        const int PADDING = 10;
+        int totalTimeRange = vcdParser->getEndTime() + (2 * PADDING);
+        totalTimeRange = qMax(20, totalTimeRange);
+
+        if (availableWidth <= 10)
+        {
+            return 1.0;
+        }
+
+        double zoomFitScale = static_cast<double>(availableWidth - (2 * PADDING)) / vcdParser->getEndTime();
+        return qMax(0.02, qMin(50.0, zoomFitScale));
+    }
+    void resetNavigationForCurrentSignal();
 
     void navigateToTime(int targetTime);
     int findEventIndexForTime(int time, const QString &signalFullName) const;

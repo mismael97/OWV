@@ -134,24 +134,47 @@ void WaveformWidget::selectAllSignals()
 
 void WaveformWidget::zoomIn()
 {
-    // Very conservative maximum zoom
-    if (timeScale >= 50.0)
-    { // Reduced from 100.0
-        qDebug() << "Maximum zoom reached at 50.0";
-        return;
-    }
+    if (timeScale >= 50.0) return;
 
-    double newTimeScale = timeScale * 1.2;
+    // Get mouse position in widget coordinates
+    QPoint mousePos = mapFromGlobal(QCursor::pos());
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    
+    qDebug() << "=== ZOOM IN ===";
+    qDebug() << "Mouse pos:" << mousePos;
+    qDebug() << "Waveform start X:" << waveformStartX;
 
-    if (newTimeScale > 50.0)
+    // Only zoom to mouse if it's in the waveform area
+    if (mousePos.x() >= waveformStartX && mousePos.y() >= timeMarkersHeight) 
     {
-        newTimeScale = 50.0;
+        // Calculate mouse position relative to waveform area
+        int mouseXInWaveform = mousePos.x() - waveformStartX;
+        
+        // The key calculation: what time is currently under the mouse?
+        // time = (pixel_position + scroll_offset) / scale
+        double timeUnderMouse = (mouseXInWaveform + timeOffset) / timeScale;
+        
+        qDebug() << "Mouse in waveform - X:" << mouseXInWaveform;
+        qDebug() << "Time under mouse:" << timeUnderMouse;
+        qDebug() << "Before - Scale:" << timeScale << "Offset:" << timeOffset;
+
+        // Apply zoom
+        double oldScale = timeScale;
+        timeScale *= 1.2;
+        timeScale = qMin(50.0, timeScale);
+
+        // After zoom, we want the same time to be under the mouse
+        // So we adjust the offset: new_offset = time * new_scale - mouse_x
+        timeOffset = timeUnderMouse * timeScale - mouseXInWaveform;
+        
+        qDebug() << "After - Scale:" << timeScale << "Offset:" << timeOffset;
     }
-
-    double oldTimeScale = timeScale;
-    timeScale = newTimeScale;
-
-    qDebug() << "Zoom in:" << oldTimeScale << "->" << timeScale;
+    else
+    {
+        // Default zoom (center-based)
+        timeScale = qMin(50.0, timeScale * 1.2);
+        qDebug() << "Default zoom - New scale:" << timeScale;
+    }
 
     updateScrollBar();
     update();
@@ -159,24 +182,40 @@ void WaveformWidget::zoomIn()
 
 void WaveformWidget::zoomOut()
 {
-    // Very conservative minimum zoom
-    if (timeScale <= 0.1)
-    { // Increased from 0.05
-        qDebug() << "Minimum zoom reached at 0.1";
+    // Calculate the maximum scale allowed (zoom fit level)
+    double maxScaleForZoomOut = calculateZoomFitScale();
+    
+    // If we're already at or beyond zoom fit level, don't zoom out further
+    if (timeScale <= maxScaleForZoomOut) {
+        // Optional: Snap to exact zoom fit scale
+        timeScale = maxScaleForZoomOut;
+        updateScrollBar();
+        update();
         return;
     }
 
-    double newTimeScale = timeScale / 1.2;
-
-    if (newTimeScale < 0.1)
-    {
-        newTimeScale = 0.1;
+    // Always use mouse position
+    QPoint mousePos = mapFromGlobal(QCursor::pos());
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    int mouseXInWaveform = mousePos.x() - waveformStartX;
+    
+    if (mouseXInWaveform < 0) mouseXInWaveform = 0;
+    
+    double timeUnderMouse = (mouseXInWaveform + timeOffset) / timeScale;
+    
+    double oldScale = timeScale;
+    timeScale /= 1.2;
+    
+    // Don't zoom out beyond zoom fit level
+    timeScale = qMax(maxScaleForZoomOut, timeScale);
+    timeScale = qMax(0.1, timeScale); // Still respect absolute minimum
+    
+    timeOffset = timeUnderMouse * timeScale - mouseXInWaveform;
+    
+    // Clamp offset to prevent negative timeline
+    if (timeOffset < 0) {
+        timeOffset = 0;
     }
-
-    double oldTimeScale = timeScale;
-    timeScale = newTimeScale;
-
-    qDebug() << "Zoom out:" << oldTimeScale << "->" << timeScale;
 
     updateScrollBar();
     update();
@@ -196,8 +235,8 @@ void WaveformWidget::zoomFit()
     int availableWidth = width() - signalNamesWidth - valuesColumnWidth - 20;
 
     // Use the same margins as scrolling - UPDATE THIS LINE:
-    const int LEFT_MARGIN = -10; // -10 time units (negative time)
-    const int RIGHT_MARGIN = 15; // 100 time units after end
+    const int LEFT_MARGIN = 0; // -10 time units (negative time)
+    const int RIGHT_MARGIN = 10; // 100 time units after end
 
     int totalTimeRange = vcdParser->getEndTime() + RIGHT_MARGIN - LEFT_MARGIN; // Note: subtract LEFT_MARGIN because it's negative
 
