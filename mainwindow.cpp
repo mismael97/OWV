@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QToolButton>
 #include <QKeyEvent>
+#include <QtConcurrent>
 #include <QMenuBar>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -464,28 +465,58 @@ void MainWindow::openFile()
 
 void MainWindow::loadVcdFile(const QString &filename)
 {
+    // Show progress bar for file loading
+    statusBar()->clearMessage();
+    
+    // Create and show progress bar in status bar
+    QProgressBar *progressBar = new QProgressBar();
+    progressBar->setRange(0, 0); // Indeterminate progress (spinning)
+    progressBar->setMaximumWidth(200);
+    progressBar->setTextVisible(false);
+    statusBar()->addPermanentWidget(progressBar);
+    
     statusLabel->setText("Loading VCD file...");
-    QApplication::processEvents();
+    
+    // Disable UI during loading to prevent user interaction
+    setEnabled(false);
+    QApplication::processEvents(); // Force UI update
 
-    // Use header-only parsing for fast loading
-    if (vcdParser->parseHeaderOnly(filename))
-    {
-        statusLabel->setText(QString("Loaded: %1 (%2 signals) - Ready to display")
-                                 .arg(QFileInfo(filename).fileName())
-                                 .arg(vcdParser->getSignals().size()));
+    // Use QtConcurrent to run parsing in background thread
+    QFuture<bool> parseFuture = QtConcurrent::run([this, filename]() {
+        return vcdParser->parseHeaderOnly(filename);
+    });
+    
+    // Create a watcher to handle completion
+    QFutureWatcher<bool> *watcher = new QFutureWatcher<bool>(this);
+    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, progressBar, watcher, filename]() {
+        bool success = watcher->result();
+        
+        // Re-enable UI
+        setEnabled(true);
+        
+        // Remove progress bar
+        statusBar()->removeWidget(progressBar);
+        delete progressBar;
+        watcher->deleteLater();
+        
+        if (success) {
+            statusLabel->setText(QString("Loaded: %1 (%2 signals) - Ready to display")
+                                     .arg(QFileInfo(filename).fileName())
+                                     .arg(vcdParser->getSignals().size()));
 
-        // Pass parser to waveform widget but don't load all signals
-        waveformWidget->setVcdData(vcdParser);
+            // Pass parser to waveform widget but don't load all signals
+            waveformWidget->setVcdData(vcdParser);
 
-        // Clear any existing signals from previous file
-        waveformWidget->setVisibleSignals(QList<VCDSignal>());
-    }
-    else
-    {
-        QMessageBox::critical(this, "Error",
-                              "Failed to parse VCD file: " + vcdParser->getError());
-        statusLabel->setText("Ready");
-    }
+            // Clear any existing signals from previous file
+            waveformWidget->setVisibleSignals(QList<VCDSignal>());
+        } else {
+            QMessageBox::critical(this, "Error",
+                                  "Failed to parse VCD file: " + vcdParser->getError());
+            statusLabel->setText("Ready");
+        }
+    });
+    
+    watcher->setFuture(parseFuture);
 }
 
 void MainWindow::zoomIn()
