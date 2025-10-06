@@ -200,12 +200,19 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+void resetNavigationForCurrentSignal();
 
-bool isSignalSelected(const VCDSignal& signal) const {
-        for (int i = 0; i < displayItems.size(); i++) {
-            if (selectedItems.contains(i) && 
-                displayItems[i].type == DisplayItem::Signal && 
-                displayItems[i].signal.signal.fullName == signal.fullName) {
+    void navigateToTime(int targetTime);
+    int findEventIndexForTime(int time, const QString &signalFullName) const;
+
+    bool isSignalSelected(const VCDSignal &signal) const
+    {
+        for (int i = 0; i < displayItems.size(); i++)
+        {
+            if (selectedItems.contains(i) &&
+                displayItems[i].type == DisplayItem::Signal &&
+                displayItems[i].signal.signal.fullName == signal.fullName)
+            {
                 return true;
             }
         }
@@ -214,6 +221,9 @@ bool isSignalSelected(const VCDSignal& signal) const {
     int selectedLineWidth = 3;
 
     // Navigation
+    QMap<QString, QVector<int>> signalEventTimestamps; // Maps signal fullName to its events
+    QMap<QString, int> signalCurrentEventIndex;        // Maps signal fullName to its current event index
+    QString currentlyNavigatedSignal;                  // Which signal we're currently navigating
     NavigationMode navigationMode = ValueChange;
     int currentEventIndex = -1;
     QVector<int> eventTimestamps;

@@ -658,14 +658,16 @@ void MainWindow::onNextValueClicked()
 
 void MainWindow::updateNavigationButtons()
 {
-    bool hasPrev = waveformWidget->hasPreviousEvent();
-    bool hasNext = waveformWidget->hasNextEvent();
-
-    prevValueButton->setEnabled(hasPrev);
-    nextValueButton->setEnabled(hasNext);
-
-    // Also update based on selection
     bool hasSelection = !waveformWidget->getSelectedItemIndices().isEmpty();
-    prevValueButton->setEnabled(hasPrev && hasSelection);
-    nextValueButton->setEnabled(hasNext && hasSelection);
+    
+    if (hasSelection) {
+        bool hasPrev = waveformWidget->hasPreviousEvent();
+        bool hasNext = waveformWidget->hasNextEvent();
+
+        prevValueButton->setEnabled(hasPrev);
+        nextValueButton->setEnabled(hasNext);
+    } else {
+        prevValueButton->setEnabled(false);
+        nextValueButton->setEnabled(false);
+    }
 }

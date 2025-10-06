@@ -1947,6 +1947,18 @@ void WaveformWidget::updateSplitterPositions()
     update();
 }
 
+
+void WaveformWidget::resetNavigationForCurrentSignal()
+{
+    if (currentlyNavigatedSignal.isEmpty())
+        return;
+        
+    // Reset the current index based on cursor position
+    int newIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
+    signalCurrentEventIndex[currentlyNavigatedSignal] = newIndex;
+    currentEventIndex = newIndex;
+}
+
 void WaveformWidget::updateCursorTime(const QPoint &pos)
 {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
@@ -1964,6 +1976,12 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
     cursorTime = xToTime(clickXInWaveform);
 
     showCursor = true;
+    
+    // Reset navigation for current signal when cursor moves
+    if (!currentlyNavigatedSignal.isEmpty()) {
+        resetNavigationForCurrentSignal();
+    }
+    
     update();
 }
 
@@ -2374,18 +2392,22 @@ void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: para
 void WaveformWidget::setNavigationMode(NavigationMode mode)
 {
     navigationMode = mode;
-    updateEventList();
-    currentEventIndex = -1;
+    
+    // Clear cached events when navigation mode changes
+    signalEventTimestamps.clear();
+    signalCurrentEventIndex.clear();
+    
+    // Update events for currently selected signal
+    if (!selectedItems.isEmpty()) {
+        updateEventList();
+    }
+    else {
+        currentEventIndex = -1;
+    }
 }
 
-void WaveformWidget::navigateToPreviousEvent()
+void WaveformWidget::navigateToTime(int targetTime)
 {
-    if (eventTimestamps.isEmpty() || currentEventIndex <= 0)
-        return;
-
-    currentEventIndex--;
-    int targetTime = eventTimestamps[currentEventIndex];
-
     // Center the view on the target time
     int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
     int targetX = timeToX(targetTime);
@@ -2398,69 +2420,112 @@ void WaveformWidget::navigateToPreviousEvent()
     updateScrollBar();
     update();
     emit timeChanged(cursorTime);
+}
+
+
+void WaveformWidget::navigateToPreviousEvent()
+{
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+        return;
+
+    QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int& currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
+    
+    if (events.isEmpty() || currentIndex <= 0)
+        return;
+
+    currentIndex--;
+    int targetTime = events[currentIndex];
+    currentEventIndex = currentIndex;
+
+    // Center the view on the target time
+    navigateToTime(targetTime);
 }
 
 void WaveformWidget::navigateToNextEvent()
 {
-    if (eventTimestamps.isEmpty() || currentEventIndex >= eventTimestamps.size() - 1)
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
         return;
 
-    if (currentEventIndex == -1)
-    {
-        currentEventIndex = 0;
-    }
-    else
-    {
-        currentEventIndex++;
-    }
+    QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int& currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
+    
+    if (events.isEmpty())
+        return;
 
-    int targetTime = eventTimestamps[currentEventIndex];
+    // If no current index set, find the first event after cursor
+    if (currentIndex == -1) {
+        currentIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
+    }
+    
+    // If we're at the end, don't move
+    if (currentIndex >= events.size() - 1)
+        return;
+
+    currentIndex++;
+    int targetTime = events[currentIndex];
+    currentEventIndex = currentIndex;
 
     // Center the view on the target time
-    int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
-    int targetX = timeToX(targetTime);
-    timeOffset = qMax(0, targetX - viewportWidth / 2);
-
-    // Update cursor
-    cursorTime = targetTime;
-    showCursor = true;
-
-    updateScrollBar();
-    update();
-    emit timeChanged(cursorTime);
+    navigateToTime(targetTime);
 }
-
 bool WaveformWidget::hasPreviousEvent() const
 {
-    return !eventTimestamps.isEmpty() && currentEventIndex > 0;
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+        return false;
+        
+    const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
+    
+    return !events.isEmpty() && currentIndex > 0;
 }
 
 bool WaveformWidget::hasNextEvent() const
 {
-    return !eventTimestamps.isEmpty() &&
-           (currentEventIndex < eventTimestamps.size() - 1 || currentEventIndex == -1);
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+        return false;
+        
+    const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
+    
+    return !events.isEmpty() && 
+           (currentIndex < events.size() - 1 || currentIndex == -1);
 }
 
 void WaveformWidget::updateEventList()
 {
-    eventTimestamps.clear();
-
     if (selectedItems.isEmpty() || !vcdParser)
         return;
 
-    // Get the first selected signal
+    // Get the first selected signal for navigation
     int selectedIndex = *selectedItems.begin();
     if (!isSignalItem(selectedIndex))
         return;
 
     const VCDSignal &signal = getSignalFromItem(selectedIndex);
+    
+    // Store which signal we're navigating
+    currentlyNavigatedSignal = signal.fullName;
+    
     const auto changes = vcdParser->getValueChangesForSignal(signal.fullName);
-
     if (changes.isEmpty())
         return;
 
-    // Collect events based on navigation mode
+    // Only recompute events if we don't have them or if navigation mode changed
+    bool needsUpdate = !signalEventTimestamps.contains(signal.fullName);
+    
+    if (!needsUpdate) {
+        // Update current index based on cursor position for this signal
+        int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
+        signalCurrentEventIndex[signal.fullName] = newIndex;
+        currentEventIndex = newIndex;
+        return;
+    }
+
+    // Collect events based on navigation mode for this specific signal
+    QVector<int> events;
     QString prevValue;
+    
     for (int i = 0; i < changes.size(); i++)
     {
         const auto &change = changes[i];
@@ -2491,26 +2556,50 @@ void WaveformWidget::updateEventList()
 
         if (includeEvent)
         {
-            eventTimestamps.append(change.timestamp);
+            events.append(change.timestamp);
         }
 
         prevValue = change.value;
     }
 
-    // Set current index based on cursor position
-    currentEventIndex = findEventIndexForTime(cursorTime);
+    // Store events for this signal
+    signalEventTimestamps[signal.fullName] = events;
+    
+    // Set current index based on cursor position for this signal
+    int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
+    signalCurrentEventIndex[signal.fullName] = newIndex;
+    currentEventIndex = newIndex;
 }
 
-int WaveformWidget::findEventIndexForTime(int time) const
+int WaveformWidget::findEventIndexForTime(int time, const QString& signalFullName) const
 {
-    for (int i = 0; i < eventTimestamps.size(); i++)
+    if (!signalEventTimestamps.contains(signalFullName))
+        return -1;
+        
+    const QVector<int>& events = signalEventTimestamps[signalFullName];
+    
+    if (events.isEmpty())
+        return -1;
+        
+    // Find the first event that is >= the given time
+    for (int i = 0; i < events.size(); i++)
     {
-        if (eventTimestamps[i] >= time)
+        if (events[i] >= time)
         {
             return i;
         }
     }
-    return eventTimestamps.size() - 1;
+    
+    // If no event found after the time, return the last event
+    return events.size() - 1;
+}
+
+// Overload for currently navigated signal
+int WaveformWidget::findEventIndexForTime(int time) const
+{
+    if (currentlyNavigatedSignal.isEmpty())
+        return -1;
+    return findEventIndexForTime(time, currentlyNavigatedSignal);
 }
 
 int WaveformWidget::getCurrentEventTime() const
@@ -2527,15 +2616,49 @@ void WaveformWidget::selectSignalAtPosition(const QPoint &pos)
     int itemIndex = getItemAtPosition(pos);
     if (itemIndex >= 0 && isSignalItem(itemIndex))
     {
-        // Single selection
-        selectedItems.clear();
+        // Single selection - clear previous selection unless using modifiers
+        Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
+        if (!(modifiers & (Qt::ControlModifier | Qt::ShiftModifier)))
+        {
+            selectedItems.clear();
+        }
         selectedItems.insert(itemIndex);
         lastSelectedItem = itemIndex;
 
-        updateEventList(); // Update events for newly selected signal
+        // Update navigation for the newly selected signal
+        const VCDSignal &signal = getSignalFromItem(itemIndex);
+        
+        // If switching to a different signal, reset its navigation state based on cursor
+        if (currentlyNavigatedSignal != signal.fullName) {
+            currentlyNavigatedSignal = signal.fullName;
+            
+            // Force update of event list to recompute for new signal
+            if (signalEventTimestamps.contains(signal.fullName)) {
+                // Just update the current index based on cursor
+                int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
+                signalCurrentEventIndex[signal.fullName] = newIndex;
+                currentEventIndex = newIndex;
+            } else {
+                // Compute events for this signal
+                updateEventList();
+            }
+        }
 
         update();
         emit itemSelected(itemIndex);
+    }
+    else
+    {
+        // Clear selection when clicking empty space
+        if (!(QApplication::keyboardModifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
+        {
+            selectedItems.clear();
+            lastSelectedItem = -1;
+            currentlyNavigatedSignal.clear();
+            currentEventIndex = -1;
+            update();
+            emit itemSelected(-1);
+        }
     }
 }
 
@@ -2546,43 +2669,21 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
     // Check if click is in waveform area (not in names or values columns)
     if (pos.x() >= waveformStartX && pos.y() >= timeMarkersHeight)
     {
-        // Try to select signal at this position
-        int itemIndex = getItemAtPosition(pos);
+        // Store old cursor time to detect changes
+        int oldCursorTime = cursorTime;
         
-        if (itemIndex >= 0 && isSignalItem(itemIndex))
-        {
-            // Single selection - clear previous selection unless using modifiers
-            if (!(QApplication::keyboardModifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
-            {
-                selectedItems.clear();
-            }
-            selectedItems.insert(itemIndex);
-            lastSelectedItem = itemIndex;
-
-            updateEventList(); // Update events for newly selected signal
-
-            update();
-            emit itemSelected(itemIndex);
-        }
-        else
-        {
-            // NEW: Clear selection when clicking empty space in waveform area
-            if (!(QApplication::keyboardModifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
-            {
-                selectedItems.clear();
-                lastSelectedItem = -1;
-                update();
-                emit itemSelected(-1);
-            }
-        }
-
         // Also set cursor time
         int clickXInWaveform = pos.x() - waveformStartX;
         cursorTime = xToTime(clickXInWaveform);
         showCursor = true;
 
-        // Update event index based on new cursor position
-        currentEventIndex = findEventIndexForTime(cursorTime);
+        // Try to select signal at this position
+        selectSignalAtPosition(pos);
+
+        // If cursor time changed and we have a selected signal, update navigation
+        if (cursorTime != oldCursorTime && !currentlyNavigatedSignal.isEmpty()) {
+            resetNavigationForCurrentSignal();
+        }
 
         update();
         emit timeChanged(cursorTime);
