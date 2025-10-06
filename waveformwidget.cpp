@@ -650,6 +650,10 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         return;
     }
 
+    // Check if user has set a custom color
+    bool hasCustomColor = signalColors.contains(signal.fullName);
+    QColor customColor = hasCustomColor ? signalColors[signal.fullName] : QColor();
+
     // Hardcoded small offset - 3 pixels from top and bottom
     int signalTop = yPos + 3;
     int signalBottom = yPos + signalHeight - 3;
@@ -666,7 +670,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
     {
         int currentX = timeToX(change.timestamp);
 
-        // Determine color for the HORIZONTAL segment based on the PREVIOUS value
+        // Determine color for the HORIZONTAL segment
         QColor horizontalColor;
         
         bool prevIsX = (prevValue == "x" || prevValue == "X");
@@ -674,17 +678,22 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         bool isX = (change.value == "x" || change.value == "X");
         bool isZ = (change.value == "z" || change.value == "Z");
 
-        // Color for horizontal line is based on the PREVIOUS value
-        if (prevIsX) {
-            horizontalColor = QColor(255, 0, 0); // Red for X
-        } else if (prevIsZ) {
-            horizontalColor = QColor(255, 165, 0); // Orange for Z
-        } else if (prevValue == "0") {
-            horizontalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
-        } else if (prevValue == "1") {
-            horizontalColor = QColor(0, 255, 0); // Green for 1
+        // If user has chosen a custom color, use it for all horizontal segments
+        if (hasCustomColor) {
+            horizontalColor = customColor;
         } else {
-            horizontalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
+            // No custom color - use value-based colors for horizontal segments
+            if (prevIsX) {
+                horizontalColor = QColor(255, 0, 0); // Red for X
+            } else if (prevIsZ) {
+                horizontalColor = QColor(255, 165, 0); // Orange for Z
+            } else if (prevValue == "0") {
+                horizontalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
+            } else if (prevValue == "1") {
+                horizontalColor = QColor(0, 255, 0); // Green for 1
+            } else {
+                horizontalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
+            }
         }
 
         // Draw the HORIZONTAL segment based on previous value
@@ -699,7 +708,7 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
             painter.drawLine(prevX, lowLevel, currentX, lowLevel);
         }
 
-        // Draw VERTICAL transition line if value changed - ALWAYS use CYAN color
+        // Draw VERTICAL transition line if value changed
         if (prevValue != change.value) {
             int fromY, toY;
 
@@ -721,8 +730,17 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
                 toY = lowLevel;
             }
 
-            // VERTICAL line ALWAYS uses CYAN color
-            painter.setPen(QPen(QColor(0x01, 0xFF, 0xFF), lineWidth)); // Cyan
+            // Determine color for VERTICAL line
+            QColor verticalColor;
+            if (hasCustomColor) {
+                // Use custom color for vertical lines too
+                verticalColor = customColor;
+            } else {
+                // No custom color - vertical lines use CYAN
+                verticalColor = QColor(0x01, 0xFF, 0xFF); // Cyan
+            }
+
+            painter.setPen(QPen(verticalColor, lineWidth));
             painter.drawLine(currentX, fromY, currentX, toY);
         }
 
@@ -731,22 +749,28 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
         prevX = currentX;
     }
 
-    // Draw the final segment - color based on the LAST value
+    // Draw the final segment
     QColor finalColor;
     
     bool finalIsX = (prevValue == "x" || prevValue == "X");
     bool finalIsZ = (prevValue == "z" || prevValue == "Z");
 
-    if (finalIsX) {
-        finalColor = QColor(255, 0, 0); // Red for X
-    } else if (finalIsZ) {
-        finalColor = QColor(255, 165, 0); // Orange for Z
-    } else if (prevValue == "0") {
-        finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
-    } else if (prevValue == "1") {
-        finalColor = QColor(0, 255, 0); // Green for 1
+    // If user has chosen a custom color, use it for the final segment
+    if (hasCustomColor) {
+        finalColor = customColor;
     } else {
-        finalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
+        // No custom color - use value-based color for final segment
+        if (finalIsX) {
+            finalColor = QColor(255, 0, 0); // Red for X
+        } else if (finalIsZ) {
+            finalColor = QColor(255, 165, 0); // Orange for Z
+        } else if (prevValue == "0") {
+            finalColor = QColor(0x01, 0xFF, 0xFF); // Cyan for 0
+        } else if (prevValue == "1") {
+            finalColor = QColor(0, 255, 0); // Green for 1
+        } else {
+            finalColor = QColor(0xFF, 0xE6, 0xCD); // Default for other values
+        }
     }
 
     painter.setPen(QPen(finalColor, lineWidth));
