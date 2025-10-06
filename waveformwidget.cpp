@@ -28,7 +28,6 @@ WaveformWidget::WaveformWidget(QWidget *parent)
       dragStartOffset(0),
       dragStartY(0),
       lastSelectedItem(-1),
-      highlightBusses(false),
       busDisplayFormat(Hex),
       draggingNamesSplitter(false),
       draggingValuesSplitter(false),
@@ -228,12 +227,6 @@ void WaveformWidget::resetSignalColors()
     update();
 }
 
-void WaveformWidget::setHighlightBusses(bool highlight)
-{
-    highlightBusses = highlight;
-    update();
-}
-
 void WaveformWidget::setBusDisplayFormat(BusFormat format)
 {
     busDisplayFormat = format;
@@ -256,7 +249,7 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
     // Draw pinned header (always visible)
     painter.fillRect(valuesColumnStart, 0, valuesColumnWidth, timeMarkersHeight, QColor(70, 70, 80));
     painter.setPen(QPen(Qt::white));
-    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value @ Time");
+    painter.drawText(valuesColumnStart + 5, timeMarkersHeight - 8, "Value");
 
     // Set up clipping to exclude pinned areas from scrolling
     painter.setClipRect(valuesColumnStart, timeMarkersHeight, valuesColumnWidth, height() - timeMarkersHeight);

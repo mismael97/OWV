@@ -95,10 +95,6 @@ void MainWindow::createActions()
     defaultColorsAction = new QAction("Default Colors", this);
     connect(defaultColorsAction, &QAction::triggered, this, &MainWindow::resetSignalColors);
 
-    highlightBussesAction = new QAction("Highlight Busses", this);
-    highlightBussesAction->setCheckable(true);
-    connect(highlightBussesAction, &QAction::triggered, this, &MainWindow::toggleHighlightBusses);
-
     // Bus format actions
     busHexAction = new QAction("Hexadecimal", this);
     busHexAction->setCheckable(true);
@@ -175,7 +171,6 @@ void MainWindow::createMenuBar()
     // Signal colors submenu
     QMenu *signalColorsMenu = waveMenu->addMenu("Signal Colors");
     signalColorsMenu->addAction(defaultColorsAction);
-    signalColorsMenu->addAction(highlightBussesAction);
 
     // Bus format submenu
     busFormatMenu = waveMenu->addMenu("Bus Format");
@@ -569,10 +564,6 @@ void MainWindow::toggleBusDisplayFormat()
     }
 }
 
-void MainWindow::toggleHighlightBusses()
-{
-    waveformWidget->setHighlightBusses(highlightBussesAction->isChecked());
-}
 
 void MainWindow::setBusHexFormat()
 {

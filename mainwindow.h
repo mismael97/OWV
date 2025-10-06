@@ -48,7 +48,6 @@ private slots:
     void removeSelectedSignals();
     void toggleBusDisplayFormat();
     void resetSignalColors();
-    void toggleHighlightBusses();
     void setBusHexFormat();
     void setBusBinaryFormat();
     void setBusOctalFormat();
@@ -58,8 +57,7 @@ private slots:
     void decreaseSignalHeight();
 
 private:
-    void createToolbarBelowMenu(); // Add this line
-
+    void createToolbarBelowMenu();
     void updateLineThicknessActions();
     QAction *increaseHeightAction;
     QAction *decreaseHeightAction;
@@ -71,7 +69,6 @@ private:
     // Wave menu actions
     QMenu *waveMenu;
     QAction *defaultColorsAction;
-    QAction *highlightBussesAction;
     QMenu *busFormatMenu;
     QAction *busHexAction;
     QAction *busBinaryAction;
@@ -85,8 +82,8 @@ private:
     void loadVcdFile(const QString &filename);
     void loadDefaultVcdFile();
 
-    void createMenuBar();     // Renamed from createToolBar()
-    void createMainToolbar(); // Renamed from createToolbarBelowMenu()
+    void createMenuBar();
+    void createMainToolbar();
 
     // Add these to private section
     QToolBar *mainToolBar;

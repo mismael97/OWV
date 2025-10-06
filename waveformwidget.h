@@ -158,7 +158,6 @@ public:
     void removeSelectedSignals();
     void selectAllSignals();
     void resetSignalColors();
-    void setHighlightBusses(bool highlight);
     void setBusDisplayFormat(BusFormat format);
     BusFormat getBusDisplayFormat() const { return busDisplayFormat; }
     int getSelectedSignal() const { return selectedItems.isEmpty() ? -1 : *selectedItems.begin(); }
@@ -287,7 +286,6 @@ private:
 
     // Signal colors
     QMap<QString, QColor> signalColors;
-    bool highlightBusses = false;
     BusFormat busDisplayFormat = Hex;
 
     // Splitter state
