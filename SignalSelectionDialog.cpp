@@ -471,6 +471,9 @@ void SignalSelectionDialog::populateTopLevelScopes()
 
         populatedScopes.insert("");
         updateScopeCheckState(globalItem);
+        
+        // NEW: Expand the global signals item
+        globalItem->setExpanded(true);
     }
 
     // Find top-level scopes
@@ -513,11 +516,13 @@ void SignalSelectionDialog::populateTopLevelScopes()
         signalTree->addTopLevelItem(scopeItem);
         populatedScopes.insert(scope);
         updateScopeCheckState(scopeItem);
+        
+        // NEW: Expand all top-level scope items
+        scopeItem->setExpanded(true);
     }
 
     signalTree->setUpdatesEnabled(true);
 }
-
 
 void SignalSelectionDialog::onItemExpanded(QTreeWidgetItem *item)
 {
