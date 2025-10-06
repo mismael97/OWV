@@ -1393,9 +1393,10 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
                 update();
                 emit itemSelected(itemIndex);
             }
-            else if (!inNamesColumn && inWaveformArea)
+            else 
             {
-                // Clear selection when clicking empty space
+                // NEW: Clear selection when clicking empty space
+                // Only clear if not using Ctrl or Shift modifiers (which are for multi-selection)
                 if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
                 {
                     selectedItems.clear();
@@ -1409,6 +1410,17 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
                 dragStartX = event->pos().x() - waveformStartX;
                 dragStartOffset = timeOffset;
                 setCursor(Qt::ClosedHandCursor);
+            }
+        }
+        else
+        {
+            // NEW: Also clear selection when clicking in the pinned header area
+            if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
+            {
+                selectedItems.clear();
+                lastSelectedItem = -1;
+                update();
+                emit itemSelected(-1);
             }
         }
     }
@@ -2535,7 +2547,34 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
     if (pos.x() >= waveformStartX && pos.y() >= timeMarkersHeight)
     {
         // Try to select signal at this position
-        selectSignalAtPosition(pos);
+        int itemIndex = getItemAtPosition(pos);
+        
+        if (itemIndex >= 0 && isSignalItem(itemIndex))
+        {
+            // Single selection - clear previous selection unless using modifiers
+            if (!(QApplication::keyboardModifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
+            {
+                selectedItems.clear();
+            }
+            selectedItems.insert(itemIndex);
+            lastSelectedItem = itemIndex;
+
+            updateEventList(); // Update events for newly selected signal
+
+            update();
+            emit itemSelected(itemIndex);
+        }
+        else
+        {
+            // NEW: Clear selection when clicking empty space in waveform area
+            if (!(QApplication::keyboardModifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
+            {
+                selectedItems.clear();
+                lastSelectedItem = -1;
+                update();
+                emit itemSelected(-1);
+            }
+        }
 
         // Also set cursor time
         int clickXInWaveform = pos.x() - waveformStartX;
