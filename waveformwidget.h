@@ -204,6 +204,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+void debugSignalState(int time) const;
     double calculateZoomFitScale() const
     {
         if (!vcdParser || vcdParser->getEndTime() <= 0)

@@ -2581,10 +2581,26 @@ void WaveformWidget::navigateToTime(int targetTime)
     updateScrollBar();
     update();
 }
-
+void WaveformWidget::debugSignalState(int time) const
+{
+    if (currentlyNavigatedSignal.isEmpty() || !vcdParser)
+        return;
+        
+    const auto changes = vcdParser->getValueChangesForSignal(currentlyNavigatedSignal);
+    QString value = "unknown";
+    
+    for (const auto &change : changes) {
+        if (change.timestamp > time) break;
+        value = change.value;
+    }
+    
+    qDebug() << "Signal state at time" << time << ":" << value;
+}
 
 void WaveformWidget::navigateToPreviousEvent()
 {
+    qDebug() << "=== PREVIOUS BUTTON CLICKED ===";
+    
     if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
         return;
 
@@ -2594,9 +2610,21 @@ void WaveformWidget::navigateToPreviousEvent()
     if (events.isEmpty())
         return;
 
-    // If no current index set, set it to the last event
+    // If no current index set, find where we are based on cursor time
     if (currentIndex == -1) {
-        currentIndex = events.size() - 1;
+        currentIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
+        qDebug() << "Setting initial current index to:" << currentIndex;
+    }
+    
+    // If we're before the first event, go to the first event
+    if (currentIndex == -1) {
+        currentIndex = 0;
+        int targetTime = events[currentIndex];
+        currentEventIndex = currentIndex;
+
+        qDebug() << "Previous: Before first event, going to first event at index" << currentIndex << "Time:" << targetTime;
+        navigateToTime(targetTime);
+        return;
     }
     
     // If we're at the beginning, don't move
@@ -2608,12 +2636,13 @@ void WaveformWidget::navigateToPreviousEvent()
     currentEventIndex = currentIndex;
 
     qDebug() << "Previous: Index" << currentIndex << "Time:" << targetTime;
-    
     navigateToTime(targetTime);
 }
 
 void WaveformWidget::navigateToNextEvent()
 {
+    qDebug() << "=== NEXT BUTTON CLICKED ===";
+    
     if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
         return;
 
@@ -2623,9 +2652,21 @@ void WaveformWidget::navigateToNextEvent()
     if (events.isEmpty())
         return;
 
-    // If no current index set, set it to before the first event
+    // If no current index set, find where we are based on cursor time
     if (currentIndex == -1) {
-        currentIndex = -1;
+        currentIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
+        qDebug() << "Setting initial current index to:" << currentIndex;
+    }
+    
+    // If we're before the first event, go to the first event
+    if (currentIndex == -1) {
+        currentIndex = 0;
+        int targetTime = events[currentIndex];
+        currentEventIndex = currentIndex;
+
+        qDebug() << "Next: Before first event, going to first event at index" << currentIndex << "Time:" << targetTime;
+        navigateToTime(targetTime);
+        return;
     }
     
     // If we're at the end, don't move
@@ -2637,7 +2678,6 @@ void WaveformWidget::navigateToNextEvent()
     currentEventIndex = currentIndex;
 
     qDebug() << "Next: Index" << currentIndex << "Time:" << targetTime;
-    
     navigateToTime(targetTime);
 }
 
@@ -2649,7 +2689,18 @@ bool WaveformWidget::hasPreviousEvent() const
     const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
     int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
     
-    return !events.isEmpty() && currentIndex > 0;
+    // If we have events and we're either before the first one or after the first one, we can go previous
+    if (!events.isEmpty()) {
+        if (currentIndex == -1) {
+            // Before first event - no previous available
+            return false;
+        } else if (currentIndex > 0) {
+            // After first event - can go to previous event
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 bool WaveformWidget::hasNextEvent() const
@@ -2660,12 +2711,16 @@ bool WaveformWidget::hasNextEvent() const
     const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
     int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
     
-    // If no current index but we have events, we can go to the first event
-    if (currentIndex == -1 && !events.isEmpty()) {
+    if (events.isEmpty())
+        return false;
+    
+    // If we're before the first event, we can go to the first event
+    if (currentIndex == -1) {
         return true;
     }
     
-    return !events.isEmpty() && currentIndex < events.size() - 1;
+    // If we're at or before the last event, we can go next
+    return currentIndex < events.size() - 1;
 }
 
 void WaveformWidget::updateEventList()
@@ -2690,8 +2745,24 @@ void WaveformWidget::updateEventList()
     // Always recompute events to ensure they're up to date
     QVector<int> events;
     
+    // Get the actual initial value from the first change (if it exists at time 0)
     QString prevValue;
+    if (!changes.isEmpty() && changes.first().timestamp == 0) {
+        prevValue = changes.first().value;
+    } else {
+        // If no change at time 0, assume initial state is 0
+        prevValue = "0";
+    }
     
+    // For SignalRise and SignalFall, we need to check if the initial state itself qualifies
+    if (navigationMode == SignalRise && prevValue == "1") {
+        // If signal starts at 1, the initial state itself is a "rise" from unknown to 1
+        events.append(0);
+    } else if (navigationMode == SignalFall && prevValue == "0") {
+        // If signal starts at 0, the initial state itself is a "fall" from unknown to 0  
+        events.append(0);
+    }
+
     for (int i = 0; i < changes.size(); i++)
     {
         const auto &change = changes[i];
@@ -2706,14 +2777,14 @@ void WaveformWidget::updateEventList()
 
         case SignalRise:
             // Include transitions from 0 to 1
-            if (i > 0 && prevValue == "0" && change.value == "1") {
+            if (prevValue == "0" && change.value == "1") {
                 includeEvent = true;
             }
             break;
 
         case SignalFall:
             // Include transitions from 1 to 0
-            if (i > 0 && prevValue == "1" && change.value == "0") {
+            if (prevValue == "1" && change.value == "0") {
                 includeEvent = true;
             }
             break;
@@ -2733,7 +2804,7 @@ void WaveformWidget::updateEventList()
             break;
         }
 
-        if (includeEvent)
+        if (includeEvent && change.timestamp > 0) // Don't add time 0 again if we already added it
         {
             events.append(change.timestamp);
         }
@@ -2751,6 +2822,7 @@ void WaveformWidget::updateEventList()
     
     qDebug() << "Navigation: Signal" << signal.fullName 
              << "Mode:" << navigationMode 
+             << "Initial value:" << (changes.isEmpty() ? "unknown" : changes.first().value)
              << "Total changes:" << changes.size()
              << "Navigation events:" << events.size()
              << "Cursor time:" << cursorTime
@@ -2776,26 +2848,25 @@ int WaveformWidget::findEventIndexForTime(int time, const QString& signalFullNam
     if (events.isEmpty())
         return -1;
     
-    // Special case: if we're before the first event, return the first event
+    // If we're before the first event, return -1 to indicate we're before any event
     if (time < events.first()) {
-        return 0;
+        return -1;
     }
     
-    // Special case: if we're after the last event, return the last event
+    // If we're after the last event, return the last event index
     if (time > events.last()) {
         return events.size() - 1;
     }
     
     // Find the event that is closest to but not greater than the current time
-    // This ensures we're "within" an event period, not jumping to the next one
     for (int i = events.size() - 1; i >= 0; i--) {
         if (events[i] <= time) {
             return i;
         }
     }
     
-    // Fallback: return first event
-    return 0;
+    // Should never reach here, but return -1 if we do
+    return -1;
 }
 
 // Overload for currently navigated signal
