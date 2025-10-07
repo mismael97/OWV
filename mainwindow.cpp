@@ -710,7 +710,9 @@ void MainWindow::onNavigationModeChanged(int index)
 {
     // Update waveform widget navigation mode
     waveformWidget->setNavigationMode(static_cast<WaveformWidget::NavigationMode>(index));
-    updateNavigationButtons();
+    
+    // Force update navigation buttons
+    QTimer::singleShot(0, this, &MainWindow::updateNavigationButtons);
 }
 
 void MainWindow::onPrevValueClicked()
@@ -728,17 +730,16 @@ void MainWindow::onNextValueClicked()
 void MainWindow::updateNavigationButtons()
 {
     bool hasSelection = !waveformWidget->getSelectedItemIndices().isEmpty();
-
-    if (hasSelection)
-    {
+    
+    if (hasSelection) {
         bool hasPrev = waveformWidget->hasPreviousEvent();
         bool hasNext = waveformWidget->hasNextEvent();
 
         prevValueButton->setEnabled(hasPrev);
         nextValueButton->setEnabled(hasNext);
-    }
-    else
-    {
+        
+        qDebug() << "Navigation buttons - HasPrev:" << hasPrev << "HasNext:" << hasNext;
+    } else {
         prevValueButton->setEnabled(false);
         nextValueButton->setEnabled(false);
     }
