@@ -124,6 +124,8 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    int getCursorTime() const { return cursorTime; }
+    void navigateToTime(int time);
     enum NavigationMode
     {
         ValueChange,
@@ -187,6 +189,8 @@ signals:
     void timeChanged(int time);
     void itemSelected(int itemIndex);
     void contextMenuRequested(const QPoint &pos, int itemIndex);
+        void cursorTimeChanged(int time);  // ADD THIS - for yellow timeline cursor
+
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -224,7 +228,7 @@ private:
     }
     void resetNavigationForCurrentSignal();
 
-    void navigateToTime(int targetTime);
+    // void navigateToTime(int targetTime);
     int findEventIndexForTime(int time, const QString &signalFullName) const;
 
     bool isSignalSelected(const VCDSignal &signal) const

@@ -600,43 +600,112 @@ void MainWindow::updateBusFormatActions()
     }
 }
 
-// In setupNavigationControls() method, replace the connection:
 void MainWindow::setupNavigationControls()
 {
     // Create navigation controls
     QWidget *navWidget = new QWidget();
     QHBoxLayout *navLayout = new QHBoxLayout(navWidget);
     navLayout->setContentsMargins(5, 0, 5, 0);
-    
+    navLayout->setSpacing(3); // Reduced spacing between widgets
+
     QLabel *navLabel = new QLabel("Navigate:");
     navigationModeCombo = new QComboBox();
-    navigationModeCombo->addItem("Value Change");
-    navigationModeCombo->addItem("Signal Rise");
-    navigationModeCombo->addItem("Signal Fall"); 
-    navigationModeCombo->addItem("X Values");
-    navigationModeCombo->addItem("Z Values");
+    QFont boldFont;
+    boldFont.setWeight(QFont::Bold);
+
+    navigationModeCombo->addItem("⇄");
+    navigationModeCombo->addItem("↱");
+    navigationModeCombo->addItem("↳");
+    navigationModeCombo->addItem("X");
+    navigationModeCombo->addItem("Z");
+
+    // Set the font for each item
+    navigationModeCombo->setItemData(0, boldFont, Qt::FontRole);
+    navigationModeCombo->setItemData(1, boldFont, Qt::FontRole);
+    navigationModeCombo->setItemData(2, boldFont, Qt::FontRole);
+    navigationModeCombo->setItemData(3, boldFont, Qt::FontRole);
+    navigationModeCombo->setItemData(4, boldFont, Qt::FontRole);
     
-    prevValueButton = new QPushButton("◀ Prev");
-    nextValueButton = new QPushButton("Next ▶");
+    // Make combo box smaller
+    navigationModeCombo->setMaximumWidth(60);
+    navigationModeCombo->setMaximumHeight(22);
+
+    // Create smaller prev/next buttons
+    prevValueButton = new QPushButton("◀");
+    nextValueButton = new QPushButton("▶");
     
+    // Set smaller button sizes
+    prevValueButton->setFixedSize(22, 22);
+    nextValueButton->setFixedSize(22, 22);
+    
+    // Set smaller font for buttons
+    QFont smallFont = prevValueButton->font();
+    smallFont.setPointSize(8);
+    prevValueButton->setFont(smallFont);
+    nextValueButton->setFont(smallFont);
+
     prevValueButton->setEnabled(false);
     nextValueButton->setEnabled(false);
+
+    // Create time input field
+    QLabel *timeLabel = new QLabel("Time:");
+    QLineEdit *timeInput = new QLineEdit();
     
+    // Set initial placeholder with current time (start with 0)
+    timeInput->setPlaceholderText("Time: 0");
+    
+    timeInput->setMaximumWidth(80); // Slightly wider to fit "Time: 1234"
+    timeInput->setMaximumHeight(22);
+    
+    // Set validator to accept only numbers
+    QIntValidator *validator = new QIntValidator(0, 1000000000, this);
+    timeInput->setValidator(validator);
+
+    // Connect time input - when Enter is pressed, move cursor to that time
+    connect(timeInput, &QLineEdit::returnPressed, this, [this, timeInput]() {
+        bool ok;
+        int time = timeInput->text().toInt(&ok);
+        if (ok) {
+            // Move cursor to the specified time
+            waveformWidget->navigateToTime(time);
+            // Update the time display
+            updateTimeDisplay(time);
+            // Clear the input field and immediately update placeholder
+            timeInput->clear();
+            timeInput->clearFocus(); // Remove focus so placeholder is visible
+            
+            // Force update the placeholder with the new time immediately
+            QString timeText = QString("Time: %1").arg(time);
+            timeInput->setPlaceholderText(timeText);
+        }
+    });
+
+    // Connect to update the placeholder text with YELLOW TIMELINE CURSOR time
+    connect(waveformWidget, &WaveformWidget::cursorTimeChanged, this, [timeInput](int time) {
+        // Always update the placeholder to match the cursor time
+        QString timeText = QString("Time: %1").arg(time);
+        timeInput->setPlaceholderText(timeText);
+    });
+
     // FIX: Use simpler connection syntax
     connect(navigationModeCombo, SIGNAL(currentIndexChanged(int)),
             this, SLOT(onNavigationModeChanged(int)));
     connect(prevValueButton, &QPushButton::clicked, this, &MainWindow::onPrevValueClicked);
     connect(nextValueButton, &QPushButton::clicked, this, &MainWindow::onNextValueClicked);
-    
+
     navLayout->addWidget(navLabel);
     navLayout->addWidget(navigationModeCombo);
     navLayout->addWidget(prevValueButton);
     navLayout->addWidget(nextValueButton);
+    navLayout->addWidget(timeLabel);
+    navLayout->addWidget(timeInput);
     navLayout->addStretch();
-    
+
     // Add to main toolbar
     mainToolBar->addWidget(navWidget);
 }
+
+
 void MainWindow::onNavigationModeChanged(int index)
 {
     // Update waveform widget navigation mode
@@ -659,14 +728,17 @@ void MainWindow::onNextValueClicked()
 void MainWindow::updateNavigationButtons()
 {
     bool hasSelection = !waveformWidget->getSelectedItemIndices().isEmpty();
-    
-    if (hasSelection) {
+
+    if (hasSelection)
+    {
         bool hasPrev = waveformWidget->hasPreviousEvent();
         bool hasNext = waveformWidget->hasNextEvent();
 
         prevValueButton->setEnabled(hasPrev);
         nextValueButton->setEnabled(hasNext);
-    } else {
+    }
+    else
+    {
         prevValueButton->setEnabled(false);
         nextValueButton->setEnabled(false);
     }

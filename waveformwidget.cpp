@@ -689,34 +689,24 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     if (cursorX < 0 || cursorX > (width() - waveformStartX))
         return;
 
-    // Draw vertical cursor line through entire height (including pinned areas)
-    painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
-    painter.drawLine(waveformStartX + cursorX, 0, waveformStartX + cursorX, height());
-
-    // Draw cursor time label at top (in pinned timeline area)
-    painter.setPen(QPen(Qt::white));
-    QString timeText = QString("Time: %1").arg(cursorTime);
-
-    // Calculate text width to make rectangle dynamic
-    int textWidth = painter.fontMetrics().horizontalAdvance(timeText) + 10; // +10 for padding
-    int textHeight = 20;
-
-    // Ensure the rectangle doesn't go off-screen to the right
-    int maxX = width() - textWidth - 5; // 5px margin from right edge
-    int labelX = waveformStartX + cursorX + 5;
-
-    // If the label would go off-screen, position it to the left of the cursor
-    if (labelX + textWidth > width())
-    {
-        labelX = waveformStartX + cursorX - textWidth - 5;
+    // Calculate the height based on actual signals (stop at last signal)
+    int totalSignalsHeight = timeMarkersHeight; // Start below timeline
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto &item = displayItems[i];
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
+        totalSignalsHeight += itemHeight;
     }
+    
+    // Add some padding at the bottom
+    totalSignalsHeight += 10;
+    
+    // Don't draw beyond the actual content height
+    int drawHeight = qMin(totalSignalsHeight, height());
 
-    // Also ensure it doesn't go off-screen to the left
-    labelX = qMax(waveformStartX + 5, labelX);
-
-    QRect timeRect(labelX, 5, textWidth, textHeight);
-    painter.fillRect(timeRect, QColor(0, 0, 0, 200));
-    painter.drawText(timeRect, Qt::AlignCenter, timeText);
+    // Draw vertical cursor line from timeline area to the last signal
+    painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
+    painter.drawLine(waveformStartX + cursorX, timeMarkersHeight, waveformStartX + cursorX, drawHeight);
 }
 
 void WaveformWidget::drawSignals(QPainter &painter)
@@ -2102,8 +2092,8 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
 {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
 
-    // Only set cursor if click is in the timeline area (top part)
-    if (pos.x() < waveformStartX || pos.y() >= timeMarkersHeight)
+    // Only set cursor if click is in the timeline area (top part) AND we have signals
+    if ((pos.x() < waveformStartX || pos.y() >= timeMarkersHeight) || displayItems.isEmpty())
     {
         return;
     }
@@ -2112,6 +2102,7 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
     int clickXInWaveform = pos.x() - waveformStartX;
 
     // Convert the click position to time, accounting for current zoom and scroll
+    int oldCursorTime = cursorTime;
     cursorTime = xToTime(clickXInWaveform);
 
     showCursor = true;
@@ -2119,6 +2110,11 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
     // Reset navigation for current signal when cursor moves
     if (!currentlyNavigatedSignal.isEmpty()) {
         resetNavigationForCurrentSignal();
+    }
+    
+    // Emit cursor time change if it actually changed
+    if (cursorTime != oldCursorTime) {
+        emit cursorTimeChanged(cursorTime);
     }
     
     update();
@@ -2547,18 +2543,35 @@ void WaveformWidget::setNavigationMode(NavigationMode mode)
 
 void WaveformWidget::navigateToTime(int targetTime)
 {
+    if (!vcdParser) return;
+    
+    // Ensure the time is within valid range
+    int endTime = vcdParser->getEndTime();
+    targetTime = qMax(0, qMin(targetTime, endTime));
+    
+    int oldCursorTime = cursorTime;
+    
+    // Set cursor time
+    cursorTime = targetTime;
+    showCursor = true;
+    
     // Center the view on the target time
     int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
     int targetX = timeToX(targetTime);
     timeOffset = qMax(0, targetX - viewportWidth / 2);
-
-    // Update cursor
-    cursorTime = targetTime;
-    showCursor = true;
-
+    
+    // Reset navigation for current signal
+    if (!currentlyNavigatedSignal.isEmpty()) {
+        resetNavigationForCurrentSignal();
+    }
+    
+    // Emit cursor time change if it actually changed
+    if (cursorTime != oldCursorTime) {
+        emit cursorTimeChanged(cursorTime);  // ADD THIS LINE
+    }
+    
     updateScrollBar();
     update();
-    emit timeChanged(cursorTime);
 }
 
 
@@ -2808,23 +2821,39 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
     // Check if click is in waveform area (not in names or values columns)
     if (pos.x() >= waveformStartX && pos.y() >= timeMarkersHeight)
     {
-        // Store old cursor time to detect changes
-        int oldCursorTime = cursorTime;
-        
-        // Also set cursor time
-        int clickXInWaveform = pos.x() - waveformStartX;
-        cursorTime = xToTime(clickXInWaveform);
-        showCursor = true;
-
-        // Try to select signal at this position
-        selectSignalAtPosition(pos);
-
-        // If cursor time changed and we have a selected signal, update navigation
-        if (cursorTime != oldCursorTime && !currentlyNavigatedSignal.isEmpty()) {
-            resetNavigationForCurrentSignal();
+        // Calculate the maximum Y position where signals exist
+        int maxSignalY = timeMarkersHeight;
+        for (int i = 0; i < displayItems.size(); i++) {
+            const auto &item = displayItems[i];
+            int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
+            maxSignalY += itemHeight;
         }
+        
+        // Add some padding
+        maxSignalY += 10;
+        
+        // Only process clicks that are within the signal area (not empty space below)
+        if (pos.y() <= maxSignalY) {
+            // Store old cursor time to detect changes
+            int oldCursorTime = cursorTime;
+            
+            // Also set cursor time
+            int clickXInWaveform = pos.x() - waveformStartX;
+            cursorTime = xToTime(clickXInWaveform);
+            showCursor = true;
 
-        update();
-        emit timeChanged(cursorTime);
+            // Try to select signal at this position
+            selectSignalAtPosition(pos);
+
+            // If cursor time changed and we have a selected signal, update navigation
+            if (cursorTime != oldCursorTime && !currentlyNavigatedSignal.isEmpty()) {
+                resetNavigationForCurrentSignal();
+                
+                // Emit cursor time change
+                emit cursorTimeChanged(cursorTime);
+            }
+
+            update();
+        }
     }
 }
