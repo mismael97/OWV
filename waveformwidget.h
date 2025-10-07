@@ -130,9 +130,7 @@ public:
     {
         ValueChange,
         SignalRise,
-        SignalFall,
-        XValues,
-        ZValues
+        SignalFall
     };
     void setNavigationMode(NavigationMode mode);
     void navigateToPreviousEvent();
@@ -189,8 +187,7 @@ signals:
     void timeChanged(int time);
     void itemSelected(int itemIndex);
     void contextMenuRequested(const QPoint &pos, int itemIndex);
-        void cursorTimeChanged(int time);  // ADD THIS - for yellow timeline cursor
-
+    void cursorTimeChanged(int time); // ADD THIS - for yellow timeline cursor
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -204,7 +201,8 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
-void debugSignalState(int time) const;
+    void forceNavigationUpdate();
+    void debugSignalState(int time) const;
     double calculateZoomFitScale() const
     {
         if (!vcdParser || vcdParser->getEndTime() <= 0)

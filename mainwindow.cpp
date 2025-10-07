@@ -615,16 +615,12 @@ void MainWindow::setupNavigationControls()
 
     navigationModeCombo->addItem("⇄");
     navigationModeCombo->addItem("↱");
-    navigationModeCombo->addItem("↳");
-    navigationModeCombo->addItem("X");
-    navigationModeCombo->addItem("Z");
+    navigationModeCombo->addItem("↳"); 
 
     // Set the font for each item
     navigationModeCombo->setItemData(0, boldFont, Qt::FontRole);
     navigationModeCombo->setItemData(1, boldFont, Qt::FontRole);
     navigationModeCombo->setItemData(2, boldFont, Qt::FontRole);
-    navigationModeCombo->setItemData(3, boldFont, Qt::FontRole);
-    navigationModeCombo->setItemData(4, boldFont, Qt::FontRole);
     
     // Make combo box smaller
     navigationModeCombo->setMaximumWidth(60);
@@ -708,11 +704,11 @@ void MainWindow::setupNavigationControls()
 
 void MainWindow::onNavigationModeChanged(int index)
 {
-    // Update waveform widget navigation mode
-    waveformWidget->setNavigationMode(static_cast<WaveformWidget::NavigationMode>(index));
-    
-    // Force update navigation buttons
-    QTimer::singleShot(0, this, &MainWindow::updateNavigationButtons);
+    // Only 3 modes now: 0=ValueChange, 1=SignalRise, 2=SignalFall
+    if (index >= 0 && index <= 2) {
+        waveformWidget->setNavigationMode(static_cast<WaveformWidget::NavigationMode>(index));
+        updateNavigationButtons();
+    }
 }
 
 void MainWindow::onPrevValueClicked()

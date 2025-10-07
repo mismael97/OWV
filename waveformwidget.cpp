@@ -2528,21 +2528,20 @@ void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: para
     }
 }
 
+
 void WaveformWidget::setNavigationMode(NavigationMode mode)
 {
     navigationMode = mode;
     
-    // Clear cached events when navigation mode changes
+    // Clear ALL cached events when navigation mode changes
     signalEventTimestamps.clear();
     signalCurrentEventIndex.clear();
+    currentlyNavigatedSignal.clear();
+    currentEventIndex = -1;
     
-    // Always update events immediately when mode changes
+    // Force update events immediately when mode changes
     if (!selectedItems.isEmpty()) {
         updateEventList();
-    }
-    else {
-        currentEventIndex = -1;
-        currentlyNavigatedSignal.clear();
     }
     
     // Emit signal to update button states
@@ -2581,21 +2580,7 @@ void WaveformWidget::navigateToTime(int targetTime)
     updateScrollBar();
     update();
 }
-void WaveformWidget::debugSignalState(int time) const
-{
-    if (currentlyNavigatedSignal.isEmpty() || !vcdParser)
-        return;
-        
-    const auto changes = vcdParser->getValueChangesForSignal(currentlyNavigatedSignal);
-    QString value = "unknown";
-    
-    for (const auto &change : changes) {
-        if (change.timestamp > time) break;
-        value = change.value;
-    }
-    
-    qDebug() << "Signal state at time" << time << ":" << value;
-}
+
 
 void WaveformWidget::navigateToPreviousEvent()
 {
@@ -2689,18 +2674,17 @@ bool WaveformWidget::hasPreviousEvent() const
     const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
     int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
     
-    // If we have events and we're either before the first one or after the first one, we can go previous
-    if (!events.isEmpty()) {
-        if (currentIndex == -1) {
-            // Before first event - no previous available
-            return false;
-        } else if (currentIndex > 0) {
-            // After first event - can go to previous event
-            return true;
-        }
+    if (events.isEmpty())
+        return false;
+    
+    // If we're before the first event, no previous available
+    if (currentIndex == -1) {
+        return false;
     }
     
-    return false;
+    // If we're at the first event but there are multiple events, we can go to previous (which would be before first)
+    // OR if we're after the first event, we can go to previous event
+    return currentIndex > 0;
 }
 
 bool WaveformWidget::hasNextEvent() const
@@ -2745,24 +2729,10 @@ void WaveformWidget::updateEventList()
     // Always recompute events to ensure they're up to date
     QVector<int> events;
     
-    // Get the actual initial value from the first change (if it exists at time 0)
     QString prevValue;
-    if (!changes.isEmpty() && changes.first().timestamp == 0) {
-        prevValue = changes.first().value;
-    } else {
-        // If no change at time 0, assume initial state is 0
-        prevValue = "0";
-    }
     
-    // For SignalRise and SignalFall, we need to check if the initial state itself qualifies
-    if (navigationMode == SignalRise && prevValue == "1") {
-        // If signal starts at 1, the initial state itself is a "rise" from unknown to 1
-        events.append(0);
-    } else if (navigationMode == SignalFall && prevValue == "0") {
-        // If signal starts at 0, the initial state itself is a "fall" from unknown to 0  
-        events.append(0);
-    }
-
+    qDebug() << "=== PROCESSING EVENTS FOR MODE:" << navigationMode << "===";
+    
     for (int i = 0; i < changes.size(); i++)
     {
         const auto &change = changes[i];
@@ -2771,40 +2741,31 @@ void WaveformWidget::updateEventList()
         switch (navigationMode)
         {
         case ValueChange:
-            // Include ALL changes including the first one
             includeEvent = true;
+            qDebug() << "  ValueChange: including time" << change.timestamp << "value:" << change.value;
             break;
 
         case SignalRise:
-            // Include transitions from 0 to 1
-            if (prevValue == "0" && change.value == "1") {
-                includeEvent = true;
+            if (i > 0) {
+                includeEvent = (prevValue == "0" && change.value == "1");
+                if (includeEvent) {
+                    qDebug() << "  SignalRise: including time" << change.timestamp << "prev:" << prevValue << "curr:" << change.value;
+                }
             }
             break;
 
         case SignalFall:
-            // Include transitions from 1 to 0
-            if (prevValue == "1" && change.value == "0") {
-                includeEvent = true;
+            if (i > 0) {
+                includeEvent = (prevValue == "1" && change.value == "0");
+                if (includeEvent) {
+                    qDebug() << "  SignalFall: including time" << change.timestamp << "prev:" << prevValue << "curr:" << change.value;
+                }
             }
             break;
-
-        case XValues:
-            // Include transitions to X values
-            if (change.value.toLower() == "x") {
-                includeEvent = true;
-            }
-            break;
-
-        case ZValues:
-            // Include transitions to Z values
-            if (change.value.toLower() == "z") {
-                includeEvent = true;
-            }
-            break;
+        
         }
 
-        if (includeEvent && change.timestamp > 0) // Don't add time 0 again if we already added it
+        if (includeEvent)
         {
             events.append(change.timestamp);
         }
@@ -2820,23 +2781,34 @@ void WaveformWidget::updateEventList()
     signalCurrentEventIndex[signal.fullName] = newIndex;
     currentEventIndex = newIndex;
     
-    qDebug() << "Navigation: Signal" << signal.fullName 
-             << "Mode:" << navigationMode 
-             << "Initial value:" << (changes.isEmpty() ? "unknown" : changes.first().value)
-             << "Total changes:" << changes.size()
-             << "Navigation events:" << events.size()
-             << "Cursor time:" << cursorTime
-             << "Current index:" << newIndex;
-    
-    // Debug: print all events for this mode
-    if (!events.isEmpty()) {
-        qDebug() << "Events for mode" << navigationMode << ":";
-        for (int i = 0; i < events.size(); i++) {
-            qDebug() << "  " << i << ":" << events[i];
-        }
-    }
+    qDebug() << "=== NAVIGATION SUMMARY ===";
+    qDebug() << "Signal:" << signal.fullName;
+    qDebug() << "Mode:" << navigationMode;
+    qDebug() << "Total changes:" << changes.size();
+    qDebug() << "Navigation events found:" << events.size();
+    qDebug() << "Cursor time:" << cursorTime;
+    qDebug() << "Current index:" << newIndex;
+    qDebug() << "Events list:" << events;
+    qDebug() << "Button states - HasPrev:" << hasPreviousEvent() << "HasNext:" << hasNextEvent();
+    qDebug() << "=== END SUMMARY ===";
 }
 
+void WaveformWidget::forceNavigationUpdate()
+{
+    // Clear all navigation state
+    signalEventTimestamps.clear();
+    signalCurrentEventIndex.clear();
+    currentlyNavigatedSignal.clear();
+    currentEventIndex = -1;
+    
+    // Force update if we have selected signals
+    if (!selectedItems.isEmpty()) {
+        updateEventList();
+    }
+    
+    update();
+    emit timeChanged(cursorTime);
+}
 
 int WaveformWidget::findEventIndexForTime(int time, const QString& signalFullName) const
 {
@@ -2900,12 +2872,8 @@ void WaveformWidget::selectSignalAtPosition(const QPoint &pos)
         selectedItems.insert(itemIndex);
         lastSelectedItem = itemIndex;
 
-        // Update navigation for the newly selected signal
-        const VCDSignal &signal = getSignalFromItem(itemIndex);
-        
-        // Always update events when selecting a new signal
-        currentlyNavigatedSignal = signal.fullName;
-        updateEventList();
+        // Force navigation update for the newly selected signal
+        forceNavigationUpdate();
 
         update();
         emit itemSelected(itemIndex);
