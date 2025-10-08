@@ -43,15 +43,23 @@ private slots:
     void onSearchTimerTimeout();
     void onLoadProgress(int percentage);
     void onLoadFinished();
+    
+    // NEW: Filter button slots
+    void onFilterInputPorts();
+    void onFilterOutputPorts();
+    void onFilterInoutPorts();
+    void onFilterNetSignals();
+    void onFilterRegisters();
+    void onFilterAll();
 
 private:
- void processNextChunk(); // Add this declaration
+    void processNextChunk();
     void populateTopLevelScopes();
     void performSearch(const QString &text);
     void populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem);
     void displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope);
-
     void onSearchFinished();
+    void applySignalFilter();
 
     // UI Components
     QTreeWidget *signalTree;
@@ -62,6 +70,14 @@ private:
     QProgressBar *progressBar;
     QLabel *statusLabel;
 
+    // NEW: Filter buttons
+    QPushButton *filterInputButton;
+    QPushButton *filterOutputButton;
+    QPushButton *filterInoutButton;
+    QPushButton *filterNetButton;
+    QPushButton *filterRegButton;
+    QPushButton *filterAllButton;
+
     // Loading and search management
     QTimer *searchTimer;
     QString pendingSearchText;
@@ -69,7 +85,7 @@ private:
     bool isLoadingInProgress;
     bool isInitialLoadComplete;
 
-        // Loading state variables
+    // Loading state variables
     int currentLoadIndex;
     int totalSignalsToProcess;
 
@@ -87,6 +103,9 @@ private:
     // Multi-selection support
     QTreeWidgetItem *lastSelectedItem;
     QString currentFilter;
+    
+    // NEW: Signal type filter
+    QString currentTypeFilter;
 
     // Async loading
     QFutureWatcher<void> *loadWatcher;

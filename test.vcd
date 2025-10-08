@@ -1,5 +1,5 @@
 $date
-	Thu Oct  2 07:37:22 2025
+	Wed Oct  8 04:43:13 2025
 $end
 
 $version
@@ -10,7 +10,7 @@ $timescale
 	1ns
 $end
 
-$comment Csum: 1 1336ca24c77ae40f $end
+$comment Csum: 1 82559be2f7f4f286 $end
 
 
 $scope module tb_four_bit_adder $end
@@ -19,10 +19,20 @@ $var reg 4 " b [3:0] $end
 $var reg 1 # cin $end
 $var wire 4 $ sum [3:0] $end
 $var wire 1 % cout $end
-$var wire 1 & unknown_single_w $end
-$var reg 1 ' unknown_single_l $end
-$var wire 11 ( unknown_z [10:0] $end
-$var reg 11 ) unknown_x [10:0] $end
+$var wire 4 & bus_x [3:0] $end
+$var wire 1 ' signle_x $end
+$var reg 4 ( bus_y [3:0] $end
+$var reg 1 ) signle_y $end
+
+$scope module uut $end
+$var input 4 ! a [3:0] $end
+$var input 4 " b [3:0] $end
+$var input 1 # cin $end
+$var output 4 $ sum [3:0] $end
+$var output 1 % cout $end
+$var reg 3 * empty [2:0] $end
+$upscope $end
+
 $upscope $end
 
 $enddefinitions $end
@@ -34,13 +44,14 @@ x%
 b0000 !
 b0000 "
 bxxxx $
-bxxxxxxxxxxx )
-bzzzzzzzzzzz (
-x'
-z&
+bxxx *
+x)
+bxxxx (
+z'
+bzzzz &
 $end
-b0000 $
 0%
+b0000 $
 #10
 b0011 !
 b0101 "
@@ -48,8 +59,8 @@ b1000 $
 #20
 b1111 !
 b0001 "
-b0000 $
 1%
+b0000 $
 #30
 b1010 !
 b0101 "

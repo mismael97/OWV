@@ -52,7 +52,8 @@ void SignalSelectionDialog::onItemChanged(QTreeWidgetItem *item, int column)
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent), lastSelectedItem(nullptr),
       isSearchInProgress(false), isLoadingInProgress(false), isInitialLoadComplete(false),
-      currentLoadIndex(0), totalSignalsToProcess(0)  // Now these will work
+      currentLoadIndex(0), totalSignalsToProcess(0),
+      currentTypeFilter("all")  // Initialize with "all" filter
 {
     setWindowTitle("Add Signals to Waveform");
     setMinimumSize(800, 600);
@@ -93,6 +94,56 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
 
     searchLayout->addWidget(searchLabel);
     searchLayout->addWidget(searchEdit);
+
+    // NEW: Filter buttons layout
+    QHBoxLayout *filterLayout = new QHBoxLayout();
+    filterLayout->setSpacing(2);
+    
+    filterInputButton = new QPushButton("Input Ports");
+    filterOutputButton = new QPushButton("Output Ports");
+    filterInoutButton = new QPushButton("Inout Ports");
+    filterNetButton = new QPushButton("Net Signals");
+    filterRegButton = new QPushButton("Registers");
+    filterAllButton = new QPushButton("All Signals");
+    
+    // Style the buttons
+    QString buttonStyle = "QPushButton { padding: 6px; font-size: 11px; border: 1px solid #555; background-color: #333; color: white; }"
+                         "QPushButton:checked { background-color: #4CAF50; color: white; border: 1px solid #4CAF50; }"
+                         "QPushButton:hover { background-color: #555; }";
+    
+    filterInputButton->setStyleSheet(buttonStyle);
+    filterOutputButton->setStyleSheet(buttonStyle);
+    filterInoutButton->setStyleSheet(buttonStyle);
+    filterNetButton->setStyleSheet(buttonStyle);
+    filterRegButton->setStyleSheet(buttonStyle);
+    filterAllButton->setStyleSheet(buttonStyle);
+    
+    // Make buttons checkable
+    filterInputButton->setCheckable(true);
+    filterOutputButton->setCheckable(true);
+    filterInoutButton->setCheckable(true);
+    filterNetButton->setCheckable(true);
+    filterRegButton->setCheckable(true);
+    filterAllButton->setCheckable(true);
+    
+    // Set "All Signals" as initially checked
+    filterAllButton->setChecked(true);
+    
+    // Connect filter buttons
+    connect(filterInputButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterInputPorts);
+    connect(filterOutputButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterOutputPorts);
+    connect(filterInoutButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterInoutPorts);
+    connect(filterNetButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterNetSignals);
+    connect(filterRegButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterRegisters);
+    connect(filterAllButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterAll);
+    
+    filterLayout->addWidget(filterInputButton);
+    filterLayout->addWidget(filterOutputButton);
+    filterLayout->addWidget(filterInoutButton);
+    filterLayout->addWidget(filterNetButton);
+    filterLayout->addWidget(filterRegButton);
+    filterLayout->addWidget(filterAllButton);
+    filterLayout->addStretch();
 
     // Progress bar
     progressBar = new QProgressBar();
@@ -137,6 +188,7 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     mainLayout->addLayout(searchLayout);
+    mainLayout->addLayout(filterLayout);  // NEW: Add filter buttons
     mainLayout->addWidget(progressBar);
     mainLayout->addWidget(statusLabel);
     mainLayout->addWidget(signalTree, 1);
@@ -375,8 +427,8 @@ void SignalSelectionDialog::onLoadFinished()
 
     progressBar->setVisible(false);
     
-    // Populate top-level scopes in main thread
-    populateTopLevelScopes();
+    // Apply the current filter instead of just populating top-level scopes
+    applySignalFilter();
     
     statusLabel->setText(QString("Ready - %1 signals in %2 scopes")
                          .arg(allSignals.size())
@@ -805,16 +857,7 @@ void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 
     // For immediate feedback on empty search
     if (text.isEmpty()) {
-        signalTree->setUpdatesEnabled(false);
-        signalTree->blockSignals(true);
-        
-        signalTree->clear();
-        populatedScopes.clear();
-        populateTopLevelScopes();
-        
-        signalTree->blockSignals(false);
-        signalTree->setUpdatesEnabled(true);
-        statusLabel->setText("Ready");
+        applySignalFilter();  // Use the new filter function
         return;
     }
 
@@ -1146,4 +1189,170 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
     }
 
     populatedScopes.insert(scopePath + "_POPULATED");
+}
+
+// NEW: Filter button implementations
+void SignalSelectionDialog::onFilterInputPorts()
+{
+    currentTypeFilter = "input";
+    filterInputButton->setChecked(true);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterOutputPorts()
+{
+    currentTypeFilter = "output";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(true);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterInoutPorts()
+{
+    currentTypeFilter = "inout";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(true);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterNetSignals()
+{
+    currentTypeFilter = "wire";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(true);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterRegisters()
+{
+    currentTypeFilter = "reg";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(true);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterAll()
+{
+    currentTypeFilter = "all";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(true);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::applySignalFilter()
+{
+    if (!isInitialLoadComplete) {
+        return; // Wait until initial load is complete
+    }
+
+    signalTree->setUpdatesEnabled(false);
+    signalTree->blockSignals(true);
+    signalTree->clear();
+
+    // Build a map of signals by scope, filtered by type
+    QMap<QString, QVector<VCDSignal>> filteredSignalsByScope;
+
+    for (const auto &signal : allSignals) {
+        // Skip signals that are already visible
+        if (visibleSignalIdentifiers.contains(signal.fullName)) {
+            continue;
+        }
+
+        // Apply type filter
+        if (currentTypeFilter != "all" && signal.type.toLower() != currentTypeFilter) {
+            continue;
+        }
+
+        // Apply search filter if active
+        if (!currentFilter.isEmpty()) {
+            QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
+            if (!signalPath.contains(currentFilter.toLower())) {
+                continue;
+            }
+        }
+
+        filteredSignalsByScope[signal.scope].append(signal);
+    }
+
+    // Populate the tree with filtered signals
+    if (!filteredSignalsByScope.isEmpty()) {
+        for (auto it = filteredSignalsByScope.begin(); it != filteredSignalsByScope.end(); ++it) {
+            QString scopePath = it.key();
+            QVector<VCDSignal> signalsInScope = it.value();
+
+            QTreeWidgetItem *scopeItem;
+            if (scopePath.isEmpty()) {
+                scopeItem = new QTreeWidgetItem(signalTree);
+                scopeItem->setText(0, "Global Signals");
+            } else {
+                scopeItem = new QTreeWidgetItem(signalTree);
+                scopeItem->setText(0, scopePath);
+            }
+
+            scopeItem->setFlags(scopeItem->flags() | Qt::ItemIsUserCheckable);
+            scopeItem->setData(0, Qt::UserRole, scopePath);
+            updateScopeCheckState(scopeItem);
+
+            for (const VCDSignal &signal : signalsInScope) {
+                QTreeWidgetItem *signalItem = new QTreeWidgetItem(scopeItem);
+                signalItem->setText(0, signal.name);
+                signalItem->setText(1, QString::number(signal.width));
+                signalItem->setText(2, signal.type);
+                signalItem->setText(3, signal.identifier);
+                signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+                signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+
+                if (selectedSignals.contains(signal.fullName)) {
+                    signalItem->setCheckState(0, Qt::Checked);
+                } else {
+                    signalItem->setCheckState(0, Qt::Unchecked);
+                }
+            }
+            scopeItem->setExpanded(true);
+        }
+    } else {
+        QTreeWidgetItem *noResultsItem = new QTreeWidgetItem(signalTree);
+        noResultsItem->setText(0, QString("No %1 signals found").arg(currentTypeFilter == "all" ? "" : currentTypeFilter + " "));
+        noResultsItem->setFlags(noResultsItem->flags() & ~Qt::ItemIsSelectable);
+    }
+
+    signalTree->blockSignals(false);
+    signalTree->setUpdatesEnabled(true);
+
+    // Update status
+    int totalFilteredSignals = 0;
+    for (const auto &signalList : filteredSignalsByScope) {  // CHANGED: renamed from 'signals' to 'signalList'
+        totalFilteredSignals += signalList.size();
+    }
+    
+    if (currentTypeFilter == "all") {
+        statusLabel->setText(QString("Showing %1 signals").arg(totalFilteredSignals));
+    } else {
+        statusLabel->setText(QString("Showing %1 %2 signals").arg(totalFilteredSignals).arg(currentTypeFilter));
+    }
 }
