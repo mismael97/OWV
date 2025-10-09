@@ -18,7 +18,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QKeyEvent>
-#include <QComboBox> // ADD THIS
+#include <QComboBox>
 #include "vcdparser.h"
 #include "waveformwidget.h"
 #include <QProcess>
@@ -33,8 +33,16 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    // NEW: Make these methods public so SignalSelectionDialog can access them
+    bool hasRtlDirectoryForSignalDialog();
+    QString findRtlDirectoryForSignalDialog(const QString &vcdFile);
+    bool processVcdWithRtlForSignalDialog(const QString &vcdFile);
+    bool runVcdPortMapperForSignalDialog(const QString &inputVcd, const QString &outputVcd, const QString &rtlDir);
+    void showRtlDirectoryDialogForSignalDialog();
+
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    void closeEvent(QCloseEvent *event) override; // ADD override
 
 private slots:
     void setLineThicknessThin();
@@ -64,13 +72,15 @@ private slots:
 
 private:
     QString currentVcdFilePath;
-    QString tempVcdFilePath;
-    bool hasRtlDirectory;
-    void closeEvent(QCloseEvent *event);
+
+    // NEW: Track RTL processing state for signal dialog
+    bool rtlProcessedForSignalDialog;
+    QString tempVcdFilePathForSignalDialog;
 
     bool processVcdWithRtl(const QString &vcdFile);
     QString findRtlDirectory(const QString &vcdFile);
     bool runVcdPortMapper(const QString &inputVcd, const QString &outputVcd, const QString &rtlDir);
+
 
     void showRtlDirectoryDialog();
     void createToolbarBelowMenu();
@@ -100,8 +110,8 @@ private:
 
     void createMenuBar();
     void createMainToolbar();
-    void setupNavigationControls(); // ADD THIS
-    void updateNavigationButtons(); // ADD THIS
+    void setupNavigationControls();
+    void updateNavigationButtons();
 
     // Add these to private section
     QToolBar *mainToolBar;

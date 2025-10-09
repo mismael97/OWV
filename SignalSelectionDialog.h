@@ -18,6 +18,8 @@
 #include <QtConcurrent>
 #include "vcdparser.h"
 
+class MainWindow; // Forward declaration
+
 class SignalSelectionDialog : public QDialog
 {
     Q_OBJECT
@@ -27,6 +29,9 @@ public:
 
     void setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals);
     QList<VCDSignal> getSelectedSignals() const;
+
+    // NEW: RTL processing setup
+    void setRtlProcessingInfo(MainWindow* mainWindow, const QString& vcdFilePath, bool& rtlProcessed, QString& tempVcdPath);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -60,6 +65,9 @@ private:
     void displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope);
     void onSearchFinished();
     void applySignalFilter();
+
+    // NEW: Method to check and process RTL for port filters
+    bool ensureRtlProcessedForPortFilter(const QString& filterType);
 
     // UI Components
     QTreeWidget *signalTree;
@@ -110,6 +118,15 @@ private:
     // Async loading
     QFutureWatcher<void> *loadWatcher;
     QFuture<void> loadFuture;
+
+    // NEW: RTL processing members
+    MainWindow* mainWindow;
+    QString currentVcdFilePath;
+    bool* rtlProcessed;
+    QString* tempVcdFilePath;
+
+    // NEW: Store the VCD parser reference
+    VCDParser* vcdParser;
 
     // Methods
     void startInitialLoad();

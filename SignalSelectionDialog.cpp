@@ -1,4 +1,5 @@
 #include "SignalSelectionDialog.h"
+#include "mainwindow.h" // ADD THIS
 #include <QHeaderView>
 #include <QDebug>
 #include <QApplication>
@@ -7,7 +8,7 @@
 #include <QCloseEvent>
 #include <QShowEvent>
 #include <QtConcurrent>
-
+#include <QMessageBox> // ADD THIS
 
 void SignalSelectionDialog::onSearchFinished()
 {
@@ -48,12 +49,11 @@ void SignalSelectionDialog::onItemChanged(QTreeWidgetItem *item, int column)
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
 
-
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent), lastSelectedItem(nullptr),
       isSearchInProgress(false), isLoadingInProgress(false), isInitialLoadComplete(false),
       currentLoadIndex(0), totalSignalsToProcess(0),
-      currentTypeFilter("all")  // Initialize with "all" filter
+      currentTypeFilter("all") // Initialize with "all" filter
 {
     setWindowTitle("Add Signals to Waveform");
     setMinimumSize(800, 600);
@@ -72,7 +72,8 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     searchTimer->setSingleShot(true);
     searchTimer->setInterval(300);
 
-    connect(searchEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+    connect(searchEdit, &QLineEdit::textChanged, this, [this](const QString &text)
+            {
         pendingSearchText = text;
         
         // Cancel any ongoing loading when user starts searching
@@ -87,8 +88,7 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
             onSearchTextChanged(text);
         } else {
             searchTimer->start();
-        }
-    });
+        } });
 
     connect(searchTimer, &QTimer::timeout, this, &SignalSelectionDialog::onSearchTimerTimeout);
 
@@ -98,26 +98,26 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     // NEW: Filter buttons layout
     QHBoxLayout *filterLayout = new QHBoxLayout();
     filterLayout->setSpacing(2);
-    
+
     filterInputButton = new QPushButton("Input Ports");
     filterOutputButton = new QPushButton("Output Ports");
     filterInoutButton = new QPushButton("Inout Ports");
     filterNetButton = new QPushButton("Net Signals");
     filterRegButton = new QPushButton("Registers");
     filterAllButton = new QPushButton("All Signals");
-    
+
     // Style the buttons
     QString buttonStyle = "QPushButton { padding: 6px; font-size: 11px; border: 1px solid #555; background-color: #333; color: white; }"
-                         "QPushButton:checked { background-color: #4CAF50; color: white; border: 1px solid #4CAF50; }"
-                         "QPushButton:hover { background-color: #555; }";
-    
+                          "QPushButton:checked { background-color: #4CAF50; color: white; border: 1px solid #4CAF50; }"
+                          "QPushButton:hover { background-color: #555; }";
+
     filterInputButton->setStyleSheet(buttonStyle);
     filterOutputButton->setStyleSheet(buttonStyle);
     filterInoutButton->setStyleSheet(buttonStyle);
     filterNetButton->setStyleSheet(buttonStyle);
     filterRegButton->setStyleSheet(buttonStyle);
     filterAllButton->setStyleSheet(buttonStyle);
-    
+
     // Make buttons checkable
     filterInputButton->setCheckable(true);
     filterOutputButton->setCheckable(true);
@@ -125,10 +125,10 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     filterNetButton->setCheckable(true);
     filterRegButton->setCheckable(true);
     filterAllButton->setCheckable(true);
-    
+
     // Set "All Signals" as initially checked
     filterAllButton->setChecked(true);
-    
+
     // Connect filter buttons
     connect(filterInputButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterInputPorts);
     connect(filterOutputButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterOutputPorts);
@@ -136,7 +136,7 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     connect(filterNetButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterNetSignals);
     connect(filterRegButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterRegisters);
     connect(filterAllButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterAll);
-    
+
     filterLayout->addWidget(filterInputButton);
     filterLayout->addWidget(filterOutputButton);
     filterLayout->addWidget(filterInoutButton);
@@ -188,7 +188,7 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     mainLayout->addLayout(searchLayout);
-    mainLayout->addLayout(filterLayout);  // NEW: Add filter buttons
+    mainLayout->addLayout(filterLayout); // NEW: Add filter buttons
     mainLayout->addWidget(progressBar);
     mainLayout->addWidget(statusLabel);
     mainLayout->addWidget(signalTree, 1);
@@ -311,7 +311,6 @@ void SignalSelectionDialog::handleMultiSelection(QTreeWidgetItem *item)
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
 
-
 void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSignals, const QList<VCDSignal> &visibleSignals)
 {
     this->allSignals = allSignals;
@@ -325,7 +324,8 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
 
     // Create a set of visible signal fullNames
     visibleSignalIdentifiers.clear();
-    for (const auto &signal : visibleSignals) {
+    for (const auto &signal : visibleSignals)
+    {
         visibleSignalIdentifiers.insert(signal.fullName);
     }
 
@@ -334,7 +334,8 @@ void SignalSelectionDialog::setAvailableSignals(const QVector<VCDSignal> &allSig
 
 void SignalSelectionDialog::processNextChunk()
 {
-    if (!isLoadingInProgress || currentLoadIndex >= allSignals.size()) {
+    if (!isLoadingInProgress || currentLoadIndex >= allSignals.size())
+    {
         // Loading complete
         onLoadFinished();
         return;
@@ -343,11 +344,13 @@ void SignalSelectionDialog::processNextChunk()
     const int CHUNK_SIZE = 500; // Process 500 signals per chunk
     int endIndex = qMin(currentLoadIndex + CHUNK_SIZE, allSignals.size());
 
-    for (int i = currentLoadIndex; i < endIndex; i++) {
+    for (int i = currentLoadIndex; i < endIndex; i++)
+    {
         const auto &signal = allSignals[i];
 
         // Skip signals that are already visible
-        if (visibleSignalIdentifiers.contains(signal.fullName)) {
+        if (visibleSignalIdentifiers.contains(signal.fullName))
+        {
             continue;
         }
 
@@ -357,21 +360,25 @@ void SignalSelectionDialog::processNextChunk()
         scopeSignals[scopePath].append(signal);
 
         // Build parent-child scope relationships
-        if (!scopePath.isEmpty()) {
+        if (!scopePath.isEmpty())
+        {
             QStringList scopeParts = scopePath.split('.');
             QString currentPath;
 
-            for (int j = 0; j < scopeParts.size(); j++) {
+            for (int j = 0; j < scopeParts.size(); j++)
+            {
                 if (!currentPath.isEmpty())
                     currentPath += ".";
                 currentPath += scopeParts[j];
 
-                if (j < scopeParts.size() - 1) {
+                if (j < scopeParts.size() - 1)
+                {
                     QString parentPath = currentPath;
                     QString childName = scopeParts[j + 1];
                     QString childPath = parentPath + "." + childName;
 
-                    if (!childScopes[parentPath].contains(childPath)) {
+                    if (!childScopes[parentPath].contains(childPath))
+                    {
                         childScopes[parentPath].append(childPath);
                     }
                 }
@@ -395,14 +402,15 @@ void SignalSelectionDialog::processNextChunk()
 
 void SignalSelectionDialog::startInitialLoad()
 {
-    if (isLoadingInProgress || isInitialLoadComplete) {
+    if (isLoadingInProgress || isInitialLoadComplete)
+    {
         return;
     }
 
     isLoadingInProgress = true;
     currentLoadIndex = 0;
     totalSignalsToProcess = allSignals.size();
-    
+
     statusLabel->setText("Building scope structure...");
     progressBar->setVisible(true);
     progressBar->setRange(0, 100);
@@ -414,8 +422,9 @@ void SignalSelectionDialog::startInitialLoad()
 
 void SignalSelectionDialog::onLoadProgress(int percentage)
 {
-    if (!isLoadingInProgress) return;
-    
+    if (!isLoadingInProgress)
+        return;
+
     progressBar->setValue(percentage);
     statusLabel->setText(QString("Building scope structure... %1%").arg(percentage));
 }
@@ -426,21 +435,22 @@ void SignalSelectionDialog::onLoadFinished()
     isInitialLoadComplete = true;
 
     progressBar->setVisible(false);
-    
+
     // Apply the current filter instead of just populating top-level scopes
     applySignalFilter();
-    
+
     statusLabel->setText(QString("Ready - %1 signals in %2 scopes")
-                         .arg(allSignals.size())
-                         .arg(scopeSignals.size()));
+                             .arg(allSignals.size())
+                             .arg(scopeSignals.size()));
 }
 
 void SignalSelectionDialog::populateTopLevelScopesLazy()
 {
     signalTree->setUpdatesEnabled(false);
-    
+
     // Add global signals (signals with no scope)
-    if (scopeSignals.contains("") && !scopeSignals[""].isEmpty()) {
+    if (scopeSignals.contains("") && !scopeSignals[""].isEmpty())
+    {
         QTreeWidgetItem *globalItem = new QTreeWidgetItem();
         globalItem->setText(0, "Global Signals");
         globalItem->setData(0, Qt::UserRole, "");
@@ -459,26 +469,33 @@ void SignalSelectionDialog::populateTopLevelScopesLazy()
 
     // Find top-level scopes
     QSet<QString> topLevelScopes;
-    for (const QString &scope : scopeSignals.keys()) {
-        if (!scope.isEmpty() && !scopeSignals[scope].isEmpty()) {
+    for (const QString &scope : scopeSignals.keys())
+    {
+        if (!scope.isEmpty() && !scopeSignals[scope].isEmpty())
+        {
             bool isTopLevel = true;
-            for (const QString &potentialParent : scopeSignals.keys()) {
-                if (scope.startsWith(potentialParent + ".") && scope != potentialParent) {
+            for (const QString &potentialParent : scopeSignals.keys())
+            {
+                if (scope.startsWith(potentialParent + ".") && scope != potentialParent)
+                {
                     isTopLevel = false;
                     break;
                 }
             }
-            if (isTopLevel) {
+            if (isTopLevel)
+            {
                 topLevelScopes.insert(scope);
             }
         }
     }
 
     // Create tree items for top-level scopes
-    for (const QString &scope : topLevelScopes) {
+    for (const QString &scope : topLevelScopes)
+    {
         QString displayName = scope;
         QStringList parts = scope.split('.');
-        if (!parts.isEmpty()) {
+        if (!parts.isEmpty())
+        {
             displayName = parts.last();
         }
 
@@ -506,9 +523,10 @@ void SignalSelectionDialog::populateTopLevelScopes()
 {
     signalTree->setUpdatesEnabled(false);
     signalTree->clear();
-    
+
     // Add global signals (signals with no scope)
-    if (scopeSignals.contains("") && !scopeSignals[""].isEmpty()) {
+    if (scopeSignals.contains("") && !scopeSignals[""].isEmpty())
+    {
         QTreeWidgetItem *globalItem = new QTreeWidgetItem();
         globalItem->setText(0, "Global Signals");
         globalItem->setData(0, Qt::UserRole, "");
@@ -523,33 +541,40 @@ void SignalSelectionDialog::populateTopLevelScopes()
 
         populatedScopes.insert("");
         updateScopeCheckState(globalItem);
-        
+
         // NEW: Expand the global signals item
         globalItem->setExpanded(true);
     }
 
     // Find top-level scopes
     QSet<QString> topLevelScopes;
-    for (const QString &scope : scopeSignals.keys()) {
-        if (!scope.isEmpty() && !scopeSignals[scope].isEmpty()) {
+    for (const QString &scope : scopeSignals.keys())
+    {
+        if (!scope.isEmpty() && !scopeSignals[scope].isEmpty())
+        {
             bool isTopLevel = true;
-            for (const QString &potentialParent : scopeSignals.keys()) {
-                if (scope.startsWith(potentialParent + ".") && scope != potentialParent) {
+            for (const QString &potentialParent : scopeSignals.keys())
+            {
+                if (scope.startsWith(potentialParent + ".") && scope != potentialParent)
+                {
                     isTopLevel = false;
                     break;
                 }
             }
-            if (isTopLevel) {
+            if (isTopLevel)
+            {
                 topLevelScopes.insert(scope);
             }
         }
     }
 
     // Create tree items for top-level scopes
-    for (const QString &scope : topLevelScopes) {
+    for (const QString &scope : topLevelScopes)
+    {
         QString displayName = scope;
         QStringList parts = scope.split('.');
-        if (!parts.isEmpty()) {
+        if (!parts.isEmpty())
+        {
             displayName = parts.last();
         }
 
@@ -568,7 +593,7 @@ void SignalSelectionDialog::populateTopLevelScopes()
         signalTree->addTopLevelItem(scopeItem);
         populatedScopes.insert(scope);
         updateScopeCheckState(scopeItem);
-        
+
         // NEW: Expand all top-level scope items
         scopeItem->setExpanded(true);
     }
@@ -579,12 +604,11 @@ void SignalSelectionDialog::populateTopLevelScopes()
 void SignalSelectionDialog::onItemExpanded(QTreeWidgetItem *item)
 {
     QString scopePath = item->data(0, Qt::UserRole).toString();
-    if (scopePath != "PLACEHOLDER") {
+    if (scopePath != "PLACEHOLDER")
+    {
         populateScopeChildren(scopePath, item);
     }
 }
-
-
 
 QList<VCDSignal> SignalSelectionDialog::getSelectedSignals() const
 {
@@ -610,7 +634,8 @@ void SignalSelectionDialog::selectAll()
 {
     signalTree->blockSignals(true);
 
-    if (currentFilter.isEmpty()) {
+    if (currentFilter.isEmpty())
+    {
         // Original behavior when no search filter
         for (const auto &signal : allSignals)
         {
@@ -643,7 +668,9 @@ void SignalSelectionDialog::selectAll()
             }
             ++it;
         }
-    } else {
+    }
+    else
+    {
         // NEW: When search is active, only select currently displayed signals
         QTreeWidgetItemIterator it(signalTree);
         while (*it)
@@ -672,12 +699,12 @@ void SignalSelectionDialog::selectAll()
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
 
-
 void SignalSelectionDialog::deselectAll()
 {
     signalTree->blockSignals(true);
 
-    if (currentFilter.isEmpty()) {
+    if (currentFilter.isEmpty())
+    {
         // Original behavior when no search filter
         selectedSignals.clear();
         QTreeWidgetItemIterator it(signalTree);
@@ -697,7 +724,9 @@ void SignalSelectionDialog::deselectAll()
             }
             ++it;
         }
-    } else {
+    }
+    else
+    {
         // NEW: When search is active, only deselect currently displayed signals
         QTreeWidgetItemIterator it(signalTree);
         while (*it)
@@ -724,17 +753,21 @@ void SignalSelectionDialog::deselectAll()
 
     lastSelectedItem = nullptr;
     signalTree->blockSignals(false);
-    
-    if (currentFilter.isEmpty()) {
+
+    if (currentFilter.isEmpty())
+    {
         statusLabel->setText("All signals deselected");
-    } else {
+    }
+    else
+    {
         statusLabel->setText("All displayed signals deselected");
     }
 }
 
 void SignalSelectionDialog::displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope)
 {
-    if (text != currentFilter) {
+    if (text != currentFilter)
+    {
         return; // Stale results
     }
 
@@ -742,16 +775,21 @@ void SignalSelectionDialog::displaySearchResults(const QString &text, int matche
     signalTree->blockSignals(true);
     signalTree->clear();
 
-    if (!matchingSignalsByScope.isEmpty()) {
-        for (auto it = matchingSignalsByScope.begin(); it != matchingSignalsByScope.end(); ++it) {
+    if (!matchingSignalsByScope.isEmpty())
+    {
+        for (auto it = matchingSignalsByScope.begin(); it != matchingSignalsByScope.end(); ++it)
+        {
             QString scopePath = it.key();
             QVector<VCDSignal> signalsInScope = it.value();
 
             QTreeWidgetItem *scopeItem;
-            if (scopePath.isEmpty()) {
+            if (scopePath.isEmpty())
+            {
                 scopeItem = new QTreeWidgetItem(signalTree);
                 scopeItem->setText(0, "Global Signals");
-            } else {
+            }
+            else
+            {
                 scopeItem = new QTreeWidgetItem(signalTree);
                 scopeItem->setText(0, scopePath);
             }
@@ -760,7 +798,8 @@ void SignalSelectionDialog::displaySearchResults(const QString &text, int matche
             scopeItem->setData(0, Qt::UserRole, scopePath);
             updateScopeCheckState(scopeItem);
 
-            for (const VCDSignal &signal : signalsInScope) {
+            for (const VCDSignal &signal : signalsInScope)
+            {
                 QTreeWidgetItem *signalItem = new QTreeWidgetItem(scopeItem);
                 signalItem->setText(0, signal.name);
                 signalItem->setText(1, QString::number(signal.width));
@@ -769,15 +808,20 @@ void SignalSelectionDialog::displaySearchResults(const QString &text, int matche
                 signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
                 signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
 
-                if (selectedSignals.contains(signal.fullName)) {
+                if (selectedSignals.contains(signal.fullName))
+                {
                     signalItem->setCheckState(0, Qt::Checked);
-                } else {
+                }
+                else
+                {
                     signalItem->setCheckState(0, Qt::Unchecked);
                 }
             }
             scopeItem->setExpanded(true);
         }
-    } else {
+    }
+    else
+    {
         QTreeWidgetItem *noResultsItem = new QTreeWidgetItem(signalTree);
         noResultsItem->setText(0, "No signals found matching: " + text);
         noResultsItem->setFlags(noResultsItem->flags() & ~Qt::ItemIsSelectable);
@@ -787,10 +831,14 @@ void SignalSelectionDialog::displaySearchResults(const QString &text, int matche
     signalTree->setUpdatesEnabled(true);
 
     // Updated status message to indicate search mode
-    if (matches > 0) {
+    if (matches > 0)
+    {
         statusLabel->setText(QString("Found %1 signals matching '%2' - Use Select All/Deselect All for displayed signals only")
-                             .arg(matches).arg(text));
-    } else {
+                                 .arg(matches)
+                                 .arg(text));
+    }
+    else
+    {
         statusLabel->setText(QString("No signals found matching '%1'").arg(text));
     }
 }
@@ -798,7 +846,7 @@ void SignalSelectionDialog::displaySearchResults(const QString &text, int matche
 void SignalSelectionDialog::performSearch(const QString &text)
 {
     isSearchInProgress = true;
-    
+
     QString searchLower = text.toLower();
     QMap<QString, QVector<VCDSignal>> matchingSignalsByScope;
     int matches = 0;
@@ -806,26 +854,31 @@ void SignalSelectionDialog::performSearch(const QString &text)
 
     const int CHUNK_SIZE = 500; // Process 500 signals at a time
 
-    for (const auto &signal : allSignals) {
-        if (visibleSignalIdentifiers.contains(signal.fullName)) {
+    for (const auto &signal : allSignals)
+    {
+        if (visibleSignalIdentifiers.contains(signal.fullName))
+        {
             processed++;
             continue;
         }
 
         QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
-        if (signalPath.contains(searchLower)) {
+        if (signalPath.contains(searchLower))
+        {
             matchingSignalsByScope[signal.scope].append(signal);
             matches++;
         }
 
         processed++;
-        
+
         // Process events every CHUNK_SIZE to keep UI responsive
-        if (processed % CHUNK_SIZE == 0) {
+        if (processed % CHUNK_SIZE == 0)
+        {
             QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-            
+
             // Check if search was cancelled (new text entered)
-            if (text != currentFilter) {
+            if (text != currentFilter)
+            {
                 isSearchInProgress = false;
                 return;
             }
@@ -835,18 +888,19 @@ void SignalSelectionDialog::performSearch(const QString &text)
     // Display results
     displaySearchResults(text, matches, matchingSignalsByScope);
     isSearchInProgress = false;
-    
+
     // Check if there's a pending search
-    if (!pendingSearchText.isNull() && pendingSearchText != text) {
-        QTimer::singleShot(0, this, [this]() {
-            onSearchTextChanged(pendingSearchText);
-        });
+    if (!pendingSearchText.isNull() && pendingSearchText != text)
+    {
+        QTimer::singleShot(0, this, [this]()
+                           { onSearchTextChanged(pendingSearchText); });
     }
 }
 
 void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 {
-    if (isSearchInProgress) {
+    if (isSearchInProgress)
+    {
         // If a search is already running, we'll let it finish
         // The new search will be handled when the current one completes
         pendingSearchText = text;
@@ -856,14 +910,15 @@ void SignalSelectionDialog::onSearchTextChanged(const QString &text)
     currentFilter = text;
 
     // For immediate feedback on empty search
-    if (text.isEmpty()) {
-        applySignalFilter();  // Use the new filter function
+    if (text.isEmpty())
+    {
+        applySignalFilter(); // Use the new filter function
         return;
     }
 
     // Show searching status
     statusLabel->setText("Searching...");
-    
+
     QApplication::processEvents(); // Update UI
 
     // Perform search in main thread but with chunked processing
@@ -872,10 +927,12 @@ void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 
 SignalSelectionDialog::~SignalSelectionDialog()
 {
-    if (searchTimer && searchTimer->isActive()) {
+    if (searchTimer && searchTimer->isActive())
+    {
         searchTimer->stop();
     }
-    if (loadWatcher && loadWatcher->isRunning()) {
+    if (loadWatcher && loadWatcher->isRunning())
+    {
         loadWatcher->cancel();
         loadWatcher->waitForFinished();
     }
@@ -883,10 +940,12 @@ SignalSelectionDialog::~SignalSelectionDialog()
 
 void SignalSelectionDialog::closeEvent(QCloseEvent *event)
 {
-    if (searchTimer && searchTimer->isActive()) {
+    if (searchTimer && searchTimer->isActive())
+    {
         searchTimer->stop();
     }
-    if (loadWatcher && loadWatcher->isRunning()) {
+    if (loadWatcher && loadWatcher->isRunning())
+    {
         loadWatcher->cancel();
         loadWatcher->waitForFinished();
     }
@@ -896,24 +955,28 @@ void SignalSelectionDialog::closeEvent(QCloseEvent *event)
 void SignalSelectionDialog::showEvent(QShowEvent *event)
 {
     QDialog::showEvent(event);
-    
+
     // Start initial loading when dialog is shown
-    if (!isInitialLoadComplete && !isLoadingInProgress && !allSignals.isEmpty()) {
+    if (!isInitialLoadComplete && !isLoadingInProgress && !allSignals.isEmpty())
+    {
         startInitialLoad();
     }
 }
 
 void SignalSelectionDialog::onSearchTimerTimeout()
 {
-    if (!pendingSearchText.isNull()) {
+    if (!pendingSearchText.isNull())
+    {
         onSearchTextChanged(pendingSearchText);
     }
 }
 
 void SignalSelectionDialog::onScopeItemChanged(QTreeWidgetItem *item, int column)
 {
-    if (column != 0) return;
-    if (!item) return;
+    if (column != 0)
+        return;
+    if (!item)
+        return;
 
     QVariant data = item->data(0, Qt::UserRole);
     QString scopePath = data.toString();
@@ -941,8 +1004,6 @@ void SignalSelectionDialog::onScopeItemChanged(QTreeWidgetItem *item, int column
     // Update status
     statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
 }
-
-
 
 void SignalSelectionDialog::updateTreeWidgetCheckStates(const QString &scopePath, bool selected)
 {
@@ -1003,7 +1064,6 @@ void SignalSelectionDialog::setScopeSignalsSelection(const QString &scopePath, b
     }
 }
 
-
 void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
 {
     if (!scopeItem)
@@ -1033,7 +1093,7 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
     // Count signals in all child scopes recursively using QList
     QSet<QString> processedScopes;
     QList<QString> scopesToProcess;
-    
+
     if (childScopes.contains(scopePath))
     {
         for (const QString &childScope : childScopes[scopePath])
@@ -1047,7 +1107,7 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
         QString currentScope = scopesToProcess.takeFirst();
         if (processedScopes.contains(currentScope))
             continue;
-            
+
         processedScopes.insert(currentScope);
 
         // Count signals in this child scope
@@ -1097,10 +1157,12 @@ void SignalSelectionDialog::updateScopeCheckState(QTreeWidgetItem *scopeItem)
 
 void SignalSelectionDialog::updateParentScopeCheckState(QTreeWidgetItem *childItem)
 {
-    if (!childItem) return;
-    
+    if (!childItem)
+        return;
+
     QTreeWidgetItem *parent = childItem->parent();
-    if (!parent) return;
+    if (!parent)
+        return;
 
     // Update the parent's check state
     updateScopeCheckState(parent);
@@ -1111,14 +1173,17 @@ void SignalSelectionDialog::updateParentScopeCheckState(QTreeWidgetItem *childIt
 
 void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem)
 {
-    if (!parentItem || populatedScopes.contains(scopePath + "_POPULATED")) {
+    if (!parentItem || populatedScopes.contains(scopePath + "_POPULATED"))
+    {
         return;
     }
 
     // Remove placeholder
-    while (parentItem->childCount() > 0) {
+    while (parentItem->childCount() > 0)
+    {
         QTreeWidgetItem *child = parentItem->child(0);
-        if (child->data(0, Qt::UserRole).toString() == "PLACEHOLDER") {
+        if (child->data(0, Qt::UserRole).toString() == "PLACEHOLDER")
+        {
             delete child;
             break;
         }
@@ -1131,12 +1196,15 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
     updateScopeCheckState(parentItem);
 
     // Add child scopes
-    if (childScopes.contains(scopePath)) {
-        for (const QString &childScopePath : childScopes[scopePath]) {
+    if (childScopes.contains(scopePath))
+    {
+        for (const QString &childScopePath : childScopes[scopePath])
+        {
             QString displayName = childScopePath;
             // Extract just the last part for display
             QStringList parts = childScopePath.split('.');
-            if (!parts.isEmpty()) {
+            if (!parts.isEmpty())
+            {
                 displayName = parts.last();
             }
 
@@ -1160,12 +1228,16 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
     }
 
     // Add signals in this scope
-    if (scopeSignals.contains(scopePath)) {
-        for (const VCDSignal &signal : scopeSignals[scopePath]) {
+    if (scopeSignals.contains(scopePath))
+    {
+        for (const VCDSignal &signal : scopeSignals[scopePath])
+        {
             // Apply filter if active
-            if (!currentFilter.isEmpty()) {
+            if (!currentFilter.isEmpty())
+            {
                 QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
-                if (!signalPath.contains(currentFilter.toLower())) {
+                if (!signalPath.contains(currentFilter.toLower()))
+                {
                     continue;
                 }
             }
@@ -1178,9 +1250,12 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
             signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
             signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
 
-            if (selectedSignals.contains(signal.fullName)) {
+            if (selectedSignals.contains(signal.fullName))
+            {
                 signalItem->setCheckState(0, Qt::Checked);
-            } else {
+            }
+            else
+            {
                 signalItem->setCheckState(0, Qt::Unchecked);
             }
 
@@ -1191,9 +1266,15 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
     populatedScopes.insert(scopePath + "_POPULATED");
 }
 
-// NEW: Filter button implementations
+
+// Fix the port filter button slots
 void SignalSelectionDialog::onFilterInputPorts()
 {
+    // NEW: Ensure RTL is processed before applying port filter
+    if (!ensureRtlProcessedForPortFilter("input")) {
+        return; // RTL processing failed or was cancelled
+    }
+    
     currentTypeFilter = "input";
     filterInputButton->setChecked(true);
     filterOutputButton->setChecked(false);
@@ -1206,6 +1287,11 @@ void SignalSelectionDialog::onFilterInputPorts()
 
 void SignalSelectionDialog::onFilterOutputPorts()
 {
+    // NEW: Ensure RTL is processed before applying port filter
+    if (!ensureRtlProcessedForPortFilter("output")) {
+        return; // RTL processing failed or was cancelled
+    }
+    
     currentTypeFilter = "output";
     filterInputButton->setChecked(false);
     filterOutputButton->setChecked(true);
@@ -1218,6 +1304,11 @@ void SignalSelectionDialog::onFilterOutputPorts()
 
 void SignalSelectionDialog::onFilterInoutPorts()
 {
+    // NEW: Ensure RTL is processed before applying port filter
+    if (!ensureRtlProcessedForPortFilter("inout")) {
+        return; // RTL processing failed or was cancelled
+    }
+    
     currentTypeFilter = "inout";
     filterInputButton->setChecked(false);
     filterOutputButton->setChecked(false);
@@ -1227,7 +1318,6 @@ void SignalSelectionDialog::onFilterInoutPorts()
     filterAllButton->setChecked(false);
     applySignalFilter();
 }
-
 void SignalSelectionDialog::onFilterNetSignals()
 {
     currentTypeFilter = "wire";
@@ -1274,10 +1364,37 @@ void SignalSelectionDialog::applySignalFilter()
     signalTree->blockSignals(true);
     signalTree->clear();
 
+    // NEW: Use RTL-processed signals if available
+    QVector<VCDSignal> signalsToUse = allSignals;
+    VCDParser* tempRtlParser = nullptr;
+    
+    if (*rtlProcessed && !tempVcdFilePath->isEmpty() && QFile::exists(*tempVcdFilePath)) {
+        // Create a temporary parser for the RTL-processed VCD file
+        tempRtlParser = new VCDParser(this);
+        if (tempRtlParser->parseHeaderOnly(*tempVcdFilePath)) {
+            // Use the RTL-processed signals
+            signalsToUse = tempRtlParser->getSignals();
+            qDebug() << "Using RTL-processed signals, total:" << signalsToUse.size();
+            
+            // Debug: Print some signal types to verify RTL processing worked
+            int inputCount = 0, outputCount = 0, inoutCount = 0;
+            for (const auto& signal : signalsToUse) {
+                if (signal.type == "input") inputCount++;
+                else if (signal.type == "output") outputCount++;
+                else if (signal.type == "inout") inoutCount++;
+            }
+            qDebug() << "Signal types - Input:" << inputCount << "Output:" << outputCount << "Inout:" << inoutCount;
+        } else {
+            qDebug() << "Failed to parse RTL-processed VCD file";
+            delete tempRtlParser;
+            tempRtlParser = nullptr;
+        }
+    }
+
     // Build a map of signals by scope, filtered by type
     QMap<QString, QVector<VCDSignal>> filteredSignalsByScope;
 
-    for (const auto &signal : allSignals) {
+    for (const auto &signal : signalsToUse) {
         // Skip signals that are already visible
         if (visibleSignalIdentifiers.contains(signal.fullName)) {
             continue;
@@ -1346,7 +1463,7 @@ void SignalSelectionDialog::applySignalFilter()
 
     // Update status
     int totalFilteredSignals = 0;
-    for (const auto &signalList : filteredSignalsByScope) {  // CHANGED: renamed from 'signals' to 'signalList'
+    for (const auto &signalList : filteredSignalsByScope) {
         totalFilteredSignals += signalList.size();
     }
     
@@ -1354,5 +1471,100 @@ void SignalSelectionDialog::applySignalFilter()
         statusLabel->setText(QString("Showing %1 signals").arg(totalFilteredSignals));
     } else {
         statusLabel->setText(QString("Showing %1 %2 signals").arg(totalFilteredSignals).arg(currentTypeFilter));
+    }
+
+    // Clean up the temporary parser if we created one
+    if (tempRtlParser) {
+        delete tempRtlParser;
+    }
+}
+
+void SignalSelectionDialog::setRtlProcessingInfo(MainWindow* mainWindow, const QString& vcdFilePath, bool& rtlProcessed, QString& tempVcdPath)
+{
+    this->mainWindow = mainWindow;
+    this->currentVcdFilePath = vcdFilePath;
+    this->rtlProcessed = &rtlProcessed;
+    this->tempVcdFilePath = &tempVcdPath;
+}
+
+bool MainWindow::hasRtlDirectoryForSignalDialog()
+{
+    return !findRtlDirectoryForSignalDialog(currentVcdFilePath).isEmpty();
+}
+
+bool SignalSelectionDialog::ensureRtlProcessedForPortFilter(const QString& filterType)
+{
+    if (filterType != "input" && filterType != "output" && filterType != "inout") {
+        return true; // No RTL needed for non-port filters
+    }
+    
+    if (*rtlProcessed) {
+        qDebug() << "RTL already processed for signal dialog";
+        return true; // Already processed
+    }
+    
+    // Check if RTL directory exists
+    if (mainWindow->hasRtlDirectoryForSignalDialog()) {
+        // Show processing status
+        statusLabel->setText("Processing RTL files for port information...");
+        QApplication::processEvents();
+        
+        bool success = mainWindow->processVcdWithRtlForSignalDialog(currentVcdFilePath);
+        
+        if (success) {
+            *rtlProcessed = true;
+            statusLabel->setText("RTL processing completed");
+            qDebug() << "RTL processing successful, temp file:" << *tempVcdFilePath;
+            
+            // Verify the temp file exists and has content
+            if (QFile::exists(*tempVcdFilePath)) {
+                QFile file(*tempVcdFilePath);
+                if (file.open(QIODevice::ReadOnly)) {
+                    qDebug() << "Temp file size:" << file.size() << "bytes";
+                    file.close();
+                }
+            }
+            return true;
+        } else {
+            // Show warning about RTL mismatch
+            QMessageBox msgBox(this);
+            msgBox.setWindowTitle("RTL Module Mismatch");
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setText("RTL directory found, but no matching modules were detected.\n\n"
+                          "The RTL files don't contain the modules found in the VCD file.\n\n"
+                          "Would you like to specify a different RTL directory?");
+            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No | QMessageBox::Ignore);
+            msgBox.setDefaultButton(QMessageBox::Yes);
+            
+            int result = msgBox.exec();
+            if (result == QMessageBox::Yes) {
+                mainWindow->showRtlDirectoryDialogForSignalDialog();
+                if (*rtlProcessed) {
+                    return true; // User selected a directory and processing succeeded
+                }
+            } else if (result == QMessageBox::Ignore) {
+                // Continue without RTL processing
+                statusLabel->setText("Continuing without RTL information...");
+                return true;
+            }
+            return false;
+        }
+    } else {
+        // No RTL directory found - ask user
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle("RTL Information Not Available");
+        msgBox.setIcon(QMessageBox::Information);
+        msgBox.setText("No RTL directory found. Port directions (input/output/inout) will not be available.\n\n"
+                      "Would you like to specify an RTL directory?");
+        msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+        msgBox.setDefaultButton(QMessageBox::No);
+        
+        if (msgBox.exec() == QMessageBox::Yes) {
+            mainWindow->showRtlDirectoryDialogForSignalDialog();
+            if (*rtlProcessed) {
+                return true; // User selected a directory and processing succeeded
+            }
+        }
+        return false;
     }
 }

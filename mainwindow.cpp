@@ -20,7 +20,8 @@
 #include <QMenuBar>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), vcdParser(new VCDParser(this))
+    : QMainWindow(parent), vcdParser(new VCDParser(this)),
+      rtlProcessedForSignalDialog(false)  // ADD THIS
 {
     qRegisterMetaType<VCDSignal>("VCDSignal");
     setWindowTitle("VCD Wave Viewer");
@@ -328,7 +329,6 @@ void MainWindow::setupUI()
     setCentralWidget(centralWidget);
 }
 
-// Update showAddSignalsDialog to be simpler
 void MainWindow::showAddSignalsDialog()
 {
     if (!vcdParser)
@@ -354,6 +354,9 @@ void MainWindow::showAddSignalsDialog()
     }
 
     SignalSelectionDialog dialog(this);
+
+    // NEW: Set up RTL processing for signal dialog
+    dialog.setRtlProcessingInfo(this, currentVcdFilePath, rtlProcessedForSignalDialog, tempVcdFilePathForSignalDialog);
 
     // Get current signals
     QList<VCDSignal> currentSignals;
@@ -398,30 +401,22 @@ void MainWindow::showAddSignalsDialog()
             removeSignalsButton->setEnabled(false);
         }
     }
-}
 
-void MainWindow::showRtlDirectoryDialog()
-{
-    QString rtlDir = QFileDialog::getExistingDirectory(this, "Select RTL Directory",
-                                                      QFileInfo(currentVcdFilePath).dir().path());
-    
-    if (!rtlDir.isEmpty()) {
-        // Reprocess VCD with the new RTL directory
-        if (runVcdPortMapper(currentVcdFilePath, tempVcdFilePath, rtlDir)) {
-            hasRtlDirectory = true;
-            // Reload the VCD file
-            loadVcdFile(currentVcdFilePath);
-        }
+    // NEW: Clean up temp file if it was created for signal dialog
+    if (QFile::exists(tempVcdFilePathForSignalDialog)) {
+        QFile::remove(tempVcdFilePathForSignalDialog);
     }
+    rtlProcessedForSignalDialog = false;
 }
 
-// Add cleanup in destructor or close event
+
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    // Clean up temp VCD file
-    if (QFile::exists(tempVcdFilePath)) {
-        QFile::remove(tempVcdFilePath);
+    // NEW: Only clean up signal dialog temp file
+    if (QFile::exists(tempVcdFilePathForSignalDialog)) {
+        QFile::remove(tempVcdFilePathForSignalDialog);
     }
+    
     QMainWindow::closeEvent(event);
 }
 
@@ -481,62 +476,8 @@ void MainWindow::loadVcdFile(const QString &filename)
     // Store the original VCD file path
     currentVcdFilePath = filename;
     
-    // Check for RTL directory
-    QString rtlDir = findRtlDirectory(filename);
-    hasRtlDirectory = !rtlDir.isEmpty();
-    
-    // Create temp VCD file path
-    QFileInfo fileInfo(filename);
-    tempVcdFilePath = fileInfo.path() + "/" + fileInfo.completeBaseName() + "_temp.vcd";
-    
+    // Don't check for RTL during file loading - only in signal dialog
     QString vcdToLoad = filename;
-    bool rtlProcessingSuccess = false;
-    
-    if (hasRtlDirectory) {
-        // Show RTL processing status
-        statusLabel->setText("Checking RTL files for matching modules...");
-        QApplication::processEvents();
-        
-        rtlProcessingSuccess = processVcdWithRtl(filename);
-        
-        if (rtlProcessingSuccess) {
-            vcdToLoad = tempVcdFilePath;
-            statusLabel->setText("VCD processed with RTL port information");
-        } else {
-            // Show warning about RTL mismatch
-            QMessageBox msgBox(this);
-            msgBox.setWindowTitle("RTL Module Mismatch");
-            msgBox.setIcon(QMessageBox::Warning);
-            msgBox.setText("RTL directory found, but no matching modules were detected.\n\n"
-                          "The RTL files don't contain the modules found in the VCD file.\n\n"
-                          "Would you like to specify a different RTL directory?");
-            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No | QMessageBox::Ignore);
-            msgBox.setDefaultButton(QMessageBox::Yes);
-            
-            int result = msgBox.exec();
-            if (result == QMessageBox::Yes) {
-                showRtlDirectoryDialog();
-                return; // Restart the process
-            } else if (result == QMessageBox::Ignore) {
-                // Continue without RTL processing
-                statusLabel->setText("Loading VCD without RTL information...");
-            }
-        }
-    } else {
-        // No RTL directory found - ask user
-        QMessageBox msgBox(this);
-        msgBox.setWindowTitle("RTL Information Not Available");
-        msgBox.setIcon(QMessageBox::Information);
-        msgBox.setText("No RTL directory found. Port directions (input/output/inout) will not be available.\n\n"
-                      "Would you like to specify an RTL directory?");
-        msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-        msgBox.setDefaultButton(QMessageBox::No);
-        
-        if (msgBox.exec() == QMessageBox::Yes) {
-            showRtlDirectoryDialog();
-            return; // Restart the process after setting RTL directory
-        }
-    }
     
     // Continue with VCD loading...
     statusBar()->clearMessage();
@@ -560,7 +501,7 @@ void MainWindow::loadVcdFile(const QString &filename)
 
     // Create a watcher to handle completion
     QFutureWatcher<bool> *watcher = new QFutureWatcher<bool>(this);
-    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, progressBar, watcher, vcdToLoad, rtlProcessingSuccess]()
+    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, progressBar, watcher, vcdToLoad]()
             {
         bool success = watcher->result();
         
@@ -574,12 +515,6 @@ void MainWindow::loadVcdFile(const QString &filename)
         
         if (success) {
             QString statusMessage = QString("Loaded: %1 (%2 signals)").arg(QFileInfo(vcdToLoad).fileName()).arg(vcdParser->getSignals().size());
-            if (rtlProcessingSuccess) {
-                statusMessage += " - With RTL port information";
-            } else {
-                statusMessage += " - No RTL information";
-            }
-            
             statusLabel->setText(statusMessage);
 
             // Pass parser to waveform widget but don't load all signals
@@ -594,81 +529,6 @@ void MainWindow::loadVcdFile(const QString &filename)
         } });
 
     watcher->setFuture(parseFuture);
-}
-
-QString MainWindow::findRtlDirectory(const QString &vcdFile)
-{
-    QFileInfo vcdInfo(vcdFile);
-    QDir vcdDir = vcdInfo.dir();
-    
-    // Check for common RTL directory names
-    QStringList rtlDirs = {"rtl", "RTL", "src", "source", "sources", "verilog", "sv"};
-    
-    for (const QString &dirName : rtlDirs) {
-        if (vcdDir.exists(dirName)) {
-            return vcdDir.filePath(dirName);
-        }
-    }
-    
-    // Check if current directory has RTL files
-    QStringList rtlFilters = {"*.v", "*.sv"};
-    if (!vcdDir.entryList(rtlFilters, QDir::Files).isEmpty()) {
-        return vcdDir.path();
-    }
-    
-    return "";
-}
-
-bool MainWindow::runVcdPortMapper(const QString &inputVcd, const QString &outputVcd, const QString &rtlDir)
-{
-    // Get the path to the Python script
-    QString pythonScript = QCoreApplication::applicationDirPath() + "/vcd_port_mapper.py";
-    
-    // If script doesn't exist in application dir, try current dir
-    if (!QFile::exists(pythonScript)) {
-        pythonScript = "vcd_port_mapper.py";
-    }
-    
-    if (!QFile::exists(pythonScript)) {
-        qDebug() << "VCD port mapper script not found:" << pythonScript;
-        return false;
-    }
-    
-    // Prepare the command
-    QStringList arguments;
-    arguments << pythonScript << inputVcd << "-o" << outputVcd << "-r" << rtlDir;
-    
-    QProcess process;
-    process.start("python", arguments);
-    
-    if (!process.waitForStarted()) {
-        qDebug() << "Failed to start VCD port mapper";
-        return false;
-    }
-    
-    if (!process.waitForFinished(30000)) { // 30 second timeout
-        qDebug() << "VCD port mapper timed out";
-        return false;
-    }
-    
-    if (process.exitCode() != 0) {
-        qDebug() << "VCD port mapper failed:" << process.readAllStandardError();
-        return false;
-    }
-    
-    qDebug() << "VCD port mapper completed successfully";
-    return true;
-}
-
-// Add the RTL processing functions:
-bool MainWindow::processVcdWithRtl(const QString &vcdFile)
-{
-    QString rtlDir = findRtlDirectory(vcdFile);
-    if (rtlDir.isEmpty()) {
-        return false;
-    }
-    
-    return runVcdPortMapper(vcdFile, tempVcdFilePath, rtlDir);
 }
 
 void MainWindow::zoomIn()
@@ -907,5 +767,96 @@ void MainWindow::updateNavigationButtons()
     } else {
         prevValueButton->setEnabled(false);
         nextValueButton->setEnabled(false);
+    }
+}
+
+bool MainWindow::runVcdPortMapperForSignalDialog(const QString &inputVcd, const QString &outputVcd, const QString &rtlDir)
+{
+    // Get the path to the Python script
+    QString pythonScript = QCoreApplication::applicationDirPath() + "/vcd_port_mapper.py";
+    
+    // If script doesn't exist in application dir, try current dir
+    if (!QFile::exists(pythonScript)) {
+        pythonScript = "vcd_port_mapper.py";
+    }
+    
+    if (!QFile::exists(pythonScript)) {
+        qDebug() << "VCD port mapper script not found:" << pythonScript;
+        return false;
+    }
+    
+    // Prepare the command
+    QStringList arguments;
+    arguments << pythonScript << inputVcd << "-o" << outputVcd << "-r" << rtlDir;
+    
+    QProcess process;
+    process.start("python", arguments);
+    
+    if (!process.waitForStarted()) {
+        qDebug() << "Failed to start VCD port mapper";
+        return false;
+    }
+    
+    if (!process.waitForFinished(30000)) { // 30 second timeout
+        qDebug() << "VCD port mapper timed out";
+        return false;
+    }
+    
+    if (process.exitCode() != 0) {
+        qDebug() << "VCD port mapper failed:" << process.readAllStandardError();
+        return false;
+    }
+    
+    qDebug() << "VCD port mapper completed successfully";
+    return true;
+}
+
+QString MainWindow::findRtlDirectoryForSignalDialog(const QString &vcdFile)
+{
+    QFileInfo vcdInfo(vcdFile);
+    QDir vcdDir = vcdInfo.dir();
+    
+    // Check for common RTL directory names
+    QStringList rtlDirs = {"rtl", "RTL", "src", "source", "sources", "verilog", "sv"};
+    
+    for (const QString &dirName : rtlDirs) {
+        if (vcdDir.exists(dirName)) {
+            return vcdDir.filePath(dirName);
+        }
+    }
+    
+    // Check if current directory has RTL files
+    QStringList rtlFilters = {"*.v", "*.sv"};
+    if (!vcdDir.entryList(rtlFilters, QDir::Files).isEmpty()) {
+        return vcdDir.path();
+    }
+    
+    return "";
+}
+
+bool MainWindow::processVcdWithRtlForSignalDialog(const QString &vcdFile)
+{
+    QString rtlDir = findRtlDirectoryForSignalDialog(vcdFile);
+    if (rtlDir.isEmpty()) {
+        return false;
+    }
+    
+    // Create temp VCD file path for signal dialog
+    QFileInfo fileInfo(vcdFile);
+    tempVcdFilePathForSignalDialog = fileInfo.path() + "/" + fileInfo.completeBaseName() + "_temp_signal_dialog.vcd";
+    
+    return runVcdPortMapperForSignalDialog(vcdFile, tempVcdFilePathForSignalDialog, rtlDir);
+}
+
+void MainWindow::showRtlDirectoryDialogForSignalDialog()
+{
+    QString rtlDir = QFileDialog::getExistingDirectory(this, "Select RTL Directory for Signal Filtering",
+                                                      QFileInfo(currentVcdFilePath).dir().path());
+    
+    if (!rtlDir.isEmpty()) {
+        // Reprocess VCD with the new RTL directory for signal dialog
+        if (runVcdPortMapperForSignalDialog(currentVcdFilePath, tempVcdFilePathForSignalDialog, rtlDir)) {
+            rtlProcessedForSignalDialog = true;
+        }
     }
 }
