@@ -1494,7 +1494,13 @@ void SignalSelectionDialog::setRtlProcessingInfo(MainWindow* mainWindow, const Q
 
 bool MainWindow::hasRtlDirectoryForSignalDialog()
 {
-    return !findRtlDirectoryForSignalDialog(currentVcdFilePath).isEmpty();
+    QString rtlDir = findRtlDirectoryForSignalDialog(currentVcdFilePath);
+    bool found = !rtlDir.isEmpty();
+    qDebug() << "RTL directory check:" << (found ? "Found" : "Not found");
+    if (found) {
+        qDebug() << "RTL directory path:" << rtlDir;
+    }
+    return found;
 }
 
 bool SignalSelectionDialog::ensureRtlProcessedForPortFilter(const QString& filterType)

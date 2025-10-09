@@ -784,26 +784,88 @@ bool MainWindow::runVcdPortMapperForSignalDialog(const QString &inputVcd, const 
         qDebug() << "VCD port mapper script not found:" << pythonScript;
         return false;
     }
+
+    // Convert paths to absolute paths to avoid any relative path issues
+    QString absInputVcd = QFileInfo(inputVcd).absoluteFilePath();
+    QString absOutputVcd = QFileInfo(outputVcd).absoluteFilePath();
+    QString absRtlDir = QFileInfo(rtlDir).absoluteFilePath();
+    QString absPythonScript = QFileInfo(pythonScript).absoluteFilePath();
+
+    qDebug() << "=== VCD PORT MAPPER EXECUTION ===";
+    qDebug() << "Python script:" << absPythonScript;
+    qDebug() << "Input VCD:" << absInputVcd;
+    qDebug() << "Output VCD:" << absOutputVcd;
+    qDebug() << "RTL Directory:" << absRtlDir;
+    qDebug() << "RTL Directory exists:" << QDir(absRtlDir).exists();
     
-    // Prepare the command
+    // Check if RTL directory exists and has files
+    QDir rtlDirectory(absRtlDir);
+    QStringList rtlFiles = rtlDirectory.entryList(QStringList() << "*.v" << "*.sv", QDir::Files);
+    qDebug() << "RTL files found:" << rtlFiles.size();
+    if (rtlFiles.size() > 0) {
+        qDebug() << "First few RTL files:" << rtlFiles.mid(0, 5);
+    }
+
+    // Prepare the command - use absolute paths
     QStringList arguments;
-    arguments << pythonScript << inputVcd << "-o" << outputVcd << "-r" << rtlDir;
+    arguments << absPythonScript << absInputVcd << "-o" << absOutputVcd << "-r" << absRtlDir;
+    
+    qDebug() << "Command: python" << arguments;
     
     QProcess process;
+    process.setProcessChannelMode(QProcess::MergedChannels); // Merge stdout and stderr
+    
+    // Connect to readyRead signal to capture output in real-time
+    QObject::connect(&process, &QProcess::readyRead, [&process]() {
+        QByteArray output = process.readAll();
+        qDebug() << "Python output:" << output.trimmed();
+    });
+    
     process.start("python", arguments);
     
-    if (!process.waitForStarted()) {
-        qDebug() << "Failed to start VCD port mapper";
+    if (!process.waitForStarted(5000)) {
+        qDebug() << "Failed to start VCD port mapper process";
+        qDebug() << "Error:" << process.errorString();
         return false;
     }
     
-    if (!process.waitForFinished(30000)) { // 30 second timeout
+    qDebug() << "Process started successfully";
+    
+    if (!process.waitForFinished(60000)) { // 60 second timeout
         qDebug() << "VCD port mapper timed out";
+        process.kill();
         return false;
     }
     
-    if (process.exitCode() != 0) {
-        qDebug() << "VCD port mapper failed:" << process.readAllStandardError();
+    int exitCode = process.exitCode();
+    QByteArray allOutput = process.readAll();
+    
+    qDebug() << "Process finished with exit code:" << exitCode;
+    qDebug() << "Final output:" << allOutput.trimmed();
+    
+    if (exitCode != 0) {
+        qDebug() << "VCD port mapper failed with exit code:" << exitCode;
+        return false;
+    }
+    
+    // Verify the output file was created
+    if (QFile::exists(absOutputVcd)) {
+        QFile outputFile(absOutputVcd);
+        if (outputFile.open(QIODevice::ReadOnly)) {
+            qDebug() << "Output file created successfully, size:" << outputFile.size() << "bytes";
+            outputFile.close();
+            
+            // Quick check if the file has the expected content
+            if (outputFile.size() > 100) { // Reasonable minimum size
+                qDebug() << "VCD port mapper completed successfully";
+                return true;
+            } else {
+                qDebug() << "Output file seems too small, might be empty";
+                return false;
+            }
+        }
+    } else {
+        qDebug() << "Output file was not created";
         return false;
     }
     
@@ -816,21 +878,41 @@ QString MainWindow::findRtlDirectoryForSignalDialog(const QString &vcdFile)
     QFileInfo vcdInfo(vcdFile);
     QDir vcdDir = vcdInfo.dir();
     
-    // Check for common RTL directory names
-    QStringList rtlDirs = {"rtl", "RTL", "src", "source", "sources", "verilog", "sv"};
+    qDebug() << "=== FINDING RTL DIRECTORY ===";
+    qDebug() << "VCD file:" << vcdFile;
+    qDebug() << "VCD directory:" << vcdDir.absolutePath();
     
-    for (const QString &dirName : rtlDirs) {
-        if (vcdDir.exists(dirName)) {
-            return vcdDir.filePath(dirName);
+    // First, check if there's a directory that contains RTL files
+    // We'll look for directories that have Verilog/SystemVerilog files
+    
+    QDir parentDir = vcdDir;
+    
+    // Look in the VCD file directory and its subdirectories
+    QStringList searchDirs;
+    searchDirs << vcdDir.absolutePath(); // Current directory
+    
+    // Add all immediate subdirectories
+    QFileInfoList subdirs = vcdDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo &subdir : subdirs) {
+        searchDirs << subdir.absoluteFilePath();
+    }
+    
+    qDebug() << "Searching in directories:" << searchDirs;
+    
+    for (const QString &searchDir : searchDirs) {
+        QDir dir(searchDir);
+        QStringList rtlFiles = dir.entryList(QStringList() << "*.v" << "*.sv", QDir::Files);
+        
+        if (!rtlFiles.isEmpty()) {
+            qDebug() << "Found RTL directory:" << searchDir << "with" << rtlFiles.size() << "RTL files";
+            qDebug() << "Sample RTL files:" << rtlFiles.mid(0, 3); // Show first 3 files
+            return searchDir;
+        } else {
+            qDebug() << "No RTL files found in:" << searchDir;
         }
     }
     
-    // Check if current directory has RTL files
-    QStringList rtlFilters = {"*.v", "*.sv"};
-    if (!vcdDir.entryList(rtlFilters, QDir::Files).isEmpty()) {
-        return vcdDir.path();
-    }
-    
+    qDebug() << "No RTL directory found automatically";
     return "";
 }
 
@@ -879,5 +961,25 @@ void MainWindow::showRtlDirectoryDialogForSignalDialog()
         if (runVcdPortMapperForSignalDialog(currentVcdFilePath, tempVcdFilePathForSignalDialog, rtlDir)) {
             rtlProcessedForSignalDialog = true;
         }
+    }
+}
+
+// You can add this check somewhere in your initialization
+void checkPythonAvailability()
+{
+    QProcess process;
+    process.start("python", QStringList() << "--version");
+    if (process.waitForFinished(5000)) {
+        QByteArray output = process.readAll();
+        qDebug() << "Python version:" << output.trimmed();
+    } else {
+        qDebug() << "Python not found or not working";
+    }
+    
+    // Also check python3
+    process.start("python3", QStringList() << "--version");
+    if (process.waitForFinished(5000)) {
+        QByteArray output = process.readAll();
+        qDebug() << "Python3 version:" << output.trimmed();
     }
 }
