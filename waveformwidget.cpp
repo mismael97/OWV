@@ -134,26 +134,27 @@ void WaveformWidget::selectAllSignals()
 
 void WaveformWidget::zoomIn()
 {
-    if (timeScale >= 50.0) return;
+    if (timeScale >= 50.0)
+        return;
 
     // Get mouse position in widget coordinates
     QPoint mousePos = mapFromGlobal(QCursor::pos());
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
-    
+
     qDebug() << "=== ZOOM IN ===";
     qDebug() << "Mouse pos:" << mousePos;
     qDebug() << "Waveform start X:" << waveformStartX;
 
     // Only zoom to mouse if it's in the waveform area
-    if (mousePos.x() >= waveformStartX && mousePos.y() >= timeMarkersHeight) 
+    if (mousePos.x() >= waveformStartX && mousePos.y() >= timeMarkersHeight)
     {
         // Calculate mouse position relative to waveform area
         int mouseXInWaveform = mousePos.x() - waveformStartX;
-        
+
         // The key calculation: what time is currently under the mouse?
         // time = (pixel_position + scroll_offset) / scale
         double timeUnderMouse = (mouseXInWaveform + timeOffset) / timeScale;
-        
+
         qDebug() << "Mouse in waveform - X:" << mouseXInWaveform;
         qDebug() << "Time under mouse:" << timeUnderMouse;
         qDebug() << "Before - Scale:" << timeScale << "Offset:" << timeOffset;
@@ -166,14 +167,22 @@ void WaveformWidget::zoomIn()
         // After zoom, we want the same time to be under the mouse
         // So we adjust the offset: new_offset = time * new_scale - mouse_x
         timeOffset = timeUnderMouse * timeScale - mouseXInWaveform;
-        
+
         qDebug() << "After - Scale:" << timeScale << "Offset:" << timeOffset;
     }
     else
     {
-        // Default zoom (center-based)
+        // Default zoom (center-based) - keep cursor visible
+        double cursorTimeBeforeZoom = cursorTime;
         timeScale = qMin(50.0, timeScale * 1.2);
-        qDebug() << "Default zoom - New scale:" << timeScale;
+
+        // Adjust offset to keep cursor roughly in the same screen position
+        int waveformStartX = signalNamesWidth + valuesColumnWidth;
+        int viewportWidth = width() - waveformStartX;
+        int cursorScreenPos = timeToX(cursorTimeBeforeZoom);
+        timeOffset = cursorScreenPos - viewportWidth / 2;
+
+        qDebug() << "Default zoom - New scale:" << timeScale << "Cursor time:" << cursorTimeBeforeZoom;
     }
 
     updateScrollBar();
@@ -184,9 +193,10 @@ void WaveformWidget::zoomOut()
 {
     // Calculate the maximum scale allowed (zoom fit level)
     double maxScaleForZoomOut = calculateZoomFitScale();
-    
+
     // If we're already at or beyond zoom fit level, don't zoom out further
-    if (timeScale <= maxScaleForZoomOut) {
+    if (timeScale <= maxScaleForZoomOut)
+    {
         // Optional: Snap to exact zoom fit scale
         timeScale = maxScaleForZoomOut;
         updateScrollBar();
@@ -198,22 +208,24 @@ void WaveformWidget::zoomOut()
     QPoint mousePos = mapFromGlobal(QCursor::pos());
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
     int mouseXInWaveform = mousePos.x() - waveformStartX;
-    
-    if (mouseXInWaveform < 0) mouseXInWaveform = 0;
-    
+
+    if (mouseXInWaveform < 0)
+        mouseXInWaveform = 0;
+
     double timeUnderMouse = (mouseXInWaveform + timeOffset) / timeScale;
-    
+
     double oldScale = timeScale;
     timeScale /= 1.2;
-    
+
     // Don't zoom out beyond zoom fit level
     timeScale = qMax(maxScaleForZoomOut, timeScale);
     timeScale = qMax(0.1, timeScale); // Still respect absolute minimum
-    
+
     timeOffset = timeUnderMouse * timeScale - mouseXInWaveform;
-    
+
     // Clamp offset to prevent negative timeline
-    if (timeOffset < 0) {
+    if (timeOffset < 0)
+    {
         timeOffset = 0;
     }
 
@@ -235,7 +247,7 @@ void WaveformWidget::zoomFit()
     int availableWidth = width() - signalNamesWidth - valuesColumnWidth - 20;
 
     // Use the same margins as scrolling - UPDATE THIS LINE:
-    const int LEFT_MARGIN = 0; // -10 time units (negative time)
+    const int LEFT_MARGIN = 0;   // -10 time units (negative time)
     const int RIGHT_MARGIN = 10; // 100 time units after end
 
     int totalTimeRange = vcdParser->getEndTime() + RIGHT_MARGIN - LEFT_MARGIN; // Note: subtract LEFT_MARGIN because it's negative
@@ -253,7 +265,7 @@ void WaveformWidget::zoomFit()
         timeScale = static_cast<double>(availableWidth) / totalTimeRange;
     }
 
-    timeScale = qMax(0.001, qMin(1000.0, timeScale));   
+    timeScale = qMax(0.001, qMin(1000.0, timeScale));
     timeOffset = 0;
 
     updateScrollBar();
@@ -395,8 +407,16 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
         return;
     }
 
+    // DEBUG: Verify cursor position
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    int viewportWidth = width() - waveformStartX;
+    int cursorX = timeToX(cursorTime);
+    int centerX = viewportWidth / 2;
+    
+    qDebug() << "Paint event - Cursor X:" << cursorX << "Center X:" << centerX << "Difference:" << (cursorX - centerX);
+
     drawSignalNamesColumn(painter);
-    drawSignalValuesColumn(painter, cursorTime); // FIX: Pass cursorTime here
+    drawSignalValuesColumn(painter, cursorTime);
     drawWaveformArea(painter);
     drawTimeCursor(painter);
 }
@@ -493,15 +513,15 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
             int msb = signal.width - 1;
             QString bitRangeText = QString("[%1:0]").arg(msb);
             int bitRangeTextWidth = fm.horizontalAdvance(bitRangeText);
-            
+
             // Draw signal name
             painter.drawText(textIndent, textY, displayName);
-            
+
             // Draw bit range at the right end of the column
             int bitRangeX = signalNamesWidth - bitRangeTextWidth - 5; // 5px padding from right edge
-            painter.setPen(QPen(QColor(180, 180, 180))); // Gray color for bit range
+            painter.setPen(QPen(QColor(180, 180, 180)));              // Gray color for bit range
             painter.drawText(bitRangeX, textY, bitRangeText);
-            
+
             // Reset pen color for next items
             if (isSelected)
             {
@@ -687,7 +707,10 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
 
     // Only draw if cursor is within visible waveform area
     if (cursorX < 0 || cursorX > (width() - waveformStartX))
+    {
+        qDebug() << "Cursor outside visible area - Cursor X:" << cursorX << "Waveform width:" << (width() - waveformStartX);
         return;
+    }
 
     // Calculate the height based on actual signals (stop at last signal)
     int totalSignalsHeight = timeMarkersHeight; // Start below timeline
@@ -703,6 +726,8 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     
     // Don't draw beyond the actual content height
     int drawHeight = qMin(totalSignalsHeight, height());
+
+    qDebug() << "Drawing cursor at X:" << cursorX << "Height:" << drawHeight;
 
     // Draw vertical cursor line from timeline area to the last signal
     painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
@@ -761,10 +786,12 @@ void WaveformWidget::drawSignalWaveform(QPainter &painter, const VCDSignal &sign
 
     // Check if this signal is selected
     bool isSelected = false;
-    for (int i = 0; i < displayItems.size(); i++) {
-        if (selectedItems.contains(i) && 
-            displayItems[i].type == DisplayItem::Signal && 
-            displayItems[i].signal.signal.fullName == signal.fullName) {
+    for (int i = 0; i < displayItems.size(); i++)
+    {
+        if (selectedItems.contains(i) &&
+            displayItems[i].type == DisplayItem::Signal &&
+            displayItems[i].signal.signal.fullName == signal.fullName)
+        {
             isSelected = true;
             break;
         }
@@ -976,12 +1003,12 @@ void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int 
 
     // Draw crisp cross markers using integer coordinates
     int crossSize = 2;
-    
+
     // Top cross - horizontal line
     painter.drawLine(x - crossSize, top + crossSize, x + crossSize, top + crossSize);
     // Top cross - vertical line
     painter.drawLine(x, top, x, top + crossSize * 2);
-    
+
     // Bottom cross - horizontal line
     painter.drawLine(x - crossSize, bottom - crossSize, x + crossSize, bottom - crossSize);
     // Bottom cross - vertical line
@@ -990,7 +1017,7 @@ void WaveformWidget::drawCleanTransition(QPainter &painter, int x, int top, int 
     // Center dot - filled rectangle for crispness
     int centerY = top + height / 2;
     painter.fillRect(x - 1, centerY - 1, 3, 3, signalColor);
-    
+
     // Optional: Add a white outline for better visibility
     painter.setPen(QPen(Qt::white, 1));
     painter.drawLine(x, top, x, bottom);
@@ -1003,19 +1030,20 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
     if (changes.isEmpty())
         return;
 
-        // Check if this signal is selected
+    // Check if this signal is selected
     bool isSelected = false;
-    for (int i = 0; i < displayItems.size(); i++) {
-        if (selectedItems.contains(i) && 
-            displayItems[i].type == DisplayItem::Signal && 
-            displayItems[i].signal.signal.fullName == signal.fullName) {
+    for (int i = 0; i < displayItems.size(); i++)
+    {
+        if (selectedItems.contains(i) &&
+            displayItems[i].type == DisplayItem::Signal &&
+            displayItems[i].signal.signal.fullName == signal.fullName)
+        {
             isSelected = true;
             break;
         }
     }
 
-        int currentLineWidth = isSelected ? selectedLineWidth : lineWidth;
-
+    int currentLineWidth = isSelected ? selectedLineWidth : lineWidth;
 
     // Emergency check for extreme zoom
     if (timeScale > 1000.0 || timeScale < 0.001)
@@ -1117,7 +1145,7 @@ void WaveformWidget::drawBusWaveform(QPainter &painter, const VCDSignal &signal,
         }
     }
 
-// Draw clean bus outline - use currentLineWidth for selected signals
+    // Draw clean bus outline - use currentLineWidth for selected signals
     painter.setPen(QPen(signalColor, currentLineWidth));
     painter.drawRect(timeToX(0), busTop, endX - timeToX(0), waveformHeight);
 }
@@ -1522,7 +1550,7 @@ void WaveformWidget::mousePressEvent(QMouseEvent *event)
                 update();
                 emit itemSelected(itemIndex);
             }
-            else 
+            else
             {
                 // NEW: Clear selection when clicking empty space
                 // Only clear if not using Ctrl or Shift modifiers (which are for multi-selection)
@@ -1824,15 +1852,16 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
 void WaveformWidget::contextMenuEvent(QContextMenuEvent *event)
 {
     int itemIndex = getItemAtPosition(event->pos());
-    
+
     // If no item clicked but we're in waveform area, try to find signal under cursor
-    if (itemIndex == -1) {
+    if (itemIndex == -1)
+    {
         int waveformStartX = signalNamesWidth + valuesColumnWidth;
         QPoint adjustedPos = event->pos();
         adjustedPos.setX(adjustedPos.x() - waveformStartX);
         itemIndex = getItemAtPosition(adjustedPos);
     }
-    
+
     showContextMenu(event->globalPos(), itemIndex);
 }
 
@@ -2076,19 +2105,18 @@ void WaveformWidget::updateSplitterPositions()
     update();
 }
 
-
 void WaveformWidget::resetNavigationForCurrentSignal()
 {
     if (currentlyNavigatedSignal.isEmpty())
         return;
-        
+
     // Update the current index based on cursor position
     int newIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
     signalCurrentEventIndex[currentlyNavigatedSignal] = newIndex;
     currentEventIndex = newIndex;
-    
-    qDebug() << "Reset navigation: Signal" << currentlyNavigatedSignal 
-             << "Cursor time:" << cursorTime 
+
+    qDebug() << "Reset navigation: Signal" << currentlyNavigatedSignal
+             << "Cursor time:" << cursorTime
              << "New index:" << newIndex;
 }
 
@@ -2110,17 +2138,30 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
     cursorTime = xToTime(clickXInWaveform);
 
     showCursor = true;
-    
+
+    // NEW: Ensure cursor is immediately visible after click
+    int cursorX = timeToX(cursorTime);
+    int viewportWidth = width() - waveformStartX;
+
+    if (cursorX < timeOffset || cursorX > timeOffset + viewportWidth)
+    {
+        // Cursor would be outside viewport, center it
+        timeOffset = qMax(0, cursorX - viewportWidth / 2);
+        horizontalScrollBar->setValue(timeOffset);
+    }
+
     // Reset navigation for current signal when cursor moves
-    if (!currentlyNavigatedSignal.isEmpty()) {
+    if (!currentlyNavigatedSignal.isEmpty())
+    {
         resetNavigationForCurrentSignal();
     }
-    
+
     // Emit cursor time change if it actually changed
-    if (cursorTime != oldCursorTime) {
+    if (cursorTime != oldCursorTime)
+    {
         emit cursorTimeChanged(cursorTime);
     }
-    
+
     update();
 }
 
@@ -2528,22 +2569,22 @@ void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: para
     }
 }
 
-
 void WaveformWidget::setNavigationMode(NavigationMode mode)
 {
     navigationMode = mode;
-    
+
     // Clear ALL cached events when navigation mode changes
     signalEventTimestamps.clear();
     signalCurrentEventIndex.clear();
     currentlyNavigatedSignal.clear();
     currentEventIndex = -1;
-    
+
     // Force update events immediately when mode changes
-    if (!selectedItems.isEmpty()) {
+    if (!selectedItems.isEmpty())
+    {
         updateEventList();
     }
-    
+
     // Emit signal to update button states
     emit timeChanged(cursorTime);
 }
@@ -2556,53 +2597,93 @@ void WaveformWidget::navigateToTime(int targetTime)
     int endTime = vcdParser->getEndTime();
     targetTime = qMax(0, qMin(targetTime, endTime));
     
+    qDebug() << "Navigating to time:" << targetTime << "(end time:" << endTime << ")";
+    
     int oldCursorTime = cursorTime;
     
     // Set cursor time
     cursorTime = targetTime;
     showCursor = true;
     
-    // Center the view on the target time
-    int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
-    int targetX = timeToX(targetTime);
-    timeOffset = qMax(0, targetX - viewportWidth / 2);
+    // SIMPLE AND CORRECT: Always center the cursor in the visible waveform area
+    int waveformStartX = signalNamesWidth + valuesColumnWidth;
+    int viewportWidth = width() - waveformStartX;
     
-    // Reset navigation for current signal
+    if (viewportWidth > 0) {
+        // Calculate what pixel position the cursor should be at to be centered
+        // We want: cursorX = viewportWidth / 2
+        // But cursorX = timeToX(cursorTime) = (cursorTime * timeScale) - timeOffset
+        // So: (cursorTime * timeScale) - timeOffset = viewportWidth / 2
+        // Therefore: timeOffset = (cursorTime * timeScale) - viewportWidth / 2
+        
+        timeOffset = (cursorTime * timeScale) - (viewportWidth / 2);
+        
+        // Clamp to valid range
+        timeOffset = qMax(0, timeOffset);
+        int maxOffset = horizontalScrollBar->maximum();
+        timeOffset = qMin(timeOffset, maxOffset);
+        
+        qDebug() << "Viewport adjustment:";
+        qDebug() << "  Cursor time:" << cursorTime;
+        qDebug() << "  Time scale:" << timeScale;
+        qDebug() << "  Viewport width:" << viewportWidth;
+        qDebug() << "  Calculated offset:" << (cursorTime * timeScale) - (viewportWidth / 2);
+        qDebug() << "  Final offset:" << timeOffset;
+        
+        // Update scrollbar
+        horizontalScrollBar->setValue(timeOffset);
+    }
+    
+    // Reset navigation for current signal when cursor moves
     if (!currentlyNavigatedSignal.isEmpty()) {
         resetNavigationForCurrentSignal();
     }
     
     // Emit cursor time change if it actually changed
     if (cursorTime != oldCursorTime) {
-        emit cursorTimeChanged(cursorTime);  // ADD THIS LINE
+        emit cursorTimeChanged(cursorTime);
     }
     
     updateScrollBar();
     update();
+    
+    qDebug() << "Navigation complete - Cursor time:" << cursorTime;
 }
-
 
 void WaveformWidget::navigateToPreviousEvent()
 {
     qDebug() << "=== PREVIOUS BUTTON CLICKED ===";
-    
-    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
-        return;
+    qDebug() << "Currently navigated signal:" << currentlyNavigatedSignal;
 
-    QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
-    int& currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
-    
-    if (events.isEmpty())
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+    {
+        qDebug() << "No signal selected for navigation";
         return;
+    }
+
+    QVector<int> &events = signalEventTimestamps[currentlyNavigatedSignal];
+    int &currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
+
+    qDebug() << "Events count:" << events.size();
+    qDebug() << "Current index:" << currentIndex;
+    qDebug() << "Current cursor time:" << cursorTime;
+
+    if (events.isEmpty())
+    {
+        qDebug() << "No events found for signal";
+        return;
+    }
 
     // If no current index set, find where we are based on cursor time
-    if (currentIndex == -1) {
+    if (currentIndex == -1)
+    {
         currentIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
         qDebug() << "Setting initial current index to:" << currentIndex;
     }
-    
+
     // If we're before the first event, go to the first event
-    if (currentIndex == -1) {
+    if (currentIndex == -1)
+    {
         currentIndex = 0;
         int targetTime = events[currentIndex];
         currentEventIndex = currentIndex;
@@ -2611,40 +2692,56 @@ void WaveformWidget::navigateToPreviousEvent()
         navigateToTime(targetTime);
         return;
     }
-    
+
     // If we're at the beginning, don't move
     if (currentIndex <= 0)
+    {
+        qDebug() << "Already at first event, cannot go previous";
         return;
+    }
 
     currentIndex--;
     int targetTime = events[currentIndex];
     currentEventIndex = currentIndex;
 
-    qDebug() << "Previous: Index" << currentIndex << "Time:" << targetTime;
+    qDebug() << "Previous: Moving to index" << currentIndex << "Time:" << targetTime;
     navigateToTime(targetTime);
 }
 
 void WaveformWidget::navigateToNextEvent()
 {
     qDebug() << "=== NEXT BUTTON CLICKED ===";
-    
-    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
-        return;
+    qDebug() << "Currently navigated signal:" << currentlyNavigatedSignal;
 
-    QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
-    int& currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
-    
-    if (events.isEmpty())
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+    {
+        qDebug() << "No signal selected for navigation";
         return;
+    }
+
+    QVector<int> &events = signalEventTimestamps[currentlyNavigatedSignal];
+    int &currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
+
+    qDebug() << "Events count:" << events.size();
+    qDebug() << "Current index:" << currentIndex;
+    qDebug() << "Current cursor time:" << cursorTime;
+
+    if (events.isEmpty())
+    {
+        qDebug() << "No events found for signal";
+        return;
+    }
 
     // If no current index set, find where we are based on cursor time
-    if (currentIndex == -1) {
+    if (currentIndex == -1)
+    {
         currentIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
         qDebug() << "Setting initial current index to:" << currentIndex;
     }
-    
+
     // If we're before the first event, go to the first event
-    if (currentIndex == -1) {
+    if (currentIndex == -1)
+    {
         currentIndex = 0;
         int targetTime = events[currentIndex];
         currentEventIndex = currentIndex;
@@ -2653,16 +2750,19 @@ void WaveformWidget::navigateToNextEvent()
         navigateToTime(targetTime);
         return;
     }
-    
+
     // If we're at the end, don't move
     if (currentIndex >= events.size() - 1)
+    {
+        qDebug() << "Already at last event, cannot go next";
         return;
+    }
 
     currentIndex++;
     int targetTime = events[currentIndex];
     currentEventIndex = currentIndex;
 
-    qDebug() << "Next: Index" << currentIndex << "Time:" << targetTime;
+    qDebug() << "Next: Moving to index" << currentIndex << "Time:" << targetTime;
     navigateToTime(targetTime);
 }
 
@@ -2670,18 +2770,19 @@ bool WaveformWidget::hasPreviousEvent() const
 {
     if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
         return false;
-        
-    const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+
+    const QVector<int> &events = signalEventTimestamps[currentlyNavigatedSignal];
     int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
-    
+
     if (events.isEmpty())
         return false;
-    
+
     // If we're before the first event, no previous available
-    if (currentIndex == -1) {
+    if (currentIndex == -1)
+    {
         return false;
     }
-    
+
     // If we're at the first event but there are multiple events, we can go to previous (which would be before first)
     // OR if we're after the first event, we can go to previous event
     return currentIndex > 0;
@@ -2691,18 +2792,19 @@ bool WaveformWidget::hasNextEvent() const
 {
     if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
         return false;
-        
-    const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+
+    const QVector<int> &events = signalEventTimestamps[currentlyNavigatedSignal];
     int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
-    
+
     if (events.isEmpty())
         return false;
-    
+
     // If we're before the first event, we can go to the first event
-    if (currentIndex == -1) {
+    if (currentIndex == -1)
+    {
         return true;
     }
-    
+
     // If we're at or before the last event, we can go next
     return currentIndex < events.size() - 1;
 }
@@ -2710,29 +2812,40 @@ bool WaveformWidget::hasNextEvent() const
 void WaveformWidget::updateEventList()
 {
     if (selectedItems.isEmpty() || !vcdParser)
+    {
+        qDebug() << "No signal selected for event list update";
         return;
+    }
 
     // Get the first selected signal for navigation
     int selectedIndex = *selectedItems.begin();
     if (!isSignalItem(selectedIndex))
+    {
+        qDebug() << "Selected item is not a signal";
         return;
+    }
 
     const VCDSignal &signal = getSignalFromItem(selectedIndex);
-    
+
     // Store which signal we're navigating
     currentlyNavigatedSignal = signal.fullName;
-    
+
     const auto changes = vcdParser->getValueChangesForSignal(signal.fullName);
     if (changes.isEmpty())
+    {
+        qDebug() << "No value changes found for signal:" << signal.fullName;
         return;
+    }
 
     // Always recompute events to ensure they're up to date
     QVector<int> events;
-    
+
     QString prevValue;
-    
+
     qDebug() << "=== PROCESSING EVENTS FOR MODE:" << navigationMode << "===";
-    
+    qDebug() << "Signal:" << signal.fullName;
+    qDebug() << "Total changes:" << changes.size();
+
     for (int i = 0; i < changes.size(); i++)
     {
         const auto &change = changes[i];
@@ -2742,32 +2855,27 @@ void WaveformWidget::updateEventList()
         {
         case ValueChange:
             includeEvent = true;
-            qDebug() << "  ValueChange: including time" << change.timestamp << "value:" << change.value;
             break;
 
         case SignalRise:
-            if (i > 0) {
+            if (i > 0)
+            {
                 includeEvent = (prevValue == "0" && change.value == "1");
-                if (includeEvent) {
-                    qDebug() << "  SignalRise: including time" << change.timestamp << "prev:" << prevValue << "curr:" << change.value;
-                }
             }
             break;
 
         case SignalFall:
-            if (i > 0) {
+            if (i > 0)
+            {
                 includeEvent = (prevValue == "1" && change.value == "0");
-                if (includeEvent) {
-                    qDebug() << "  SignalFall: including time" << change.timestamp << "prev:" << prevValue << "curr:" << change.value;
-                }
             }
             break;
-        
         }
 
         if (includeEvent)
         {
             events.append(change.timestamp);
+            qDebug() << "  Including event at time:" << change.timestamp << "value:" << change.value;
         }
 
         prevValue = change.value;
@@ -2775,12 +2883,12 @@ void WaveformWidget::updateEventList()
 
     // Store events for this signal
     signalEventTimestamps[signal.fullName] = events;
-    
+
     // Set current index based on cursor position for this signal
     int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
     signalCurrentEventIndex[signal.fullName] = newIndex;
     currentEventIndex = newIndex;
-    
+
     qDebug() << "=== NAVIGATION SUMMARY ===";
     qDebug() << "Signal:" << signal.fullName;
     qDebug() << "Mode:" << navigationMode;
@@ -2789,7 +2897,6 @@ void WaveformWidget::updateEventList()
     qDebug() << "Cursor time:" << cursorTime;
     qDebug() << "Current index:" << newIndex;
     qDebug() << "Events list:" << events;
-    qDebug() << "Button states - HasPrev:" << hasPreviousEvent() << "HasNext:" << hasNextEvent();
     qDebug() << "=== END SUMMARY ===";
 }
 
@@ -2800,43 +2907,48 @@ void WaveformWidget::forceNavigationUpdate()
     signalCurrentEventIndex.clear();
     currentlyNavigatedSignal.clear();
     currentEventIndex = -1;
-    
+
     // Force update if we have selected signals
-    if (!selectedItems.isEmpty()) {
+    if (!selectedItems.isEmpty())
+    {
         updateEventList();
     }
-    
+
     update();
     emit timeChanged(cursorTime);
 }
 
-int WaveformWidget::findEventIndexForTime(int time, const QString& signalFullName) const
+int WaveformWidget::findEventIndexForTime(int time, const QString &signalFullName) const
 {
     if (!signalEventTimestamps.contains(signalFullName))
         return -1;
-        
-    const QVector<int>& events = signalEventTimestamps[signalFullName];
-    
+
+    const QVector<int> &events = signalEventTimestamps[signalFullName];
+
     if (events.isEmpty())
         return -1;
-    
+
     // If we're before the first event, return -1 to indicate we're before any event
-    if (time < events.first()) {
+    if (time < events.first())
+    {
         return -1;
     }
-    
+
     // If we're after the last event, return the last event index
-    if (time > events.last()) {
+    if (time > events.last())
+    {
         return events.size() - 1;
     }
-    
+
     // Find the event that is closest to but not greater than the current time
-    for (int i = events.size() - 1; i >= 0; i--) {
-        if (events[i] <= time) {
+    for (int i = events.size() - 1; i >= 0; i--)
+    {
+        if (events[i] <= time)
+        {
             return i;
         }
     }
-    
+
     // Should never reach here, but return -1 if we do
     return -1;
 }
@@ -2893,7 +3005,6 @@ void WaveformWidget::selectSignalAtPosition(const QPoint &pos)
     }
 }
 
-
 void WaveformWidget::handleWaveformClick(const QPoint &pos)
 {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
@@ -2903,20 +3014,22 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
     {
         // Calculate the maximum Y position where signals exist
         int maxSignalY = timeMarkersHeight;
-        for (int i = 0; i < displayItems.size(); i++) {
+        for (int i = 0; i < displayItems.size(); i++)
+        {
             const auto &item = displayItems[i];
             int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
             maxSignalY += itemHeight;
         }
-        
+
         // Add some padding
         maxSignalY += 10;
-        
+
         // Only process clicks that are within the signal area (not empty space below)
-        if (pos.y() <= maxSignalY) {
+        if (pos.y() <= maxSignalY)
+        {
             // Store old cursor time to detect changes
             int oldCursorTime = cursorTime;
-            
+
             // Also set cursor time
             int clickXInWaveform = pos.x() - waveformStartX;
             cursorTime = xToTime(clickXInWaveform);
@@ -2926,9 +3039,10 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
             selectSignalAtPosition(pos);
 
             // If cursor time changed and we have a selected signal, update navigation
-            if (cursorTime != oldCursorTime && !currentlyNavigatedSignal.isEmpty()) {
+            if (cursorTime != oldCursorTime && !currentlyNavigatedSignal.isEmpty())
+            {
                 resetNavigationForCurrentSignal();
-                
+
                 // Emit cursor time change
                 emit cursorTimeChanged(cursorTime);
             }
