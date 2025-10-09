@@ -31,7 +31,7 @@ public:
     QList<VCDSignal> getSelectedSignals() const;
 
     // NEW: RTL processing setup
-    void setRtlProcessingInfo(MainWindow* mainWindow, const QString& vcdFilePath, bool& rtlProcessed, QString& tempVcdPath);
+    void setRtlProcessingInfo(MainWindow *mainWindow, const QString &vcdFilePath, bool &rtlProcessed, QString &tempVcdPath);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -48,7 +48,7 @@ private slots:
     void onSearchTimerTimeout();
     void onLoadProgress(int percentage);
     void onLoadFinished();
-    
+
     // NEW: Filter button slots
     void onFilterInputPorts();
     void onFilterOutputPorts();
@@ -57,7 +57,17 @@ private slots:
     void onFilterRegisters();
     void onFilterAll();
 
+    void onRtlDirectoryButtonClicked(); // ADD THIS
+
 private:
+    QPushButton *filterInputButton;
+    QPushButton *filterOutputButton;
+    QPushButton *filterInoutButton;
+    QPushButton *filterNetButton;
+    QPushButton *filterRegButton;
+    QPushButton *filterAllButton;
+
+    QPushButton *rtlDirectoryButton; // ADD THIS LINE
     void processNextChunk();
     void populateTopLevelScopes();
     void performSearch(const QString &text);
@@ -67,7 +77,7 @@ private:
     void applySignalFilter();
 
     // NEW: Method to check and process RTL for port filters
-    bool ensureRtlProcessedForPortFilter(const QString& filterType);
+    bool ensureRtlProcessedForPortFilter(const QString &filterType);
 
     // UI Components
     QTreeWidget *signalTree;
@@ -77,14 +87,6 @@ private:
     QLineEdit *searchEdit;
     QProgressBar *progressBar;
     QLabel *statusLabel;
-
-    // NEW: Filter buttons
-    QPushButton *filterInputButton;
-    QPushButton *filterOutputButton;
-    QPushButton *filterInoutButton;
-    QPushButton *filterNetButton;
-    QPushButton *filterRegButton;
-    QPushButton *filterAllButton;
 
     // Loading and search management
     QTimer *searchTimer;
@@ -111,7 +113,7 @@ private:
     // Multi-selection support
     QTreeWidgetItem *lastSelectedItem;
     QString currentFilter;
-    
+
     // NEW: Signal type filter
     QString currentTypeFilter;
 
@@ -120,13 +122,13 @@ private:
     QFuture<void> loadFuture;
 
     // NEW: RTL processing members
-    MainWindow* mainWindow;
+    MainWindow *mainWindow;
     QString currentVcdFilePath;
-    bool* rtlProcessed;
-    QString* tempVcdFilePath;
+    bool *rtlProcessed;
+    QString *tempVcdFilePath;
 
     // NEW: Store the VCD parser reference
-    VCDParser* vcdParser;
+    VCDParser *vcdParser;
 
     // Methods
     void startInitialLoad();

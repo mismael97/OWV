@@ -53,7 +53,9 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent), lastSelectedItem(nullptr),
       isSearchInProgress(false), isLoadingInProgress(false), isInitialLoadComplete(false),
       currentLoadIndex(0), totalSignalsToProcess(0),
-      currentTypeFilter("all") // Initialize with "all" filter
+      currentTypeFilter("all"),  // Initialize with "all" filter
+      mainWindow(nullptr),       // Initialize mainWindow
+      rtlProcessed(nullptr)      // Initialize rtlProcessed pointer
 {
     setWindowTitle("Add Signals to Waveform");
     setMinimumSize(800, 600);
@@ -72,8 +74,7 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     searchTimer->setSingleShot(true);
     searchTimer->setInterval(300);
 
-    connect(searchEdit, &QLineEdit::textChanged, this, [this](const QString &text)
-            {
+    connect(searchEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
         pendingSearchText = text;
         
         // Cancel any ongoing loading when user starts searching
@@ -88,7 +89,8 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
             onSearchTextChanged(text);
         } else {
             searchTimer->start();
-        } });
+        }
+    });
 
     connect(searchTimer, &QTimer::timeout, this, &SignalSelectionDialog::onSearchTimerTimeout);
 
@@ -98,37 +100,41 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     // NEW: Filter buttons layout
     QHBoxLayout *filterLayout = new QHBoxLayout();
     filterLayout->setSpacing(2);
-
+    
     filterInputButton = new QPushButton("Input Ports");
     filterOutputButton = new QPushButton("Output Ports");
     filterInoutButton = new QPushButton("Inout Ports");
     filterNetButton = new QPushButton("Net Signals");
     filterRegButton = new QPushButton("Registers");
     filterAllButton = new QPushButton("All Signals");
-
+    
+    // NEW: RTL directory button
+    rtlDirectoryButton = new QPushButton("📁 Set RTL Directory");  // ADD THIS
+    
     // Style the buttons
     QString buttonStyle = "QPushButton { padding: 6px; font-size: 11px; border: 1px solid #555; background-color: #333; color: white; }"
-                          "QPushButton:checked { background-color: #4CAF50; color: white; border: 1px solid #4CAF50; }"
-                          "QPushButton:hover { background-color: #555; }";
-
+                         "QPushButton:checked { background-color: #4CAF50; color: white; border: 1px solid #4CAF50; }"
+                         "QPushButton:hover { background-color: #555; }";
+    
     filterInputButton->setStyleSheet(buttonStyle);
     filterOutputButton->setStyleSheet(buttonStyle);
     filterInoutButton->setStyleSheet(buttonStyle);
     filterNetButton->setStyleSheet(buttonStyle);
     filterRegButton->setStyleSheet(buttonStyle);
     filterAllButton->setStyleSheet(buttonStyle);
-
-    // Make buttons checkable
+    rtlDirectoryButton->setStyleSheet(buttonStyle);  // ADD THIS
+    
+    // Make filter buttons checkable
     filterInputButton->setCheckable(true);
     filterOutputButton->setCheckable(true);
     filterInoutButton->setCheckable(true);
     filterNetButton->setCheckable(true);
     filterRegButton->setCheckable(true);
     filterAllButton->setCheckable(true);
-
+    
     // Set "All Signals" as initially checked
     filterAllButton->setChecked(true);
-
+    
     // Connect filter buttons
     connect(filterInputButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterInputPorts);
     connect(filterOutputButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterOutputPorts);
@@ -136,13 +142,17 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     connect(filterNetButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterNetSignals);
     connect(filterRegButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterRegisters);
     connect(filterAllButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterAll);
-
+    
+    // NEW: Connect RTL directory button
+    connect(rtlDirectoryButton, &QPushButton::clicked, this, &SignalSelectionDialog::onRtlDirectoryButtonClicked);
+    
     filterLayout->addWidget(filterInputButton);
     filterLayout->addWidget(filterOutputButton);
     filterLayout->addWidget(filterInoutButton);
     filterLayout->addWidget(filterNetButton);
     filterLayout->addWidget(filterRegButton);
     filterLayout->addWidget(filterAllButton);
+    filterLayout->addWidget(rtlDirectoryButton);  // ADD THIS
     filterLayout->addStretch();
 
     // Progress bar
@@ -1521,7 +1531,7 @@ bool SignalSelectionDialog::ensureRtlProcessedForPortFilter(const QString& filte
         }
     }
     
-    // Check if RTL directory exists
+    // Check if RTL directory exists (automatic discovery)
     if (mainWindow->hasRtlDirectoryForSignalDialog()) {
         // Show processing status
         statusLabel->setText("Processing RTL files for port information...");
@@ -1556,6 +1566,12 @@ bool SignalSelectionDialog::ensureRtlProcessedForPortFilter(const QString& filte
             
             int result = msgBox.exec();
             if (result == QMessageBox::Yes) {
+                // NEW: Clean up any existing temp file before manual selection
+                if (!tempVcdFilePath->isEmpty() && QFile::exists(*tempVcdFilePath)) {
+                    QFile::remove(*tempVcdFilePath);
+                }
+                *rtlProcessed = false;
+                
                 mainWindow->showRtlDirectoryDialogForSignalDialog();
                 if (*rtlProcessed) {
                     return true; // User selected a directory and processing succeeded
@@ -1587,3 +1603,66 @@ bool SignalSelectionDialog::ensureRtlProcessedForPortFilter(const QString& filte
     }
 }
 
+void SignalSelectionDialog::onRtlDirectoryButtonClicked()
+{
+    if (!mainWindow) {
+        qDebug() << "MainWindow not set for RTL directory selection";
+        return;
+    }
+    
+    QString currentRtlDir = mainWindow->findRtlDirectoryForSignalDialog(currentVcdFilePath);
+    QString startDir = currentRtlDir.isEmpty() ? QFileInfo(currentVcdFilePath).dir().path() : currentRtlDir;
+    
+    QString rtlDir = QFileDialog::getExistingDirectory(this, 
+        "Select RTL Directory",
+        startDir,
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    
+    if (!rtlDir.isEmpty()) {
+        // Verify the selected directory contains RTL files
+        QDir dir(rtlDir);
+        QStringList rtlFiles = dir.entryList(QStringList() << "*.v" << "*.sv", QDir::Files);
+        
+        if (rtlFiles.isEmpty()) {
+            QMessageBox::warning(this, "No RTL Files", 
+                "The selected directory does not contain any Verilog (.v) or SystemVerilog (.sv) files.\n\n"
+                "Please select a directory that contains RTL source files.");
+            return;
+        }
+        
+        qDebug() << "User selected RTL directory:" << rtlDir;
+        qDebug() << "RTL files found:" << rtlFiles.size();
+        
+        // NEW: Clean up existing temp file before processing with new RTL directory
+        if (!tempVcdFilePath->isEmpty() && QFile::exists(*tempVcdFilePath)) {
+            QFile::remove(*tempVcdFilePath);
+            qDebug() << "Cleaned up previous temp file for new RTL directory";
+        }
+        
+        // Reset RTL processed flag to force reprocessing
+        *rtlProcessed = false;
+        
+        // NEW: Process VCD with the SPECIFICALLY SELECTED RTL directory
+        statusLabel->setText("Processing RTL files from selected directory...");
+        QApplication::processEvents();
+        
+        // Use the MainWindow method that accepts a specific RTL directory
+        bool success = mainWindow->runVcdPortMapperForSignalDialog(currentVcdFilePath, *tempVcdFilePath, rtlDir);
+        
+        if (success) {
+            *rtlProcessed = true;
+            statusLabel->setText("RTL processing completed with manually selected directory");
+            qDebug() << "Successfully processed VCD with manually selected RTL directory:" << rtlDir;
+            
+            // Update the filter to show the new RTL-processed signals
+            if (currentTypeFilter == "input" || currentTypeFilter == "output" || currentTypeFilter == "inout") {
+                applySignalFilter();
+            }
+        } else {
+            statusLabel->setText("RTL processing failed");
+            QMessageBox::warning(this, "RTL Processing Failed", 
+                "Failed to process RTL files from the selected directory.\n\n"
+                "Please check that the directory contains valid RTL source files.");
+        }
+    }
+}

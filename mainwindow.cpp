@@ -470,9 +470,17 @@ void MainWindow::openFile()
     }
 }
 
-// Update loadVcdFile with the new verification logic
 void MainWindow::loadVcdFile(const QString &filename)
 {
+    // NEW: Clean up previous temp files when loading a new VCD file
+    if (QFile::exists(tempVcdFilePathForSignalDialog)) {
+        QFile::remove(tempVcdFilePathForSignalDialog);
+        qDebug() << "Cleaned up previous signal dialog temp file:" << tempVcdFilePathForSignalDialog;
+    }
+    
+    // Reset RTL processing state for the new file
+    rtlProcessedForSignalDialog = false;
+    
     // Store the original VCD file path
     currentVcdFilePath = filename;
     
