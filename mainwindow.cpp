@@ -838,6 +838,7 @@ bool MainWindow::processVcdWithRtlForSignalDialog(const QString &vcdFile)
 {
     QString rtlDir = findRtlDirectoryForSignalDialog(vcdFile);
     if (rtlDir.isEmpty()) {
+        qDebug() << "No RTL directory found for signal dialog";
         return false;
     }
     
@@ -845,7 +846,27 @@ bool MainWindow::processVcdWithRtlForSignalDialog(const QString &vcdFile)
     QFileInfo fileInfo(vcdFile);
     tempVcdFilePathForSignalDialog = fileInfo.path() + "/" + fileInfo.completeBaseName() + "_temp_signal_dialog.vcd";
     
-    return runVcdPortMapperForSignalDialog(vcdFile, tempVcdFilePathForSignalDialog, rtlDir);
+    qDebug() << "Processing VCD with RTL for signal dialog:";
+    qDebug() << "  Input VCD:" << vcdFile;
+    qDebug() << "  RTL Dir:" << rtlDir;
+    qDebug() << "  Output VCD:" << tempVcdFilePathForSignalDialog;
+    
+    bool success = runVcdPortMapperForSignalDialog(vcdFile, tempVcdFilePathForSignalDialog, rtlDir);
+    
+    if (success) {
+        // Verify the output file was created
+        if (QFile::exists(tempVcdFilePathForSignalDialog)) {
+            QFile file(tempVcdFilePathForSignalDialog);
+            if (file.open(QIODevice::ReadOnly)) {
+                qDebug() << "RTL processing successful, output file size:" << file.size() << "bytes";
+                file.close();
+            }
+        }
+    } else {
+        qDebug() << "RTL processing failed";
+    }
+    
+    return success;
 }
 
 void MainWindow::showRtlDirectoryDialogForSignalDialog()

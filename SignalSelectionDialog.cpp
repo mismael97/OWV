@@ -1267,12 +1267,17 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
 }
 
 
-// Fix the port filter button slots
 void SignalSelectionDialog::onFilterInputPorts()
 {
     // NEW: Ensure RTL is processed before applying port filter
     if (!ensureRtlProcessedForPortFilter("input")) {
+        qDebug() << "RTL processing failed or cancelled for input ports";
         return; // RTL processing failed or was cancelled
+    }
+    
+    // Double-check that RTL processing actually happened if we're filtering ports
+    if (currentTypeFilter == "input" && !(*rtlProcessed)) {
+        qDebug() << "RTL processing not completed, using original signals";
     }
     
     currentTypeFilter = "input";
