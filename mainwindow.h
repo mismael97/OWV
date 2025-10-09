@@ -18,9 +18,10 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QKeyEvent>
-#include <QComboBox>  // ADD THIS
+#include <QComboBox> // ADD THIS
 #include "vcdparser.h"
 #include "waveformwidget.h"
+#include <QProcess>
 
 class SignalSelectionDialog;
 
@@ -55,13 +56,23 @@ private slots:
     void updateBusFormatActions();
     void increaseSignalHeight();
     void decreaseSignalHeight();
-    
+
     // NEW SLOTS:
     void onNavigationModeChanged(int index);
     void onPrevValueClicked();
     void onNextValueClicked();
 
 private:
+    QString currentVcdFilePath;
+    QString tempVcdFilePath;
+    bool hasRtlDirectory;
+    void closeEvent(QCloseEvent *event);
+
+    bool processVcdWithRtl(const QString &vcdFile);
+    QString findRtlDirectory(const QString &vcdFile);
+    bool runVcdPortMapper(const QString &inputVcd, const QString &outputVcd, const QString &rtlDir);
+
+    void showRtlDirectoryDialog();
     void createToolbarBelowMenu();
     void updateLineThicknessActions();
     QAction *increaseHeightAction;
@@ -89,13 +100,13 @@ private:
 
     void createMenuBar();
     void createMainToolbar();
-    void setupNavigationControls();  // ADD THIS
-    void updateNavigationButtons();  // ADD THIS
+    void setupNavigationControls(); // ADD THIS
+    void updateNavigationButtons(); // ADD THIS
 
     // Add these to private section
     QToolBar *mainToolBar;
     QLineEdit *searchField;
-    
+
     // Navigation controls
     QComboBox *navigationModeCombo;
     QPushButton *prevValueButton;

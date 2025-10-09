@@ -45,3 +45,9 @@ build
 .vscode
 CMakeLists.txt.user.9630cff
 CMakeLists.txt.user.3c48466
+ariane_tb.vcd
+output.vcd
+*_temp.vcd
+rtl2
+rtl3
+rtl4

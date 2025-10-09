@@ -43,15 +43,23 @@ private slots:
     void onSearchTimerTimeout();
     void onLoadProgress(int percentage);
     void onLoadFinished();
+    
+    // NEW: Filter button slots
+    void onFilterInputPorts();
+    void onFilterOutputPorts();
+    void onFilterInoutPorts();
+    void onFilterNetSignals();
+    void onFilterRegisters();
+    void onFilterAll();
 
 private:
- void processNextChunk(); // Add this declaration
+    void processNextChunk();
     void populateTopLevelScopes();
     void performSearch(const QString &text);
     void populateScopeChildren(const QString &scopePath, QTreeWidgetItem *parentItem);
     void displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope);
-
     void onSearchFinished();
+    void applySignalFilter();
 
     // UI Components
     QTreeWidget *signalTree;
@@ -62,6 +70,14 @@ private:
     QProgressBar *progressBar;
     QLabel *statusLabel;
 
+    // NEW: Filter buttons
+    QPushButton *filterInputButton;
+    QPushButton *filterOutputButton;
+    QPushButton *filterInoutButton;
+    QPushButton *filterNetButton;
+    QPushButton *filterRegButton;
+    QPushButton *filterAllButton;
+
     // Loading and search management
     QTimer *searchTimer;
     QString pendingSearchText;
@@ -69,7 +85,7 @@ private:
     bool isLoadingInProgress;
     bool isInitialLoadComplete;
 
-        // Loading state variables
+    // Loading state variables
     int currentLoadIndex;
     int totalSignalsToProcess;
 
@@ -87,6 +103,9 @@ private:
     // Multi-selection support
     QTreeWidgetItem *lastSelectedItem;
     QString currentFilter;
+    
+    // NEW: Signal type filter
+    QString currentTypeFilter;
 
     // Async loading
     QFutureWatcher<void> *loadWatcher;
@@ -126,9 +145,10 @@ private:
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QKeyEvent>
-#include <QComboBox>  // ADD THIS
+#include <QComboBox> // ADD THIS
 #include "vcdparser.h"
 #include "waveformwidget.h"
+#include <QProcess>
 
 class SignalSelectionDialog;
 
@@ -163,13 +183,23 @@ private slots:
     void updateBusFormatActions();
     void increaseSignalHeight();
     void decreaseSignalHeight();
-    
+
     // NEW SLOTS:
     void onNavigationModeChanged(int index);
     void onPrevValueClicked();
     void onNextValueClicked();
 
 private:
+    QString currentVcdFilePath;
+    QString tempVcdFilePath;
+    bool hasRtlDirectory;
+    void closeEvent(QCloseEvent *event);
+
+    bool processVcdWithRtl(const QString &vcdFile);
+    QString findRtlDirectory(const QString &vcdFile);
+    bool runVcdPortMapper(const QString &inputVcd, const QString &outputVcd, const QString &rtlDir);
+
+    void showRtlDirectoryDialog();
     void createToolbarBelowMenu();
     void updateLineThicknessActions();
     QAction *increaseHeightAction;
@@ -197,13 +227,13 @@ private:
 
     void createMenuBar();
     void createMainToolbar();
-    void setupNavigationControls();  // ADD THIS
-    void updateNavigationButtons();  // ADD THIS
+    void setupNavigationControls(); // ADD THIS
+    void updateNavigationButtons(); // ADD THIS
 
     // Add these to private section
     QToolBar *mainToolBar;
     QLineEdit *searchField;
-    
+
     // Navigation controls
     QComboBox *navigationModeCombo;
     QPushButton *prevValueButton;
@@ -433,13 +463,13 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    int getCursorTime() const { return cursorTime; }
+    void navigateToTime(int time);
     enum NavigationMode
     {
         ValueChange,
         SignalRise,
-        SignalFall,
-        XValues,
-        ZValues
+        SignalFall
     };
     void setNavigationMode(NavigationMode mode);
     void navigateToPreviousEvent();
@@ -496,6 +526,7 @@ signals:
     void timeChanged(int time);
     void itemSelected(int itemIndex);
     void contextMenuRequested(const QPoint &pos, int itemIndex);
+    void cursorTimeChanged(int time); // ADD THIS - for yellow timeline cursor
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -509,6 +540,8 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    void forceNavigationUpdate();
+    void debugSignalState(int time) const;
     double calculateZoomFitScale() const
     {
         if (!vcdParser || vcdParser->getEndTime() <= 0)
@@ -533,7 +566,7 @@ private:
     }
     void resetNavigationForCurrentSignal();
 
-    void navigateToTime(int targetTime);
+    // void navigateToTime(int targetTime);
     int findEventIndexForTime(int time, const QString &signalFullName) const;
 
     bool isSignalSelected(const VCDSignal &signal) const
@@ -749,7 +782,8 @@ void SignalSelectionDialog::onItemChanged(QTreeWidgetItem *item, int column)
 SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     : QDialog(parent), lastSelectedItem(nullptr),
       isSearchInProgress(false), isLoadingInProgress(false), isInitialLoadComplete(false),
-      currentLoadIndex(0), totalSignalsToProcess(0)  // Now these will work
+      currentLoadIndex(0), totalSignalsToProcess(0),
+      currentTypeFilter("all")  // Initialize with "all" filter
 {
     setWindowTitle("Add Signals to Waveform");
     setMinimumSize(800, 600);
@@ -790,6 +824,56 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
 
     searchLayout->addWidget(searchLabel);
     searchLayout->addWidget(searchEdit);
+
+    // NEW: Filter buttons layout
+    QHBoxLayout *filterLayout = new QHBoxLayout();
+    filterLayout->setSpacing(2);
+    
+    filterInputButton = new QPushButton("Input Ports");
+    filterOutputButton = new QPushButton("Output Ports");
+    filterInoutButton = new QPushButton("Inout Ports");
+    filterNetButton = new QPushButton("Net Signals");
+    filterRegButton = new QPushButton("Registers");
+    filterAllButton = new QPushButton("All Signals");
+    
+    // Style the buttons
+    QString buttonStyle = "QPushButton { padding: 6px; font-size: 11px; border: 1px solid #555; background-color: #333; color: white; }"
+                         "QPushButton:checked { background-color: #4CAF50; color: white; border: 1px solid #4CAF50; }"
+                         "QPushButton:hover { background-color: #555; }";
+    
+    filterInputButton->setStyleSheet(buttonStyle);
+    filterOutputButton->setStyleSheet(buttonStyle);
+    filterInoutButton->setStyleSheet(buttonStyle);
+    filterNetButton->setStyleSheet(buttonStyle);
+    filterRegButton->setStyleSheet(buttonStyle);
+    filterAllButton->setStyleSheet(buttonStyle);
+    
+    // Make buttons checkable
+    filterInputButton->setCheckable(true);
+    filterOutputButton->setCheckable(true);
+    filterInoutButton->setCheckable(true);
+    filterNetButton->setCheckable(true);
+    filterRegButton->setCheckable(true);
+    filterAllButton->setCheckable(true);
+    
+    // Set "All Signals" as initially checked
+    filterAllButton->setChecked(true);
+    
+    // Connect filter buttons
+    connect(filterInputButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterInputPorts);
+    connect(filterOutputButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterOutputPorts);
+    connect(filterInoutButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterInoutPorts);
+    connect(filterNetButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterNetSignals);
+    connect(filterRegButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterRegisters);
+    connect(filterAllButton, &QPushButton::clicked, this, &SignalSelectionDialog::onFilterAll);
+    
+    filterLayout->addWidget(filterInputButton);
+    filterLayout->addWidget(filterOutputButton);
+    filterLayout->addWidget(filterInoutButton);
+    filterLayout->addWidget(filterNetButton);
+    filterLayout->addWidget(filterRegButton);
+    filterLayout->addWidget(filterAllButton);
+    filterLayout->addStretch();
 
     // Progress bar
     progressBar = new QProgressBar();
@@ -834,6 +918,7 @@ SignalSelectionDialog::SignalSelectionDialog(QWidget *parent)
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     mainLayout->addLayout(searchLayout);
+    mainLayout->addLayout(filterLayout);  // NEW: Add filter buttons
     mainLayout->addWidget(progressBar);
     mainLayout->addWidget(statusLabel);
     mainLayout->addWidget(signalTree, 1);
@@ -1072,8 +1157,8 @@ void SignalSelectionDialog::onLoadFinished()
 
     progressBar->setVisible(false);
     
-    // Populate top-level scopes in main thread
-    populateTopLevelScopes();
+    // Apply the current filter instead of just populating top-level scopes
+    applySignalFilter();
     
     statusLabel->setText(QString("Ready - %1 signals in %2 scopes")
                          .arg(allSignals.size())
@@ -1502,16 +1587,7 @@ void SignalSelectionDialog::onSearchTextChanged(const QString &text)
 
     // For immediate feedback on empty search
     if (text.isEmpty()) {
-        signalTree->setUpdatesEnabled(false);
-        signalTree->blockSignals(true);
-        
-        signalTree->clear();
-        populatedScopes.clear();
-        populateTopLevelScopes();
-        
-        signalTree->blockSignals(false);
-        signalTree->setUpdatesEnabled(true);
-        statusLabel->setText("Ready");
+        applySignalFilter();  // Use the new filter function
         return;
     }
 
@@ -1843,6 +1919,172 @@ void SignalSelectionDialog::populateScopeChildren(const QString &scopePath, QTre
     }
 
     populatedScopes.insert(scopePath + "_POPULATED");
+}
+
+// NEW: Filter button implementations
+void SignalSelectionDialog::onFilterInputPorts()
+{
+    currentTypeFilter = "input";
+    filterInputButton->setChecked(true);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterOutputPorts()
+{
+    currentTypeFilter = "output";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(true);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterInoutPorts()
+{
+    currentTypeFilter = "inout";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(true);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterNetSignals()
+{
+    currentTypeFilter = "wire";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(true);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterRegisters()
+{
+    currentTypeFilter = "reg";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(true);
+    filterAllButton->setChecked(false);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::onFilterAll()
+{
+    currentTypeFilter = "all";
+    filterInputButton->setChecked(false);
+    filterOutputButton->setChecked(false);
+    filterInoutButton->setChecked(false);
+    filterNetButton->setChecked(false);
+    filterRegButton->setChecked(false);
+    filterAllButton->setChecked(true);
+    applySignalFilter();
+}
+
+void SignalSelectionDialog::applySignalFilter()
+{
+    if (!isInitialLoadComplete) {
+        return; // Wait until initial load is complete
+    }
+
+    signalTree->setUpdatesEnabled(false);
+    signalTree->blockSignals(true);
+    signalTree->clear();
+
+    // Build a map of signals by scope, filtered by type
+    QMap<QString, QVector<VCDSignal>> filteredSignalsByScope;
+
+    for (const auto &signal : allSignals) {
+        // Skip signals that are already visible
+        if (visibleSignalIdentifiers.contains(signal.fullName)) {
+            continue;
+        }
+
+        // Apply type filter
+        if (currentTypeFilter != "all" && signal.type.toLower() != currentTypeFilter) {
+            continue;
+        }
+
+        // Apply search filter if active
+        if (!currentFilter.isEmpty()) {
+            QString signalPath = (signal.scope.isEmpty() ? signal.name : signal.scope + "." + signal.name).toLower();
+            if (!signalPath.contains(currentFilter.toLower())) {
+                continue;
+            }
+        }
+
+        filteredSignalsByScope[signal.scope].append(signal);
+    }
+
+    // Populate the tree with filtered signals
+    if (!filteredSignalsByScope.isEmpty()) {
+        for (auto it = filteredSignalsByScope.begin(); it != filteredSignalsByScope.end(); ++it) {
+            QString scopePath = it.key();
+            QVector<VCDSignal> signalsInScope = it.value();
+
+            QTreeWidgetItem *scopeItem;
+            if (scopePath.isEmpty()) {
+                scopeItem = new QTreeWidgetItem(signalTree);
+                scopeItem->setText(0, "Global Signals");
+            } else {
+                scopeItem = new QTreeWidgetItem(signalTree);
+                scopeItem->setText(0, scopePath);
+            }
+
+            scopeItem->setFlags(scopeItem->flags() | Qt::ItemIsUserCheckable);
+            scopeItem->setData(0, Qt::UserRole, scopePath);
+            updateScopeCheckState(scopeItem);
+
+            for (const VCDSignal &signal : signalsInScope) {
+                QTreeWidgetItem *signalItem = new QTreeWidgetItem(scopeItem);
+                signalItem->setText(0, signal.name);
+                signalItem->setText(1, QString::number(signal.width));
+                signalItem->setText(2, signal.type);
+                signalItem->setText(3, signal.identifier);
+                signalItem->setData(0, Qt::UserRole, QVariant::fromValue(signal));
+                signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+
+                if (selectedSignals.contains(signal.fullName)) {
+                    signalItem->setCheckState(0, Qt::Checked);
+                } else {
+                    signalItem->setCheckState(0, Qt::Unchecked);
+                }
+            }
+            scopeItem->setExpanded(true);
+        }
+    } else {
+        QTreeWidgetItem *noResultsItem = new QTreeWidgetItem(signalTree);
+        noResultsItem->setText(0, QString("No %1 signals found").arg(currentTypeFilter == "all" ? "" : currentTypeFilter + " "));
+        noResultsItem->setFlags(noResultsItem->flags() & ~Qt::ItemIsSelectable);
+    }
+
+    signalTree->blockSignals(false);
+    signalTree->setUpdatesEnabled(true);
+
+    // Update status
+    int totalFilteredSignals = 0;
+    for (const auto &signalList : filteredSignalsByScope) {  // CHANGED: renamed from 'signals' to 'signalList'
+        totalFilteredSignals += signalList.size();
+    }
+    
+    if (currentTypeFilter == "all") {
+        statusLabel->setText(QString("Showing %1 signals").arg(totalFilteredSignals));
+    } else {
+        statusLabel->setText(QString("Showing %1 %2 signals").arg(totalFilteredSignals).arg(currentTypeFilter));
+    }
 }// file: main.cpp
 #include "mainwindow.h"
 #include <QApplication>
@@ -1896,7 +2138,8 @@ MainWindow::MainWindow(QWidget *parent)
     setupNavigationControls();
     createStatusBar();
 
-    loadDefaultVcdFile();
+    // Don't load default VCD file - let user choose
+    statusLabel->setText("Use File → Open to load a VCD file");
 }
 
 MainWindow::~MainWindow()
@@ -2190,6 +2433,7 @@ void MainWindow::setupUI()
     setCentralWidget(centralWidget);
 }
 
+// Update showAddSignalsDialog to be simpler
 void MainWindow::showAddSignalsDialog()
 {
     if (!vcdParser)
@@ -2261,6 +2505,31 @@ void MainWindow::showAddSignalsDialog()
     }
 }
 
+void MainWindow::showRtlDirectoryDialog()
+{
+    QString rtlDir = QFileDialog::getExistingDirectory(this, "Select RTL Directory",
+                                                      QFileInfo(currentVcdFilePath).dir().path());
+    
+    if (!rtlDir.isEmpty()) {
+        // Reprocess VCD with the new RTL directory
+        if (runVcdPortMapper(currentVcdFilePath, tempVcdFilePath, rtlDir)) {
+            hasRtlDirectory = true;
+            // Reload the VCD file
+            loadVcdFile(currentVcdFilePath);
+        }
+    }
+}
+
+// Add cleanup in destructor or close event
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    // Clean up temp VCD file
+    if (QFile::exists(tempVcdFilePath)) {
+        QFile::remove(tempVcdFilePath);
+    }
+    QMainWindow::closeEvent(event);
+}
+
 void MainWindow::removeSelectedSignals()
 {
     // Check if there are any selected items in the waveform widget
@@ -2299,10 +2568,11 @@ void MainWindow::loadDefaultVcdFile()
     }
 }
 
+// Update openFile to handle the new flow
 void MainWindow::openFile()
 {
     QString filename = QFileDialog::getOpenFileName(
-        this, "Open VCD File", "C:/Users/mismael/Desktop/OWV", "VCD Files (*.vcd)");
+        this, "Open VCD File", "", "VCD Files (*.vcd)");
 
     if (!filename.isEmpty())
     {
@@ -2310,9 +2580,70 @@ void MainWindow::openFile()
     }
 }
 
+// Update loadVcdFile with the new verification logic
 void MainWindow::loadVcdFile(const QString &filename)
 {
-    // Show progress bar for file loading
+    // Store the original VCD file path
+    currentVcdFilePath = filename;
+    
+    // Check for RTL directory
+    QString rtlDir = findRtlDirectory(filename);
+    hasRtlDirectory = !rtlDir.isEmpty();
+    
+    // Create temp VCD file path
+    QFileInfo fileInfo(filename);
+    tempVcdFilePath = fileInfo.path() + "/" + fileInfo.completeBaseName() + "_temp.vcd";
+    
+    QString vcdToLoad = filename;
+    bool rtlProcessingSuccess = false;
+    
+    if (hasRtlDirectory) {
+        // Show RTL processing status
+        statusLabel->setText("Checking RTL files for matching modules...");
+        QApplication::processEvents();
+        
+        rtlProcessingSuccess = processVcdWithRtl(filename);
+        
+        if (rtlProcessingSuccess) {
+            vcdToLoad = tempVcdFilePath;
+            statusLabel->setText("VCD processed with RTL port information");
+        } else {
+            // Show warning about RTL mismatch
+            QMessageBox msgBox(this);
+            msgBox.setWindowTitle("RTL Module Mismatch");
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setText("RTL directory found, but no matching modules were detected.\n\n"
+                          "The RTL files don't contain the modules found in the VCD file.\n\n"
+                          "Would you like to specify a different RTL directory?");
+            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No | QMessageBox::Ignore);
+            msgBox.setDefaultButton(QMessageBox::Yes);
+            
+            int result = msgBox.exec();
+            if (result == QMessageBox::Yes) {
+                showRtlDirectoryDialog();
+                return; // Restart the process
+            } else if (result == QMessageBox::Ignore) {
+                // Continue without RTL processing
+                statusLabel->setText("Loading VCD without RTL information...");
+            }
+        }
+    } else {
+        // No RTL directory found - ask user
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle("RTL Information Not Available");
+        msgBox.setIcon(QMessageBox::Information);
+        msgBox.setText("No RTL directory found. Port directions (input/output/inout) will not be available.\n\n"
+                      "Would you like to specify an RTL directory?");
+        msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+        msgBox.setDefaultButton(QMessageBox::No);
+        
+        if (msgBox.exec() == QMessageBox::Yes) {
+            showRtlDirectoryDialog();
+            return; // Restart the process after setting RTL directory
+        }
+    }
+    
+    // Continue with VCD loading...
     statusBar()->clearMessage();
 
     // Create and show progress bar in status bar
@@ -2329,12 +2660,12 @@ void MainWindow::loadVcdFile(const QString &filename)
     QApplication::processEvents(); // Force UI update
 
     // Use QtConcurrent to run parsing in background thread
-    QFuture<bool> parseFuture = QtConcurrent::run([this, filename]()
-                                                  { return vcdParser->parseHeaderOnly(filename); });
+    QFuture<bool> parseFuture = QtConcurrent::run([this, vcdToLoad]()
+                                                  { return vcdParser->parseHeaderOnly(vcdToLoad); });
 
     // Create a watcher to handle completion
     QFutureWatcher<bool> *watcher = new QFutureWatcher<bool>(this);
-    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, progressBar, watcher, filename]()
+    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, progressBar, watcher, vcdToLoad, rtlProcessingSuccess]()
             {
         bool success = watcher->result();
         
@@ -2347,9 +2678,14 @@ void MainWindow::loadVcdFile(const QString &filename)
         watcher->deleteLater();
         
         if (success) {
-            statusLabel->setText(QString("Loaded: %1 (%2 signals) - Ready to display")
-                                     .arg(QFileInfo(filename).fileName())
-                                     .arg(vcdParser->getSignals().size()));
+            QString statusMessage = QString("Loaded: %1 (%2 signals)").arg(QFileInfo(vcdToLoad).fileName()).arg(vcdParser->getSignals().size());
+            if (rtlProcessingSuccess) {
+                statusMessage += " - With RTL port information";
+            } else {
+                statusMessage += " - No RTL information";
+            }
+            
+            statusLabel->setText(statusMessage);
 
             // Pass parser to waveform widget but don't load all signals
             waveformWidget->setVcdData(vcdParser);
@@ -2363,6 +2699,81 @@ void MainWindow::loadVcdFile(const QString &filename)
         } });
 
     watcher->setFuture(parseFuture);
+}
+
+QString MainWindow::findRtlDirectory(const QString &vcdFile)
+{
+    QFileInfo vcdInfo(vcdFile);
+    QDir vcdDir = vcdInfo.dir();
+    
+    // Check for common RTL directory names
+    QStringList rtlDirs = {"rtl", "RTL", "src", "source", "sources", "verilog", "sv"};
+    
+    for (const QString &dirName : rtlDirs) {
+        if (vcdDir.exists(dirName)) {
+            return vcdDir.filePath(dirName);
+        }
+    }
+    
+    // Check if current directory has RTL files
+    QStringList rtlFilters = {"*.v", "*.sv"};
+    if (!vcdDir.entryList(rtlFilters, QDir::Files).isEmpty()) {
+        return vcdDir.path();
+    }
+    
+    return "";
+}
+
+bool MainWindow::runVcdPortMapper(const QString &inputVcd, const QString &outputVcd, const QString &rtlDir)
+{
+    // Get the path to the Python script
+    QString pythonScript = QCoreApplication::applicationDirPath() + "/vcd_port_mapper.py";
+    
+    // If script doesn't exist in application dir, try current dir
+    if (!QFile::exists(pythonScript)) {
+        pythonScript = "vcd_port_mapper.py";
+    }
+    
+    if (!QFile::exists(pythonScript)) {
+        qDebug() << "VCD port mapper script not found:" << pythonScript;
+        return false;
+    }
+    
+    // Prepare the command
+    QStringList arguments;
+    arguments << pythonScript << inputVcd << "-o" << outputVcd << "-r" << rtlDir;
+    
+    QProcess process;
+    process.start("python", arguments);
+    
+    if (!process.waitForStarted()) {
+        qDebug() << "Failed to start VCD port mapper";
+        return false;
+    }
+    
+    if (!process.waitForFinished(30000)) { // 30 second timeout
+        qDebug() << "VCD port mapper timed out";
+        return false;
+    }
+    
+    if (process.exitCode() != 0) {
+        qDebug() << "VCD port mapper failed:" << process.readAllStandardError();
+        return false;
+    }
+    
+    qDebug() << "VCD port mapper completed successfully";
+    return true;
+}
+
+// Add the RTL processing functions:
+bool MainWindow::processVcdWithRtl(const QString &vcdFile)
+{
+    QString rtlDir = findRtlDirectory(vcdFile);
+    if (rtlDir.isEmpty()) {
+        return false;
+    }
+    
+    return runVcdPortMapper(vcdFile, tempVcdFilePath, rtlDir);
 }
 
 void MainWindow::zoomIn()
@@ -2463,48 +2874,115 @@ void MainWindow::updateBusFormatActions()
     }
 }
 
-// In setupNavigationControls() method, replace the connection:
 void MainWindow::setupNavigationControls()
 {
     // Create navigation controls
     QWidget *navWidget = new QWidget();
     QHBoxLayout *navLayout = new QHBoxLayout(navWidget);
     navLayout->setContentsMargins(5, 0, 5, 0);
-    
+    navLayout->setSpacing(3); // Reduced spacing between widgets
+
     QLabel *navLabel = new QLabel("Navigate:");
     navigationModeCombo = new QComboBox();
-    navigationModeCombo->addItem("Value Change");
-    navigationModeCombo->addItem("Signal Rise");
-    navigationModeCombo->addItem("Signal Fall"); 
-    navigationModeCombo->addItem("X Values");
-    navigationModeCombo->addItem("Z Values");
+    QFont boldFont;
+    boldFont.setWeight(QFont::Bold);
+
+    navigationModeCombo->addItem("⇄");
+    navigationModeCombo->addItem("↱");
+    navigationModeCombo->addItem("↳"); 
+
+    // Set the font for each item
+    navigationModeCombo->setItemData(0, boldFont, Qt::FontRole);
+    navigationModeCombo->setItemData(1, boldFont, Qt::FontRole);
+    navigationModeCombo->setItemData(2, boldFont, Qt::FontRole);
     
-    prevValueButton = new QPushButton("◀ Prev");
-    nextValueButton = new QPushButton("Next ▶");
+    // Make combo box smaller
+    navigationModeCombo->setMaximumWidth(60);
+    navigationModeCombo->setMaximumHeight(22);
+
+    // Create smaller prev/next buttons
+    prevValueButton = new QPushButton("◀");
+    nextValueButton = new QPushButton("▶");
     
+    // Set smaller button sizes
+    prevValueButton->setFixedSize(22, 22);
+    nextValueButton->setFixedSize(22, 22);
+    
+    // Set smaller font for buttons
+    QFont smallFont = prevValueButton->font();
+    smallFont.setPointSize(8);
+    prevValueButton->setFont(smallFont);
+    nextValueButton->setFont(smallFont);
+
     prevValueButton->setEnabled(false);
     nextValueButton->setEnabled(false);
+
+    // Create time input field
+    QLabel *timeLabel = new QLabel("Time:");
+    QLineEdit *timeInput = new QLineEdit();
     
+    // Set initial placeholder with current time (start with 0)
+    timeInput->setPlaceholderText("Time: 0");
+    
+    timeInput->setMaximumWidth(80); // Slightly wider to fit "Time: 1234"
+    timeInput->setMaximumHeight(22);
+    
+    // Set validator to accept only numbers
+    QIntValidator *validator = new QIntValidator(0, 1000000000, this);
+    timeInput->setValidator(validator);
+
+    // Connect time input - when Enter is pressed, move cursor to that time
+    connect(timeInput, &QLineEdit::returnPressed, this, [this, timeInput]() {
+        bool ok;
+        int time = timeInput->text().toInt(&ok);
+        if (ok) {
+            // Move cursor to the specified time
+            waveformWidget->navigateToTime(time);
+            // Update the time display
+            updateTimeDisplay(time);
+            // Clear the input field and immediately update placeholder
+            timeInput->clear();
+            timeInput->clearFocus(); // Remove focus so placeholder is visible
+            
+            // Force update the placeholder with the new time immediately
+            QString timeText = QString("Time: %1").arg(time);
+            timeInput->setPlaceholderText(timeText);
+        }
+    });
+
+    // Connect to update the placeholder text with YELLOW TIMELINE CURSOR time
+    connect(waveformWidget, &WaveformWidget::cursorTimeChanged, this, [timeInput](int time) {
+        // Always update the placeholder to match the cursor time
+        QString timeText = QString("Time: %1").arg(time);
+        timeInput->setPlaceholderText(timeText);
+    });
+
     // FIX: Use simpler connection syntax
     connect(navigationModeCombo, SIGNAL(currentIndexChanged(int)),
             this, SLOT(onNavigationModeChanged(int)));
     connect(prevValueButton, &QPushButton::clicked, this, &MainWindow::onPrevValueClicked);
     connect(nextValueButton, &QPushButton::clicked, this, &MainWindow::onNextValueClicked);
-    
+
     navLayout->addWidget(navLabel);
     navLayout->addWidget(navigationModeCombo);
     navLayout->addWidget(prevValueButton);
     navLayout->addWidget(nextValueButton);
+    navLayout->addWidget(timeLabel);
+    navLayout->addWidget(timeInput);
     navLayout->addStretch();
-    
+
     // Add to main toolbar
     mainToolBar->addWidget(navWidget);
 }
+
+
 void MainWindow::onNavigationModeChanged(int index)
 {
-    // Update waveform widget navigation mode
-    waveformWidget->setNavigationMode(static_cast<WaveformWidget::NavigationMode>(index));
-    updateNavigationButtons();
+    // Only 3 modes now: 0=ValueChange, 1=SignalRise, 2=SignalFall
+    if (index >= 0 && index <= 2) {
+        waveformWidget->setNavigationMode(static_cast<WaveformWidget::NavigationMode>(index));
+        updateNavigationButtons();
+    }
 }
 
 void MainWindow::onPrevValueClicked()
@@ -2529,6 +3007,8 @@ void MainWindow::updateNavigationButtons()
 
         prevValueButton->setEnabled(hasPrev);
         nextValueButton->setEnabled(hasNext);
+        
+        qDebug() << "Navigation buttons - HasPrev:" << hasPrev << "HasNext:" << hasNext;
     } else {
         prevValueButton->setEnabled(false);
         nextValueButton->setEnabled(false);
@@ -3558,34 +4038,24 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
     if (cursorX < 0 || cursorX > (width() - waveformStartX))
         return;
 
-    // Draw vertical cursor line through entire height (including pinned areas)
-    painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
-    painter.drawLine(waveformStartX + cursorX, 0, waveformStartX + cursorX, height());
-
-    // Draw cursor time label at top (in pinned timeline area)
-    painter.setPen(QPen(Qt::white));
-    QString timeText = QString("Time: %1").arg(cursorTime);
-
-    // Calculate text width to make rectangle dynamic
-    int textWidth = painter.fontMetrics().horizontalAdvance(timeText) + 10; // +10 for padding
-    int textHeight = 20;
-
-    // Ensure the rectangle doesn't go off-screen to the right
-    int maxX = width() - textWidth - 5; // 5px margin from right edge
-    int labelX = waveformStartX + cursorX + 5;
-
-    // If the label would go off-screen, position it to the left of the cursor
-    if (labelX + textWidth > width())
-    {
-        labelX = waveformStartX + cursorX - textWidth - 5;
+    // Calculate the height based on actual signals (stop at last signal)
+    int totalSignalsHeight = timeMarkersHeight; // Start below timeline
+    
+    for (int i = 0; i < displayItems.size(); i++) {
+        const auto &item = displayItems[i];
+        int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
+        totalSignalsHeight += itemHeight;
     }
+    
+    // Add some padding at the bottom
+    totalSignalsHeight += 10;
+    
+    // Don't draw beyond the actual content height
+    int drawHeight = qMin(totalSignalsHeight, height());
 
-    // Also ensure it doesn't go off-screen to the left
-    labelX = qMax(waveformStartX + 5, labelX);
-
-    QRect timeRect(labelX, 5, textWidth, textHeight);
-    painter.fillRect(timeRect, QColor(0, 0, 0, 200));
-    painter.drawText(timeRect, Qt::AlignCenter, timeText);
+    // Draw vertical cursor line from timeline area to the last signal
+    painter.setPen(QPen(Qt::yellow, 2, Qt::DashLine));
+    painter.drawLine(waveformStartX + cursorX, timeMarkersHeight, waveformStartX + cursorX, drawHeight);
 }
 
 void WaveformWidget::drawSignals(QPainter &painter)
@@ -4961,18 +5431,22 @@ void WaveformWidget::resetNavigationForCurrentSignal()
     if (currentlyNavigatedSignal.isEmpty())
         return;
         
-    // Reset the current index based on cursor position
+    // Update the current index based on cursor position
     int newIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
     signalCurrentEventIndex[currentlyNavigatedSignal] = newIndex;
     currentEventIndex = newIndex;
+    
+    qDebug() << "Reset navigation: Signal" << currentlyNavigatedSignal 
+             << "Cursor time:" << cursorTime 
+             << "New index:" << newIndex;
 }
 
 void WaveformWidget::updateCursorTime(const QPoint &pos)
 {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
 
-    // Only set cursor if click is in the timeline area (top part)
-    if (pos.x() < waveformStartX || pos.y() >= timeMarkersHeight)
+    // Only set cursor if click is in the timeline area (top part) AND we have signals
+    if ((pos.x() < waveformStartX || pos.y() >= timeMarkersHeight) || displayItems.isEmpty())
     {
         return;
     }
@@ -4981,6 +5455,7 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
     int clickXInWaveform = pos.x() - waveformStartX;
 
     // Convert the click position to time, accounting for current zoom and scroll
+    int oldCursorTime = cursorTime;
     cursorTime = xToTime(clickXInWaveform);
 
     showCursor = true;
@@ -4988,6 +5463,11 @@ void WaveformWidget::updateCursorTime(const QPoint &pos)
     // Reset navigation for current signal when cursor moves
     if (!currentlyNavigatedSignal.isEmpty()) {
         resetNavigationForCurrentSignal();
+    }
+    
+    // Emit cursor time change if it actually changed
+    if (cursorTime != oldCursorTime) {
+        emit cursorTimeChanged(cursorTime);
     }
     
     update();
@@ -5397,61 +5877,64 @@ void WaveformWidget::ensureSignalLoaded(const QString &fullName) // CHANGE: para
     }
 }
 
+
 void WaveformWidget::setNavigationMode(NavigationMode mode)
 {
     navigationMode = mode;
     
-    // Clear cached events when navigation mode changes
+    // Clear ALL cached events when navigation mode changes
     signalEventTimestamps.clear();
     signalCurrentEventIndex.clear();
+    currentlyNavigatedSignal.clear();
+    currentEventIndex = -1;
     
-    // Update events for currently selected signal
+    // Force update events immediately when mode changes
     if (!selectedItems.isEmpty()) {
         updateEventList();
     }
-    else {
-        currentEventIndex = -1;
-    }
+    
+    // Emit signal to update button states
+    emit timeChanged(cursorTime);
 }
 
 void WaveformWidget::navigateToTime(int targetTime)
 {
+    if (!vcdParser) return;
+    
+    // Ensure the time is within valid range
+    int endTime = vcdParser->getEndTime();
+    targetTime = qMax(0, qMin(targetTime, endTime));
+    
+    int oldCursorTime = cursorTime;
+    
+    // Set cursor time
+    cursorTime = targetTime;
+    showCursor = true;
+    
     // Center the view on the target time
     int viewportWidth = width() - signalNamesWidth - valuesColumnWidth;
     int targetX = timeToX(targetTime);
     timeOffset = qMax(0, targetX - viewportWidth / 2);
-
-    // Update cursor
-    cursorTime = targetTime;
-    showCursor = true;
-
+    
+    // Reset navigation for current signal
+    if (!currentlyNavigatedSignal.isEmpty()) {
+        resetNavigationForCurrentSignal();
+    }
+    
+    // Emit cursor time change if it actually changed
+    if (cursorTime != oldCursorTime) {
+        emit cursorTimeChanged(cursorTime);  // ADD THIS LINE
+    }
+    
     updateScrollBar();
     update();
-    emit timeChanged(cursorTime);
 }
 
 
 void WaveformWidget::navigateToPreviousEvent()
 {
-    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
-        return;
-
-    QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
-    int& currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
+    qDebug() << "=== PREVIOUS BUTTON CLICKED ===";
     
-    if (events.isEmpty() || currentIndex <= 0)
-        return;
-
-    currentIndex--;
-    int targetTime = events[currentIndex];
-    currentEventIndex = currentIndex;
-
-    // Center the view on the target time
-    navigateToTime(targetTime);
-}
-
-void WaveformWidget::navigateToNextEvent()
-{
     if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
         return;
 
@@ -5461,9 +5944,63 @@ void WaveformWidget::navigateToNextEvent()
     if (events.isEmpty())
         return;
 
-    // If no current index set, find the first event after cursor
+    // If no current index set, find where we are based on cursor time
     if (currentIndex == -1) {
         currentIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
+        qDebug() << "Setting initial current index to:" << currentIndex;
+    }
+    
+    // If we're before the first event, go to the first event
+    if (currentIndex == -1) {
+        currentIndex = 0;
+        int targetTime = events[currentIndex];
+        currentEventIndex = currentIndex;
+
+        qDebug() << "Previous: Before first event, going to first event at index" << currentIndex << "Time:" << targetTime;
+        navigateToTime(targetTime);
+        return;
+    }
+    
+    // If we're at the beginning, don't move
+    if (currentIndex <= 0)
+        return;
+
+    currentIndex--;
+    int targetTime = events[currentIndex];
+    currentEventIndex = currentIndex;
+
+    qDebug() << "Previous: Index" << currentIndex << "Time:" << targetTime;
+    navigateToTime(targetTime);
+}
+
+void WaveformWidget::navigateToNextEvent()
+{
+    qDebug() << "=== NEXT BUTTON CLICKED ===";
+    
+    if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
+        return;
+
+    QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
+    int& currentIndex = signalCurrentEventIndex[currentlyNavigatedSignal];
+    
+    if (events.isEmpty())
+        return;
+
+    // If no current index set, find where we are based on cursor time
+    if (currentIndex == -1) {
+        currentIndex = findEventIndexForTime(cursorTime, currentlyNavigatedSignal);
+        qDebug() << "Setting initial current index to:" << currentIndex;
+    }
+    
+    // If we're before the first event, go to the first event
+    if (currentIndex == -1) {
+        currentIndex = 0;
+        int targetTime = events[currentIndex];
+        currentEventIndex = currentIndex;
+
+        qDebug() << "Next: Before first event, going to first event at index" << currentIndex << "Time:" << targetTime;
+        navigateToTime(targetTime);
+        return;
     }
     
     // If we're at the end, don't move
@@ -5474,9 +6011,10 @@ void WaveformWidget::navigateToNextEvent()
     int targetTime = events[currentIndex];
     currentEventIndex = currentIndex;
 
-    // Center the view on the target time
+    qDebug() << "Next: Index" << currentIndex << "Time:" << targetTime;
     navigateToTime(targetTime);
 }
+
 bool WaveformWidget::hasPreviousEvent() const
 {
     if (currentlyNavigatedSignal.isEmpty() || !signalEventTimestamps.contains(currentlyNavigatedSignal))
@@ -5485,7 +6023,17 @@ bool WaveformWidget::hasPreviousEvent() const
     const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
     int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
     
-    return !events.isEmpty() && currentIndex > 0;
+    if (events.isEmpty())
+        return false;
+    
+    // If we're before the first event, no previous available
+    if (currentIndex == -1) {
+        return false;
+    }
+    
+    // If we're at the first event but there are multiple events, we can go to previous (which would be before first)
+    // OR if we're after the first event, we can go to previous event
+    return currentIndex > 0;
 }
 
 bool WaveformWidget::hasNextEvent() const
@@ -5496,8 +6044,16 @@ bool WaveformWidget::hasNextEvent() const
     const QVector<int>& events = signalEventTimestamps[currentlyNavigatedSignal];
     int currentIndex = signalCurrentEventIndex.value(currentlyNavigatedSignal, -1);
     
-    return !events.isEmpty() && 
-           (currentIndex < events.size() - 1 || currentIndex == -1);
+    if (events.isEmpty())
+        return false;
+    
+    // If we're before the first event, we can go to the first event
+    if (currentIndex == -1) {
+        return true;
+    }
+    
+    // If we're at or before the last event, we can go next
+    return currentIndex < events.size() - 1;
 }
 
 void WaveformWidget::updateEventList()
@@ -5519,20 +6075,12 @@ void WaveformWidget::updateEventList()
     if (changes.isEmpty())
         return;
 
-    // Only recompute events if we don't have them or if navigation mode changed
-    bool needsUpdate = !signalEventTimestamps.contains(signal.fullName);
-    
-    if (!needsUpdate) {
-        // Update current index based on cursor position for this signal
-        int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
-        signalCurrentEventIndex[signal.fullName] = newIndex;
-        currentEventIndex = newIndex;
-        return;
-    }
-
-    // Collect events based on navigation mode for this specific signal
+    // Always recompute events to ensure they're up to date
     QVector<int> events;
+    
     QString prevValue;
+    
+    qDebug() << "=== PROCESSING EVENTS FOR MODE:" << navigationMode << "===";
     
     for (int i = 0; i < changes.size(); i++)
     {
@@ -5542,24 +6090,28 @@ void WaveformWidget::updateEventList()
         switch (navigationMode)
         {
         case ValueChange:
-            includeEvent = (i > 0); // All changes except first
+            includeEvent = true;
+            qDebug() << "  ValueChange: including time" << change.timestamp << "value:" << change.value;
             break;
 
         case SignalRise:
-            includeEvent = (prevValue == "0" && change.value == "1");
+            if (i > 0) {
+                includeEvent = (prevValue == "0" && change.value == "1");
+                if (includeEvent) {
+                    qDebug() << "  SignalRise: including time" << change.timestamp << "prev:" << prevValue << "curr:" << change.value;
+                }
+            }
             break;
 
         case SignalFall:
-            includeEvent = (prevValue == "1" && change.value == "0");
+            if (i > 0) {
+                includeEvent = (prevValue == "1" && change.value == "0");
+                if (includeEvent) {
+                    qDebug() << "  SignalFall: including time" << change.timestamp << "prev:" << prevValue << "curr:" << change.value;
+                }
+            }
             break;
-
-        case XValues:
-            includeEvent = (change.value.toLower() == "x");
-            break;
-
-        case ZValues:
-            includeEvent = (change.value.toLower() == "z");
-            break;
+        
         }
 
         if (includeEvent)
@@ -5577,6 +6129,34 @@ void WaveformWidget::updateEventList()
     int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
     signalCurrentEventIndex[signal.fullName] = newIndex;
     currentEventIndex = newIndex;
+    
+    qDebug() << "=== NAVIGATION SUMMARY ===";
+    qDebug() << "Signal:" << signal.fullName;
+    qDebug() << "Mode:" << navigationMode;
+    qDebug() << "Total changes:" << changes.size();
+    qDebug() << "Navigation events found:" << events.size();
+    qDebug() << "Cursor time:" << cursorTime;
+    qDebug() << "Current index:" << newIndex;
+    qDebug() << "Events list:" << events;
+    qDebug() << "Button states - HasPrev:" << hasPreviousEvent() << "HasNext:" << hasNextEvent();
+    qDebug() << "=== END SUMMARY ===";
+}
+
+void WaveformWidget::forceNavigationUpdate()
+{
+    // Clear all navigation state
+    signalEventTimestamps.clear();
+    signalCurrentEventIndex.clear();
+    currentlyNavigatedSignal.clear();
+    currentEventIndex = -1;
+    
+    // Force update if we have selected signals
+    if (!selectedItems.isEmpty()) {
+        updateEventList();
+    }
+    
+    update();
+    emit timeChanged(cursorTime);
 }
 
 int WaveformWidget::findEventIndexForTime(int time, const QString& signalFullName) const
@@ -5588,18 +6168,26 @@ int WaveformWidget::findEventIndexForTime(int time, const QString& signalFullNam
     
     if (events.isEmpty())
         return -1;
-        
-    // Find the first event that is >= the given time
-    for (int i = 0; i < events.size(); i++)
-    {
-        if (events[i] >= time)
-        {
+    
+    // If we're before the first event, return -1 to indicate we're before any event
+    if (time < events.first()) {
+        return -1;
+    }
+    
+    // If we're after the last event, return the last event index
+    if (time > events.last()) {
+        return events.size() - 1;
+    }
+    
+    // Find the event that is closest to but not greater than the current time
+    for (int i = events.size() - 1; i >= 0; i--) {
+        if (events[i] <= time) {
             return i;
         }
     }
     
-    // If no event found after the time, return the last event
-    return events.size() - 1;
+    // Should never reach here, but return -1 if we do
+    return -1;
 }
 
 // Overload for currently navigated signal
@@ -5633,24 +6221,8 @@ void WaveformWidget::selectSignalAtPosition(const QPoint &pos)
         selectedItems.insert(itemIndex);
         lastSelectedItem = itemIndex;
 
-        // Update navigation for the newly selected signal
-        const VCDSignal &signal = getSignalFromItem(itemIndex);
-        
-        // If switching to a different signal, reset its navigation state based on cursor
-        if (currentlyNavigatedSignal != signal.fullName) {
-            currentlyNavigatedSignal = signal.fullName;
-            
-            // Force update of event list to recompute for new signal
-            if (signalEventTimestamps.contains(signal.fullName)) {
-                // Just update the current index based on cursor
-                int newIndex = findEventIndexForTime(cursorTime, signal.fullName);
-                signalCurrentEventIndex[signal.fullName] = newIndex;
-                currentEventIndex = newIndex;
-            } else {
-                // Compute events for this signal
-                updateEventList();
-            }
-        }
+        // Force navigation update for the newly selected signal
+        forceNavigationUpdate();
 
         update();
         emit itemSelected(itemIndex);
@@ -5670,6 +6242,7 @@ void WaveformWidget::selectSignalAtPosition(const QPoint &pos)
     }
 }
 
+
 void WaveformWidget::handleWaveformClick(const QPoint &pos)
 {
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
@@ -5677,24 +6250,40 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
     // Check if click is in waveform area (not in names or values columns)
     if (pos.x() >= waveformStartX && pos.y() >= timeMarkersHeight)
     {
-        // Store old cursor time to detect changes
-        int oldCursorTime = cursorTime;
-        
-        // Also set cursor time
-        int clickXInWaveform = pos.x() - waveformStartX;
-        cursorTime = xToTime(clickXInWaveform);
-        showCursor = true;
-
-        // Try to select signal at this position
-        selectSignalAtPosition(pos);
-
-        // If cursor time changed and we have a selected signal, update navigation
-        if (cursorTime != oldCursorTime && !currentlyNavigatedSignal.isEmpty()) {
-            resetNavigationForCurrentSignal();
+        // Calculate the maximum Y position where signals exist
+        int maxSignalY = timeMarkersHeight;
+        for (int i = 0; i < displayItems.size(); i++) {
+            const auto &item = displayItems[i];
+            int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
+            maxSignalY += itemHeight;
         }
+        
+        // Add some padding
+        maxSignalY += 10;
+        
+        // Only process clicks that are within the signal area (not empty space below)
+        if (pos.y() <= maxSignalY) {
+            // Store old cursor time to detect changes
+            int oldCursorTime = cursorTime;
+            
+            // Also set cursor time
+            int clickXInWaveform = pos.x() - waveformStartX;
+            cursorTime = xToTime(clickXInWaveform);
+            showCursor = true;
 
-        update();
-        emit timeChanged(cursorTime);
+            // Try to select signal at this position
+            selectSignalAtPosition(pos);
+
+            // If cursor time changed and we have a selected signal, update navigation
+            if (cursorTime != oldCursorTime && !currentlyNavigatedSignal.isEmpty()) {
+                resetNavigationForCurrentSignal();
+                
+                // Emit cursor time change
+                emit cursorTimeChanged(cursorTime);
+            }
+
+            update();
+        }
     }
 }
 # File: CMakeLists.txt
@@ -5786,3 +6375,5 @@ install(TARGETS OWV
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+configure_file(vcd_port_mapper.py ${CMAKE_CURRENT_BINARY_DIR}/vcd_port_mapper.py COPYONLY)

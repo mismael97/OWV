@@ -25,11 +25,11 @@ $var reg 4 ( bus_y [3:0] $end
 $var reg 1 ) signle_y $end
 
 $scope module uut $end
-$var input 4 ! a [3:0] $end
-$var input 4 " b [3:0] $end
-$var input 1 # cin $end
-$var output 4 $ sum [3:0] $end
-$var output 1 % cout $end
+$var reg 4 ! a [3:0] $end
+$var reg 4 " b [3:0] $end
+$var reg 1 # cin $end
+$var reg 4 $ sum [3:0] $end
+$var reg 1 % cout $end
 $var reg 3 * empty [2:0] $end
 $upscope $end
 
