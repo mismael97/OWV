@@ -18,14 +18,23 @@
 #include <QKeyEvent>
 #include <QtConcurrent>
 #include <QMenuBar>
+#include <QSettings>
+#include <QListWidget>
+#include <QDialogButtonBox>
 
+// In the constructor, initialize history
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), vcdParser(new VCDParser(this)),
-      rtlProcessedForSignalDialog(false)  // Initialize as false
+      rtlProcessedForSignalDialog(false)
 {
     qRegisterMetaType<VCDSignal>("VCDSignal");
     setWindowTitle("VCD Wave Viewer");
     setMinimumSize(1200, 800);
+
+    // NEW: Setup history file path
+    historyFilePath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(historyFilePath);
+    historyFilePath += "/vcd_history.ini";
 
     createActions();
     setupUI();
@@ -34,8 +43,170 @@ MainWindow::MainWindow(QWidget *parent)
     setupNavigationControls();
     createStatusBar();
 
-    // Don't load default VCD file - let user choose
-    statusLabel->setText("Use File → Open to load a VCD file");
+    // NEW: Load history and show startup dialog
+    loadHistory();
+    showStartupDialog();
+}
+
+void MainWindow::loadHistory()
+{
+    QSettings settings(historyFilePath, QSettings::IniFormat);
+    recentFiles = settings.value("recentFiles").toStringList();
+    
+    // Remove non-existent files
+    for (int i = recentFiles.size() - 1; i >= 0; --i) {
+        if (!QFile::exists(recentFiles[i])) {
+            recentFiles.removeAt(i);
+        }
+    }
+    
+    saveHistory(); // Save cleaned list
+    updateRecentMenu();
+}
+
+void MainWindow::saveHistory()
+{
+    QSettings settings(historyFilePath, QSettings::IniFormat);
+    settings.setValue("recentFiles", recentFiles);
+}
+
+// NEW: Add file to history
+void MainWindow::addToHistory(const QString &filePath)
+{
+    // Remove if already in list
+    recentFiles.removeAll(filePath);
+    
+    // Add to front
+    recentFiles.prepend(filePath);
+    
+    // Limit to max recent files
+    while (recentFiles.size() > MAX_RECENT_FILES) {
+        recentFiles.removeLast();
+    }
+    
+    saveHistory();
+    updateRecentMenu();
+}
+
+// NEW: Update the Recent menu
+void MainWindow::updateRecentMenu()
+{
+    if (!recentMenu) return;
+    
+    // Clear existing actions
+    recentMenu->clear();
+    
+    if (recentFiles.isEmpty()) {
+        QAction *noRecentAction = new QAction("No recent files", this);
+        noRecentAction->setEnabled(false);
+        recentMenu->addAction(noRecentAction);
+    } else {
+        for (const QString &filePath : recentFiles) {
+            QFileInfo fileInfo(filePath);
+            QString displayName = fileInfo.fileName();
+            QString fullPath = fileInfo.absoluteFilePath();
+            
+            // Truncate if too long
+            if (displayName.length() > 50) {
+                displayName = displayName.left(47) + "...";
+            }
+            
+            QAction *recentAction = new QAction(displayName, this);
+            recentAction->setData(fullPath);
+            recentAction->setToolTip(fullPath);
+            
+            connect(recentAction, &QAction::triggered, this, [this, fullPath]() {
+                loadVcdFile(fullPath);
+            });
+            
+            recentMenu->addAction(recentAction);
+        }
+        
+        // Add separator and clear history action
+        recentMenu->addSeparator();
+        QAction *clearHistoryAction = new QAction("Clear History", this);
+        connect(clearHistoryAction, &QAction::triggered, this, [this]() {
+            recentFiles.clear();
+            saveHistory();
+            updateRecentMenu();
+        });
+        recentMenu->addAction(clearHistoryAction);
+    }
+}
+
+// NEW: Show startup dialog with recent files
+void MainWindow::showStartupDialog()
+{
+    if (recentFiles.isEmpty()) {
+        statusLabel->setText("Use File → Open to load a VCD file");
+        return;
+    }
+    
+    // Create startup dialog
+    QDialog startupDialog(this);
+    startupDialog.setWindowTitle("VCD Wave Viewer - Recent Files");
+    startupDialog.setMinimumWidth(500);
+    
+    QVBoxLayout *layout = new QVBoxLayout(&startupDialog);
+    
+    QLabel *titleLabel = new QLabel("Open Recent VCD File");
+    titleLabel->setStyleSheet("font-size: 14pt; font-weight: bold; margin: 10px;");
+    layout->addWidget(titleLabel);
+    
+    QListWidget *fileList = new QListWidget();
+    fileList->setAlternatingRowColors(true);
+    
+    for (const QString &filePath : recentFiles) {
+        QFileInfo fileInfo(filePath);
+        QString displayText = QString("%1\n%2")
+            .arg(fileInfo.fileName())
+            .arg(fileInfo.absolutePath());
+        
+        QListWidgetItem *item = new QListWidgetItem(displayText);
+        item->setData(Qt::UserRole, filePath);
+        item->setToolTip(filePath);
+        fileList->addItem(item);
+    }
+    
+    layout->addWidget(fileList);
+    
+    QHBoxLayout *buttonLayout = new QHBoxLayout();
+    QPushButton *openButton = new QPushButton("Open Selected");
+    QPushButton *browseButton = new QPushButton("Browse...");
+    QPushButton *cancelButton = new QPushButton("Cancel");
+    
+    buttonLayout->addWidget(openButton);
+    buttonLayout->addWidget(browseButton);
+    buttonLayout->addWidget(cancelButton);
+    layout->addLayout(buttonLayout);
+    
+    // Connect signals
+    connect(openButton, &QPushButton::clicked, &startupDialog, [&]() {
+        QListWidgetItem *currentItem = fileList->currentItem();
+        if (currentItem) {
+            QString filePath = currentItem->data(Qt::UserRole).toString();
+            startupDialog.accept();
+            loadVcdFile(filePath);
+        }
+    });
+    
+    connect(browseButton, &QPushButton::clicked, &startupDialog, [&]() {
+        startupDialog.accept();
+        openFile();
+    });
+    
+    connect(cancelButton, &QPushButton::clicked, &startupDialog, &QDialog::reject);
+    
+    connect(fileList, &QListWidget::itemDoubleClicked, &startupDialog, [&](QListWidgetItem *item) {
+        QString filePath = item->data(Qt::UserRole).toString();
+        startupDialog.accept();
+        loadVcdFile(filePath);
+    });
+    
+    // Show dialog
+    if (startupDialog.exec() == QDialog::Rejected) {
+        statusLabel->setText("Use File → Open to load a VCD file");
+    }
 }
 
 MainWindow::~MainWindow()
@@ -144,6 +315,10 @@ void MainWindow::createMenuBar()
     // File menu
     QMenu *fileMenu = menuBar->addMenu("File");
     fileMenu->addAction(openAction);
+    
+    // NEW: Recent files submenu
+    recentMenu = fileMenu->addMenu("Recent");  // ADD THIS - make sure to declare recentMenu in .h
+    fileMenu->addSeparator();
 
     // Edit menu (empty for now)
     QMenu *editMenu = menuBar->addMenu("Edit");
@@ -472,6 +647,9 @@ void MainWindow::openFile()
 
 void MainWindow::loadVcdFile(const QString &filename)
 {
+    // NEW: Add to history
+    addToHistory(filename);
+    
     // NEW: Clean up previous temp files when loading a new VCD file
     if (QFile::exists(tempVcdFilePathForSignalDialog)) {
         QFile::remove(tempVcdFilePathForSignalDialog);
@@ -530,6 +708,9 @@ void MainWindow::loadVcdFile(const QString &filename)
 
             // Clear any existing signals from previous file
             waveformWidget->setVisibleSignals(QList<VCDSignal>());
+            
+            // NEW: Update window title to show current file
+            setWindowTitle(QString("VCD Wave Viewer - %1").arg(QFileInfo(vcdToLoad).fileName()));
         } else {
             QMessageBox::critical(this, "Error",
                                   "Failed to parse VCD file: " + vcdParser->getError());

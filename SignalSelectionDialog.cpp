@@ -644,134 +644,98 @@ void SignalSelectionDialog::selectAll()
 {
     signalTree->blockSignals(true);
 
-    if (currentFilter.isEmpty())
+    // NEW: Only select currently displayed signals (filtered + searched)
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it)
     {
-        // Original behavior when no search filter
-        for (const auto &signal : allSignals)
+        QTreeWidgetItem *item = *it;
+        QVariant data = item->data(0, Qt::UserRole);
+
+        if (data.canConvert<VCDSignal>())
         {
+            VCDSignal signal = data.value<VCDSignal>();
+            // Only select if it's not already visible in waveform
             if (!visibleSignalIdentifiers.contains(signal.fullName))
             {
                 selectedSignals.insert(signal.fullName);
-            }
-        }
-
-        // Update all tree items
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it)
-        {
-            QTreeWidgetItem *item = *it;
-            QVariant data = item->data(0, Qt::UserRole);
-
-            if (data.canConvert<VCDSignal>())
-            {
-                VCDSignal signal = data.value<VCDSignal>();
-                if (!visibleSignalIdentifiers.contains(signal.fullName))
-                {
-                    item->setCheckState(0, Qt::Checked);
-                }
-            }
-            else if (data.toString() != "PLACEHOLDER")
-            {
-                // Scope item - check it and update its state
-                item->setCheckState(0, Qt::Checked);
-                updateScopeCheckState(item);
-            }
-            ++it;
-        }
-    }
-    else
-    {
-        // NEW: When search is active, only select currently displayed signals
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it)
-        {
-            QTreeWidgetItem *item = *it;
-            QVariant data = item->data(0, Qt::UserRole);
-
-            if (data.canConvert<VCDSignal>())
-            {
-                VCDSignal signal = data.value<VCDSignal>();
-                selectedSignals.insert(signal.fullName);
                 item->setCheckState(0, Qt::Checked);
             }
-            ++it;
         }
-
-        // Update scope check states for search results
-        for (int i = 0; i < signalTree->topLevelItemCount(); ++i)
+        else if (data.toString() != "PLACEHOLDER" && !data.toString().isEmpty())
         {
-            QTreeWidgetItem *topLevelItem = signalTree->topLevelItem(i);
-            updateScopeCheckState(topLevelItem);
+            // Scope item - check it and update its state
+            item->setCheckState(0, Qt::Checked);
+            updateScopeCheckState(item);
         }
+        ++it;
     }
 
     signalTree->blockSignals(false);
-    statusLabel->setText(QString("%1 signal(s) selected").arg(selectedSignals.size()));
+    
+    // Update status with only the newly selected signals from current view
+    int displayedSelectedCount = 0;
+    QTreeWidgetItemIterator countIt(signalTree);
+    while (*countIt)
+    {
+        QTreeWidgetItem *item = *countIt;
+        QVariant data = item->data(0, Qt::UserRole);
+        if (data.canConvert<VCDSignal>())
+        {
+            VCDSignal signal = data.value<VCDSignal>();
+            if (selectedSignals.contains(signal.fullName) && !visibleSignalIdentifiers.contains(signal.fullName))
+            {
+                displayedSelectedCount++;
+            }
+        }
+        ++countIt;
+    }
+    
+    statusLabel->setText(QString("%1 signal(s) selected from current view").arg(displayedSelectedCount));
 }
 
 void SignalSelectionDialog::deselectAll()
 {
     signalTree->blockSignals(true);
 
-    if (currentFilter.isEmpty())
+    // NEW: Only deselect currently displayed signals (filtered + searched)
+    QTreeWidgetItemIterator it(signalTree);
+    while (*it)
     {
-        // Original behavior when no search filter
-        selectedSignals.clear();
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it)
-        {
-            QTreeWidgetItem *item = *it;
-            QVariant data = item->data(0, Qt::UserRole);
+        QTreeWidgetItem *item = *it;
+        QVariant data = item->data(0, Qt::UserRole);
 
-            if (data.canConvert<VCDSignal>())
-            {
-                item->setCheckState(0, Qt::Unchecked);
-            }
-            else if (data.toString() != "PLACEHOLDER")
-            {
-                // Scope item - uncheck it
-                item->setCheckState(0, Qt::Unchecked);
-            }
-            ++it;
-        }
-    }
-    else
-    {
-        // NEW: When search is active, only deselect currently displayed signals
-        QTreeWidgetItemIterator it(signalTree);
-        while (*it)
+        if (data.canConvert<VCDSignal>())
         {
-            QTreeWidgetItem *item = *it;
-            QVariant data = item->data(0, Qt::UserRole);
-
-            if (data.canConvert<VCDSignal>())
-            {
-                VCDSignal signal = data.value<VCDSignal>();
-                selectedSignals.remove(signal.fullName);
-                item->setCheckState(0, Qt::Unchecked);
-            }
-            ++it;
+            VCDSignal signal = data.value<VCDSignal>();
+            selectedSignals.remove(signal.fullName);
+            item->setCheckState(0, Qt::Unchecked);
         }
-
-        // Update scope check states for search results
-        for (int i = 0; i < signalTree->topLevelItemCount(); ++i)
+        else if (data.toString() != "PLACEHOLDER" && !data.toString().isEmpty())
         {
-            QTreeWidgetItem *topLevelItem = signalTree->topLevelItem(i);
-            updateScopeCheckState(topLevelItem);
+            // Scope item - uncheck it
+            item->setCheckState(0, Qt::Unchecked);
         }
+        ++it;
     }
 
     lastSelectedItem = nullptr;
     signalTree->blockSignals(false);
-
-    if (currentFilter.isEmpty())
+    
+    // Count how many signals were deselected from current view
+    int totalDisplayedSignals = 0;
+    QTreeWidgetItemIterator countIt(signalTree);
+    while (*countIt)
     {
-        statusLabel->setText("All signals deselected");
+        QTreeWidgetItem *item = *countIt;
+        QVariant data = item->data(0, Qt::UserRole);
+        if (data.canConvert<VCDSignal>())
+        {
+            totalDisplayedSignals++;
+        }
+        ++countIt;
     }
-    else
-    {
-        statusLabel->setText("All displayed signals deselected");
-    }
+    
+    statusLabel->setText(QString("Deselected all %1 signals from current view").arg(totalDisplayedSignals));
 }
 
 void SignalSelectionDialog::displaySearchResults(const QString &text, int matches, const QMap<QString, QVector<VCDSignal>> &matchingSignalsByScope)

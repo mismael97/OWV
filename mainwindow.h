@@ -71,6 +71,18 @@ private slots:
     void onNextValueClicked();
 
 private:
+    void loadHistory();
+    void saveHistory();
+    void addToHistory(const QString &filePath);
+    void updateRecentMenu();
+    void showStartupDialog();
+
+    QString historyFilePath;
+    QStringList recentFiles;
+    const int MAX_RECENT_FILES = 10;
+
+    QMenu *recentMenu; // ADD THIS
+
     QString currentVcdFilePath;
 
     // NEW: Track RTL processing state for signal dialog
@@ -80,7 +92,6 @@ private:
     bool processVcdWithRtl(const QString &vcdFile);
     QString findRtlDirectory(const QString &vcdFile);
     bool runVcdPortMapper(const QString &inputVcd, const QString &outputVcd, const QString &rtlDir);
-
 
     void showRtlDirectoryDialog();
     void createToolbarBelowMenu();
