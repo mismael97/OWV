@@ -1504,8 +1504,15 @@ bool SignalSelectionDialog::ensureRtlProcessedForPortFilter(const QString& filte
     }
     
     if (*rtlProcessed) {
-        qDebug() << "RTL already processed for signal dialog";
-        return true; // Already processed
+        qDebug() << "RTL already processed for signal dialog, using existing temp file";
+        
+        // Verify the temp file still exists
+        if (!tempVcdFilePath->isEmpty() && QFile::exists(*tempVcdFilePath)) {
+            return true; // Already processed and file exists
+        } else {
+            qDebug() << "Temp file missing, reprocessing RTL";
+            *rtlProcessed = false; // Reset flag if file is missing
+        }
     }
     
     // Check if RTL directory exists
@@ -1573,3 +1580,4 @@ bool SignalSelectionDialog::ensureRtlProcessedForPortFilter(const QString& filte
         return false;
     }
 }
+

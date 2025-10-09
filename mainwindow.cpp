@@ -21,7 +21,7 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), vcdParser(new VCDParser(this)),
-      rtlProcessedForSignalDialog(false)  // ADD THIS
+      rtlProcessedForSignalDialog(false)  // Initialize as false
 {
     qRegisterMetaType<VCDSignal>("VCDSignal");
     setWindowTitle("VCD Wave Viewer");
@@ -402,19 +402,19 @@ void MainWindow::showAddSignalsDialog()
         }
     }
 
-    // NEW: Clean up temp file if it was created for signal dialog
-    if (QFile::exists(tempVcdFilePathForSignalDialog)) {
-        QFile::remove(tempVcdFilePathForSignalDialog);
-    }
-    rtlProcessedForSignalDialog = false;
+    // REMOVED: Don't clean up temp file here - keep it for the session
+    // if (QFile::exists(tempVcdFilePathForSignalDialog)) {
+    //     QFile::remove(tempVcdFilePathForSignalDialog);
+    // }
+    // rtlProcessedForSignalDialog = false; // Don't reset this either
 }
-
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    // NEW: Only clean up signal dialog temp file
+    // Clean up signal dialog temp file when application closes
     if (QFile::exists(tempVcdFilePathForSignalDialog)) {
         QFile::remove(tempVcdFilePathForSignalDialog);
+        qDebug() << "Cleaned up signal dialog temp file:" << tempVcdFilePathForSignalDialog;
     }
     
     QMainWindow::closeEvent(event);
