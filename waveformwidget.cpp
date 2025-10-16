@@ -104,6 +104,10 @@ void WaveformWidget::removeSelectedSignals()
     if (selectedItems.isEmpty())
         return;
 
+    // Store the current cursor index before removal
+    int oldCursorIndex = signalCursorIndex;
+    bool cursorWasInSelection = selectedItems.contains(oldCursorIndex);
+
     // Remove items in reverse order
     QList<int> indices = selectedItems.values();
     std::sort(indices.begin(), indices.end(), std::greater<int>());
@@ -113,11 +117,20 @@ void WaveformWidget::removeSelectedSignals()
         if (index >= 0 && index < displayItems.size())
         {
             displayItems.removeAt(index);
+            
+            // Adjust cursor index if we removed items before it
+            if (signalCursorIndex > index) {
+                signalCursorIndex--;
+            }
         }
     }
 
     selectedItems.clear();
     lastSelectedItem = -1;
+    
+    // NEW: Update cursor position after deletion
+    updateSignalCursorAfterChanges();
+    
     update();
     emit itemSelected(-1);
 }
@@ -404,9 +417,9 @@ void WaveformWidget::drawSignalCursor(QPainter &painter)
     
     // Draw a small triangle or arrow on the left side to indicate insertion point
     QPolygon triangle;
-    triangle << QPoint(5, cursorY - 5) 
-             << QPoint(15, cursorY) 
-             << QPoint(5, cursorY + 5);
+    triangle << QPoint(2, cursorY - 2) 
+             << QPoint(12, cursorY) 
+             << QPoint(2, cursorY + 2);
     painter.setBrush(QBrush(Qt::yellow));
     painter.drawPolygon(triangle);
     
@@ -1861,6 +1874,9 @@ void WaveformWidget::setVisibleSignals(const QList<VCDSignal> &visibleSignals)
     selectedItems.clear();
     lastSelectedItem = -1;
 
+    // NEW: Initialize cursor to last signal if we have signals
+    updateSignalCursorAfterChanges();
+
     // Auto-zoom to fit after adding signals
     if (!visibleSignals.isEmpty())
     {
@@ -3109,7 +3125,6 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
     }
 }
 
-// Signal cursor methods
 void WaveformWidget::setSignalCursor(int itemIndex)
 {
     if (itemIndex >= 0 && itemIndex < displayItems.size() && isSignalItem(itemIndex)) {
@@ -3183,8 +3198,50 @@ void WaveformWidget::insertSignalsAtCursor(const QList<VCDSignal> &newSignals, i
     
     // Move the cursor to below the newly inserted signals
     signalCursorIndex = insertPosition + newItems.size() - 1;
+    showSignalCursor = true;
     
     updateScrollBar();
     update();
     emit itemSelected(-1);
+}
+
+void WaveformWidget::updateSignalCursorAfterChanges()
+{
+    if (displayItems.isEmpty()) {
+        // No signals - hide cursor
+        signalCursorIndex = -1;
+        showSignalCursor = false;
+        qDebug() << "No signals left - hiding cursor";
+    } else {
+        // If cursor was pointing to a signal that no longer exists, or if no cursor set
+        if (signalCursorIndex < 0 || signalCursorIndex >= displayItems.size() || !isSignalItem(signalCursorIndex)) {
+            // Set cursor to the last signal
+            int lastSignalIndex = findLastSignalIndex();
+            if (lastSignalIndex >= 0) {
+                signalCursorIndex = lastSignalIndex;
+                showSignalCursor = true;
+                qDebug() << "Cursor moved to last signal at index:" << lastSignalIndex;
+            } else {
+                // No signals found (only spaces) - hide cursor
+                signalCursorIndex = -1;
+                showSignalCursor = false;
+                qDebug() << "No signals found (only spaces) - hiding cursor";
+            }
+        } else {
+            // Cursor is still valid, ensure it's visible
+            showSignalCursor = true;
+            qDebug() << "Cursor remains at valid signal index:" << signalCursorIndex;
+        }
+    }
+    update();
+}
+
+int WaveformWidget::findLastSignalIndex() const
+{
+    for (int i = displayItems.size() - 1; i >= 0; i--) {
+        if (isSignalItem(i)) {
+            return i;
+        }
+    }
+    return -1;
 }

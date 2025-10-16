@@ -130,6 +130,9 @@ public:
     int getSignalCursorIndex() const;
     void insertSignalsAtCursor(const QList<VCDSignal> &newSignals, int cursorIndex);
     int getItemHeight(int index) const;
+    // NEW: Cursor management methods
+    void updateSignalCursorAfterChanges();
+    int findLastSignalIndex() const;
 
     int getCursorTime() const { return cursorTime; }
     void navigateToTime(int time);
