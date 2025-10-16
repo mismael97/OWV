@@ -124,6 +124,7 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+
     // Signal cursor methods
     void setSignalCursor(int itemIndex);
     void clearSignalCursor();

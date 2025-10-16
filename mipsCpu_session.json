@@ -1,0 +1,40 @@
+{
+    "cursorTime": 0,
+    "displaySettings": {
+        "busFormat": 0,
+        "lineWidth": 1,
+        "signalHeight": 24
+    },
+    "saveTime": "2025-10-16T11:06:57",
+    "signals": [
+        {
+            "fullName": "tb_mips16.pc_out [15:0]",
+            "identifier": "#",
+            "name": "pc_out [15:0]",
+            "scope": "tb_mips16",
+            "width": 16
+        },
+        {
+            "fullName": "tb_mips16.reset",
+            "identifier": "\"",
+            "name": "reset",
+            "scope": "tb_mips16",
+            "width": 1
+        },
+        {
+            "fullName": "tb_mips16.clk",
+            "identifier": "!",
+            "name": "clk",
+            "scope": "tb_mips16",
+            "width": 1
+        },
+        {
+            "fullName": "tb_mips16.alu_result [15:0]",
+            "identifier": "$",
+            "name": "alu_result [15:0]",
+            "scope": "tb_mips16",
+            "width": 16
+        }
+    ],
+    "vcdFile": "C:/Users/mismael/Desktop/OWV/mipsCpu.vcd"
+}

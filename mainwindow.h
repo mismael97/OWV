@@ -23,6 +23,12 @@
 #include "waveformwidget.h"
 #include <QProcess>
 
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QJsonValue>
+
 class SignalSelectionDialog;
 
 class MainWindow : public QMainWindow
@@ -45,6 +51,9 @@ protected:
     void closeEvent(QCloseEvent *event) override; // ADD override
 
 private slots:
+    void saveSignals();
+    void loadSignals();
+    void updateSaveLoadActions();
     void setLineThicknessThin();
     void setLineThicknessMedium();
     void openFile();
@@ -71,6 +80,13 @@ private slots:
     void onNextValueClicked();
 
 private:
+    // Add these new actions
+    QAction *saveSignalsAction;
+    QAction *loadSignalsAction;
+
+    // Add these helper methods
+    QString getSessionFilePath(const QString &vcdFile) const;
+    bool hasSessionForCurrentFile() const;
     void loadHistory();
     void saveHistory();
     void addToHistory(const QString &filePath);
