@@ -51,7 +51,6 @@ public:
     void setLastValues(const QString &value, int format);
 
 private:
-
     QString convertToBinaryStrict(const QString &value, int signalWidth, int format) const;
     QLineEdit *valueEdit;
     QButtonGroup *formatGroup;
@@ -122,7 +121,7 @@ private slots:
 
 private:
     unsigned long long convertToNumeric(const QString &value, int format) const;
-QString convertToBinaryStrict(const QString &value, int signalWidth, int format) const;
+    QString convertToBinaryStrict(const QString &value, int signalWidth, int format) const;
 
     // NEW: Value search members
     QAction *searchValueAction;
@@ -149,13 +148,13 @@ QString convertToBinaryStrict(const QString &value, int signalWidth, int format)
     void highlightSearchMatch(int matchIndex);
 
     // NEW: Search format constants
+    // Search format constants
     enum SearchFormat
     {
-        FormatAuto = 0,
-        FormatBinary = 1,
-        FormatHex = 2,
-        FormatDecimal = 3,
-        FormatOctal = 4
+        FormatBinary = 1,  // Changed from 0 to 1
+        FormatHex = 2,     // Changed from 1 to 2
+        FormatDecimal = 3, // Changed from 2 to 3
+        FormatOctal = 4    // Changed from 3 to 4
     };
 
     void checkForVcdUpdates();

@@ -30,7 +30,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), vcdParser(new VCDParser(this)),
       rtlProcessedForSignalDialog(false),
       currentSearchMatchIndex(-1),
-      lastSearchFormat(0) // NEW: Initialize search format
+      lastSearchFormat(2) // INITIALIZE TO HEX (FormatHex = 2)
 {
     qRegisterMetaType<VCDSignal>("VCDSignal");
     setWindowTitle("VCD Wave Viewer");
@@ -2027,7 +2027,7 @@ void MainWindow::performValueSearch(const QString &searchValue, int searchFormat
     case FormatHex: formatName = "hex"; break;
     case FormatDecimal: formatName = "decimal"; break;
     case FormatOctal: formatName = "octal"; break;
-    default: formatName = "auto"; break;
+    default: formatName = "hex"; break; // DEFAULT TO HEX
     }
     
     qDebug() << "=== STARTING VALUE SEARCH ===";
@@ -2319,50 +2319,29 @@ bool MainWindow::matchesSearchValue(const QString &signalValue, const QString &s
 QString MainWindow::convertToBinary(const QString &value, int signalWidth) const
 {
     if (value.isEmpty() || value.toLower() == "x" || value.toLower() == "z") {
-        qDebug() << "convertToBinary: Special value or empty ->" << value;
         return value;
     }
 
     QString processedValue = value.toLower();
-    int base = 2; // Default to binary
+    int base = 16; // DEFAULT TO HEX
 
     qDebug() << "convertToBinary: Input:" << value << "Width:" << signalWidth;
 
-    // Auto-detect base from prefixes
+    // Remove common prefixes
     if (processedValue.startsWith("0x")) {
         processedValue = processedValue.mid(2);
-        base = 16;
-        qDebug() << "Detected HEX format";
-    } else if (processedValue.startsWith("0o")) {
-        processedValue = processedValue.mid(2);
-        base = 8;
-        qDebug() << "Detected OCTAL format";
     } else if (processedValue.startsWith("b")) {
         processedValue = processedValue.mid(1);
-        base = 2;
-        qDebug() << "Detected BINARY format";
+        base = 2; // Binary if explicitly specified
     } else if (processedValue.startsWith("d")) {
         processedValue = processedValue.mid(1);
-        base = 10;
-        qDebug() << "Detected DECIMAL format";
-    } else {
-        // Auto-detect from content
-        if (QRegularExpression("^[01]+$").match(processedValue).hasMatch()) {
-            base = 2;
-            qDebug() << "Auto-detected BINARY from content";
-        } else if (QRegularExpression("^[0-7]+$").match(processedValue).hasMatch()) {
-            base = 8;
-            qDebug() << "Auto-detected OCTAL from content";
-        } else if (QRegularExpression("^[0-9a-f]+$").match(processedValue).hasMatch()) {
-            base = 16;
-            qDebug() << "Auto-detected HEX from content";
-        } else if (QRegularExpression("^\\d+$").match(processedValue).hasMatch()) {
-            base = 10;
-            qDebug() << "Auto-detected DECIMAL from content";
-        } else {
-            qDebug() << "Could not auto-detect format, using BINARY";
-        }
+        base = 10; // Decimal if explicitly specified
+    } else if (processedValue.startsWith("0o")) {
+        processedValue = processedValue.mid(2);
+        base = 8; // Octal if explicitly specified
     }
+
+    qDebug() << "Processing:" << processedValue << "with base:" << base;
 
     // Handle binary values directly
     if (base == 2) {
@@ -2377,7 +2356,7 @@ QString MainWindow::convertToBinary(const QString &value, int signalWidth) const
         return binary;
     }
 
-    // Convert from other bases
+    // Convert from hex (default) or other bases
     bool ok;
     unsigned long long numericValue = processedValue.toULongLong(&ok, base);
     
@@ -2388,26 +2367,23 @@ QString MainWindow::convertToBinary(const QString &value, int signalWidth) const
 
     qDebug() << "Numeric value:" << numericValue;
 
-    // For signals with width <= 64, convert properly
-    if (signalWidth <= 64) {
-        QString binary;
-        for (int i = signalWidth - 1; i >= 0; i--) {
+    // Convert to binary string
+    QString binary;
+    for (int i = signalWidth - 1; i >= 0; i--) {
+        if (signalWidth <= 64) {
             binary.append((numericValue & (1ULL << i)) ? '1' : '0');
+        } else {
+            // For very wide signals
+            if (i < 64) {
+                binary.append((numericValue & (1ULL << i)) ? '1' : '0');
+            } else {
+                binary.append('0');
+            }
         }
-        qDebug() << "Final binary:" << binary;
-        return binary;
-    } else {
-        // For very wide signals, we need a different approach
-        // Convert to binary string and pad/truncate
-        QString binary = QString::number(numericValue, 2);
-        if (binary.length() < signalWidth) {
-            binary = binary.rightJustified(signalWidth, '0');
-        } else if (binary.length() > signalWidth) {
-            binary = binary.right(signalWidth);
-        }
-        qDebug() << "Final binary (wide):" << binary;
-        return binary;
     }
+    
+    qDebug() << "Final binary:" << binary;
+    return binary;
 }
 
 void MainWindow::highlightSearchMatch(int matchIndex)
@@ -2502,7 +2478,7 @@ ValueSearchDialog::ValueSearchDialog(QWidget *parent)
     // Value input
     QLabel *valueLabel = new QLabel("Value to search for:");
     valueEdit = new QLineEdit();
-    valueEdit->setPlaceholderText("Enter value (e.g., 1010, 0xA, 10, 0o12, x, z)");
+    valueEdit->setPlaceholderText("Enter value (e.g., 0xA, 1010, 10, x, z)");
     
     // Format selection
     QGroupBox *formatGroupBox = new QGroupBox("Number Format");
@@ -2510,31 +2486,30 @@ ValueSearchDialog::ValueSearchDialog(QWidget *parent)
     
     formatGroup = new QButtonGroup(this);
     
-    autoRadio = new QRadioButton("Auto-detect (recommended)");
+    // REMOVED: Auto-detect option
     binaryRadio = new QRadioButton("Binary (e.g., 1010, b1010)");
-    hexRadio = new QRadioButton("Hexadecimal (e.g., 0xA, A, 0xa)");
+    hexRadio = new QRadioButton("Hexadecimal (e.g., 0xA, A)");
     decimalRadio = new QRadioButton("Decimal (e.g., 10, d10)");
     octalRadio = new QRadioButton("Octal (e.g., 0o12, 12)");
     
-    formatGroup->addButton(autoRadio, 0);
     formatGroup->addButton(binaryRadio, 1);
     formatGroup->addButton(hexRadio, 2);
     formatGroup->addButton(decimalRadio, 3);
     formatGroup->addButton(octalRadio, 4);
     
-    formatLayout->addWidget(autoRadio);
+    // ADDED: Hexadecimal as default
     formatLayout->addWidget(binaryRadio);
     formatLayout->addWidget(hexRadio);
     formatLayout->addWidget(decimalRadio);
     formatLayout->addWidget(octalRadio);
     
-    autoRadio->setChecked(true);
+    hexRadio->setChecked(true); // SET HEX AS DEFAULT
     
-    // Examples label
+    // Updated examples label
     QLabel *examplesLabel = new QLabel(
         "Examples:\n"
+        "• Hex: 0xA, A (default)\n"
         "• Binary: 1010, b1010\n"
-        "• Hex: 0xA, A, 0xa\n"
         "• Decimal: 10, d10\n"
         "• Octal: 0o12, 12\n"
         "• Special: x, z, X, Z"
@@ -2568,6 +2543,6 @@ void ValueSearchDialog::setLastValues(const QString &value, int format)
     case 2: hexRadio->setChecked(true); break;
     case 3: decimalRadio->setChecked(true); break;
     case 4: octalRadio->setChecked(true); break;
-    default: autoRadio->setChecked(true); break;
+    default: hexRadio->setChecked(true); break; // DEFAULT TO HEX
     }
 }
