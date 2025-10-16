@@ -21,6 +21,8 @@
 #include <QSettings>
 #include <QListWidget>
 #include <QDialogButtonBox>
+#include <QFileSystemWatcher>
+#include <QTimer>
 
 // In the constructor, initialize history
 MainWindow::MainWindow(QWidget *parent)
@@ -35,6 +37,15 @@ MainWindow::MainWindow(QWidget *parent)
     historyFilePath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(historyFilePath);
     historyFilePath += "/vcd_history.ini";
+
+    // NEW: Initialize file watcher
+    fileWatcher = new QFileSystemWatcher(this);
+    refreshTimer = new QTimer(this);
+    refreshTimer->setSingleShot(true);
+    refreshTimer->setInterval(1000); // 1 second debounce
+
+    connect(fileWatcher, &QFileSystemWatcher::fileChanged, this, &MainWindow::onVcdFileChanged);
+    connect(refreshTimer, &QTimer::timeout, this, &MainWindow::refreshVcd);
 
     createActions();
     setupUI();
@@ -267,6 +278,11 @@ void MainWindow::createActions()
     loadSignalsAction = new QAction("Load Signals...", this);
     connect(loadSignalsAction, &QAction::triggered, this, &MainWindow::loadSignals);
 
+    // NEW: Refresh VCD action
+    refreshVcdAction = new QAction("Refresh VCD", this);
+    refreshVcdAction->setShortcut(QKeySequence::Refresh);
+    connect(refreshVcdAction, &QAction::triggered, this, &MainWindow::refreshVcd);
+
     zoomInAction = new QAction("Zoom In", this);
     zoomInAction->setShortcut(QKeySequence::ZoomIn);
     connect(zoomInAction, &QAction::triggered, this, &MainWindow::zoomIn);
@@ -326,7 +342,6 @@ void MainWindow::createActions()
     connect(decreaseHeightAction, &QAction::triggered, this, &MainWindow::decreaseSignalHeight);
 }
 
-
 void MainWindow::loadSpecificSession(const QString &sessionName)
 {
     // This is essentially the same as loadSignals() but for a specific session
@@ -341,13 +356,15 @@ void MainWindow::loadSpecificSession(const QString &sessionName)
 
 void MainWindow::manageSessions()
 {
-    if (currentVcdFilePath.isEmpty()) {
+    if (currentVcdFilePath.isEmpty())
+    {
         QMessageBox::information(this, "Manage Sessions", "No VCD file loaded.");
         return;
     }
 
     QStringList availableSessions = getAvailableSessions(currentVcdFilePath);
-    if (availableSessions.isEmpty()) {
+    if (availableSessions.isEmpty())
+    {
         QMessageBox::information(this, "Manage Sessions", "No saved sessions found.");
         return;
     }
@@ -356,30 +373,31 @@ void MainWindow::manageSessions()
     QDialog dialog(this);
     dialog.setWindowTitle("Manage Sessions");
     dialog.setMinimumSize(400, 300);
-    
+
     QVBoxLayout *layout = new QVBoxLayout(&dialog);
-    
+
     QLabel *titleLabel = new QLabel("Saved Sessions for: " + QFileInfo(currentVcdFilePath).fileName());
     titleLabel->setStyleSheet("font-weight: bold; margin: 10px;");
     layout->addWidget(titleLabel);
-    
+
     QListWidget *sessionList = new QListWidget();
     sessionList->addItems(availableSessions);
     sessionList->setSelectionMode(QListWidget::SingleSelection);
     layout->addWidget(sessionList);
-    
+
     QHBoxLayout *buttonLayout = new QHBoxLayout();
     QPushButton *loadButton = new QPushButton("Load Selected");
     QPushButton *deleteButton = new QPushButton("Delete Selected");
     QPushButton *closeButton = new QPushButton("Close");
-    
+
     buttonLayout->addWidget(loadButton);
     buttonLayout->addWidget(deleteButton);
     buttonLayout->addWidget(closeButton);
     layout->addLayout(buttonLayout);
-    
+
     // Connect signals
-    connect(loadButton, &QPushButton::clicked, &dialog, [&]() {
+    connect(loadButton, &QPushButton::clicked, &dialog, [&]()
+            {
         QListWidgetItem *currentItem = sessionList->currentItem();
         if (currentItem) {
             QString sessionName = currentItem->text();
@@ -388,10 +406,10 @@ void MainWindow::manageSessions()
             loadSpecificSession(sessionName);
         } else {
             QMessageBox::information(&dialog, "Manage Sessions", "Please select a session first.");
-        }
-    });
-    
-    connect(deleteButton, &QPushButton::clicked, &dialog, [&]() {
+        } });
+
+    connect(deleteButton, &QPushButton::clicked, &dialog, [&]()
+            {
         QListWidgetItem *currentItem = sessionList->currentItem();
         if (currentItem) {
             QString sessionName = currentItem->text();
@@ -411,35 +429,32 @@ void MainWindow::manageSessions()
             }
         } else {
             QMessageBox::information(&dialog, "Manage Sessions", "Please select a session first.");
-        }
-    });
-    
+        } });
+
     connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
-    
+
     dialog.exec();
 }
-
 
 void MainWindow::createMenuBar()
 {
     // Create proper menu bar
     QMenuBar *menuBar = this->menuBar();
 
-
     // File menu
     QMenu *fileMenu = menuBar->addMenu("File");
     fileMenu->addAction(openAction);
-    
+
     // NEW: Add save/load signals actions
     fileMenu->addAction(saveSignalsAction);
     fileMenu->addAction(loadSignalsAction);
+    fileMenu->addAction(refreshVcdAction);
     fileMenu->addSeparator();
-    
+
     fileMenu->addAction("Manage Sessions...", this, &MainWindow::manageSessions);
     // NEW: Recent files submenu
     recentMenu = fileMenu->addMenu("Recent");
     fileMenu->addSeparator();
-
 
     // Edit menu (empty for now)
     QMenu *editMenu = menuBar->addMenu("Edit");
@@ -724,12 +739,16 @@ void MainWindow::showAddSignalsDialog()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     // Clean up signal dialog temp file when application closes
-    if (QFile::exists(tempVcdFilePathForSignalDialog))
-    {
+    if (QFile::exists(tempVcdFilePathForSignalDialog)) {
         QFile::remove(tempVcdFilePathForSignalDialog);
         qDebug() << "Cleaned up signal dialog temp file:" << tempVcdFilePathForSignalDialog;
     }
-
+    
+    // NEW: Clean up file watcher
+    if (!currentVcdFilePath.isEmpty()) {
+        fileWatcher->removePath(currentVcdFilePath);
+    }
+    
     QMainWindow::closeEvent(event);
 }
 
@@ -753,7 +772,7 @@ void MainWindow::removeSelectedSignals()
         }
 
         statusLabel->setText(QString("%1 signal(s) displayed").arg(signalCount));
-        
+
         // NEW: Update save/load actions after removing signals
         updateSaveLoadActions();
     }
@@ -788,24 +807,33 @@ void MainWindow::openFile()
 
 void MainWindow::loadVcdFile(const QString &filename)
 {
+    // NEW: Remove previous file from watcher
+    if (!currentVcdFilePath.isEmpty())
+    {
+        fileWatcher->removePath(currentVcdFilePath);
+    }
+
     // NEW: Add to history
     addToHistory(filename);
-    
+
     // NEW: Clean up previous temp files when loading a new VCD file
-    if (QFile::exists(tempVcdFilePathForSignalDialog)) {
+    if (QFile::exists(tempVcdFilePathForSignalDialog))
+    {
         QFile::remove(tempVcdFilePathForSignalDialog);
         qDebug() << "Cleaned up previous signal dialog temp file:" << tempVcdFilePathForSignalDialog;
     }
-    
+
     // Reset RTL processing state for the new file
     rtlProcessedForSignalDialog = false;
-    
+
     // Store the original VCD file path
     currentVcdFilePath = filename;
-    
+
+    fileWatcher->addPath(filename);
+
     // Don't check for RTL during file loading - only in signal dialog
     QString vcdToLoad = filename;
-    
+
     // Continue with VCD loading...
     statusBar()->clearMessage();
 
@@ -1352,10 +1380,11 @@ void checkPythonAvailability()
 
 QString MainWindow::getSessionFilePath(const QString &vcdFile) const
 {
-    if (vcdFile.isEmpty()) {
+    if (vcdFile.isEmpty())
+    {
         return "";
     }
-    
+
     QFileInfo vcdInfo(vcdFile);
     QString sessionFileName = vcdInfo.completeBaseName() + "_session.json";
     return vcdInfo.absolutePath() + "/" + sessionFileName;
@@ -1363,10 +1392,11 @@ QString MainWindow::getSessionFilePath(const QString &vcdFile) const
 
 bool MainWindow::hasSessionForCurrentFile() const
 {
-    if (currentVcdFilePath.isEmpty()) {
+    if (currentVcdFilePath.isEmpty())
+    {
         return false;
     }
-    
+
     QString sessionFile = getSessionFilePath(currentVcdFilePath);
     return QFile::exists(sessionFile);
 }
@@ -1376,36 +1406,41 @@ void MainWindow::updateSaveLoadActions()
     bool hasVcdLoaded = !currentVcdFilePath.isEmpty();
     bool hasSignals = waveformWidget->getItemCount() > 0;
     bool hasSessions = hasSessionsForCurrentFile();
-    
+
     saveSignalsAction->setEnabled(hasVcdLoaded && hasSignals);
     loadSignalsAction->setEnabled(hasVcdLoaded && hasSessions);
+    refreshVcdAction->setEnabled(hasVcdLoaded); // NEW: Enable refresh when VCD is loaded
 }
 
 void MainWindow::saveSignals()
 {
-    if (currentVcdFilePath.isEmpty() || !vcdParser) {
+    if (currentVcdFilePath.isEmpty() || !vcdParser)
+    {
         QMessageBox::warning(this, "Save Session", "No VCD file loaded.");
         return;
     }
 
-    if (waveformWidget->getItemCount() == 0) {
+    if (waveformWidget->getItemCount() == 0)
+    {
         QMessageBox::warning(this, "Save Session", "No signals to save.");
         return;
     }
 
     // Get session name from user
     bool ok;
-    QString sessionName = QInputDialog::getText(this, "Save Session", 
-                                               "Enter session name:",
-                                               QLineEdit::Normal, 
-                                               "", &ok);
-    if (!ok || sessionName.isEmpty()) {
+    QString sessionName = QInputDialog::getText(this, "Save Session",
+                                                "Enter session name:",
+                                                QLineEdit::Normal,
+                                                "", &ok);
+    if (!ok || sessionName.isEmpty())
+    {
         return;
     }
 
     // Validate session name
     sessionName = sessionName.trimmed();
-    if (sessionName.isEmpty()) {
+    if (sessionName.isEmpty())
+    {
         QMessageBox::warning(this, "Save Session", "Session name cannot be empty.");
         return;
     }
@@ -1413,12 +1448,14 @@ void MainWindow::saveSignals()
     // Check if session already exists
     QString sessionDir = getSessionDir();
     QString sessionFile = sessionDir + "/" + sessionName + ".json";
-    
-    if (QFile::exists(sessionFile)) {
+
+    if (QFile::exists(sessionFile))
+    {
         int result = QMessageBox::question(this, "Save Session",
-                                         QString("Session '%1' already exists.\nDo you want to overwrite it?")
-                                         .arg(sessionName));
-        if (result != QMessageBox::Yes) {
+                                           QString("Session '%1' already exists.\nDo you want to overwrite it?")
+                                               .arg(sessionName));
+        if (result != QMessageBox::Yes)
+        {
             return;
         }
     }
@@ -1428,12 +1465,14 @@ void MainWindow::saveSignals()
     sessionData["vcdFile"] = currentVcdFilePath;
     sessionData["sessionName"] = sessionName;
     sessionData["saveTime"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    
+
     // Save signal list
     QJsonArray signalsArray;
-    for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+    for (int i = 0; i < waveformWidget->getItemCount(); i++)
+    {
         const DisplayItem *item = waveformWidget->getItem(i);
-        if (item && item->type == DisplayItem::Signal) {
+        if (item && item->type == DisplayItem::Signal)
+        {
             QJsonObject signalObj;
             signalObj["fullName"] = item->signal.signal.fullName;
             signalObj["scope"] = item->signal.signal.scope;
@@ -1444,63 +1483,68 @@ void MainWindow::saveSignals()
         }
     }
     sessionData["signals"] = signalsArray;
-    
+
     // Save display settings
     QJsonObject displaySettings;
     displaySettings["signalHeight"] = waveformWidget->getSignalHeight();
     displaySettings["lineWidth"] = waveformWidget->getLineWidth();
     displaySettings["busFormat"] = static_cast<int>(waveformWidget->getBusDisplayFormat());
     sessionData["displaySettings"] = displaySettings;
-    
+
     // Save time cursor position
     sessionData["cursorTime"] = waveformWidget->getCursorTime();
-    
+
     // Save signal colors
     QJsonObject colorsObj;
     // Note: You'll need to add a method to get all signal colors from WaveformWidget
     // For now, we'll skip this or you can implement it later
     sessionData["signalColors"] = colorsObj;
-    
+
     // Write to file
     QFile file(sessionFile);
-    if (!file.open(QIODevice::WriteOnly)) {
-        QMessageBox::critical(this, "Save Session", 
-                            QString("Failed to create session file:\n%1").arg(file.errorString()));
+    if (!file.open(QIODevice::WriteOnly))
+    {
+        QMessageBox::critical(this, "Save Session",
+                              QString("Failed to create session file:\n%1").arg(file.errorString()));
         return;
     }
-    
+
     QJsonDocument doc(sessionData);
     file.write(doc.toJson());
     file.close();
-    
+
     statusLabel->setText(QString("Session '%1' saved with %2 signal(s)").arg(sessionName).arg(signalsArray.size()));
     updateSaveLoadActions();
-    
-    QMessageBox::information(this, "Save Session", 
-                           QString("Successfully saved session '%1' with %2 signal(s).")
-                           .arg(sessionName).arg(signalsArray.size()));
+
+    QMessageBox::information(this, "Save Session",
+                             QString("Successfully saved session '%1' with %2 signal(s).")
+                                 .arg(sessionName)
+                                 .arg(signalsArray.size()));
 }
 
 void MainWindow::loadSignals()
 {
-    if (currentVcdFilePath.isEmpty() || !vcdParser) {
+    if (currentVcdFilePath.isEmpty() || !vcdParser)
+    {
         QMessageBox::warning(this, "Load Session", "No VCD file loaded.");
         return;
     }
 
     QStringList availableSessions = getAvailableSessions(currentVcdFilePath);
-    if (availableSessions.isEmpty()) {
-        QMessageBox::information(this, "Load Session", 
-                               "No saved sessions found for the current VCD file.");
+    if (availableSessions.isEmpty())
+    {
+        QMessageBox::information(this, "Load Session",
+                                 "No saved sessions found for the current VCD file.");
         return;
     }
 
     // Let user choose which session to load
     bool ok;
     QString sessionName = QInputDialog::getItem(this, "Load Session",
-                                               "Select session to load:",
-                                               availableSessions, 0, false, &ok);
-    if (!ok || sessionName.isEmpty()) {
+                                                "Select session to load:",
+                                                availableSessions, 0, false, &ok);
+    if (!ok || sessionName.isEmpty())
+    {
         return;
     }
 
@@ -1509,141 +1553,161 @@ void MainWindow::loadSignals()
 
     // Read session file
     QFile file(sessionFile);
-    if (!file.open(QIODevice::ReadOnly)) {
-        QMessageBox::critical(this, "Load Session", 
-                            QString("Failed to open session file:\n%1").arg(file.errorString()));
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        QMessageBox::critical(this, "Load Session",
+                              QString("Failed to open session file:\n%1").arg(file.errorString()));
         return;
     }
-    
+
     QByteArray data = file.readAll();
     file.close();
-    
+
     QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (doc.isNull()) {
+    if (doc.isNull())
+    {
         QMessageBox::critical(this, "Load Session", "Invalid session file format.");
         return;
     }
-    
+
     QJsonObject sessionData = doc.object();
-    
+
     // Verify VCD file matches
     QString savedVcdFile = sessionData["vcdFile"].toString();
-    if (savedVcdFile != currentVcdFilePath) {
+    if (savedVcdFile != currentVcdFilePath)
+    {
         int result = QMessageBox::question(this, "Load Session",
-                                         QString("Session was created for:\n%1\n\n"
-                                                "Current file is:\n%2\n\n"
-                                                "Do you want to load anyway?")
-                                         .arg(savedVcdFile, currentVcdFilePath));
-        if (result != QMessageBox::Yes) {
+                                           QString("Session was created for:\n%1\n\n"
+                                                   "Current file is:\n%2\n\n"
+                                                   "Do you want to load anyway?")
+                                               .arg(savedVcdFile, currentVcdFilePath));
+        if (result != QMessageBox::Yes)
+        {
             return;
         }
     }
-    
+
     // Get session info for confirmation
     QString savedSessionName = sessionData["sessionName"].toString();
     QString saveTime = sessionData["saveTime"].toString();
-    
+
     // Ask for confirmation
     QString confirmMessage = QString("Load session '%1'?").arg(savedSessionName);
-    if (!saveTime.isEmpty()) {
+    if (!saveTime.isEmpty())
+    {
         QDateTime saveDateTime = QDateTime::fromString(saveTime, Qt::ISODate);
         confirmMessage += QString("\nSaved: %1").arg(saveDateTime.toString("yyyy-MM-dd hh:mm:ss"));
     }
-    
+
     int result = QMessageBox::question(this, "Load Session", confirmMessage);
-    if (result != QMessageBox::Yes) {
+    if (result != QMessageBox::Yes)
+    {
         return;
     }
-    
+
     // Load signals
     QJsonArray signalsArray = sessionData["signals"].toArray();
-    if (signalsArray.isEmpty()) {
+    if (signalsArray.isEmpty())
+    {
         QMessageBox::warning(this, "Load Session", "No signals found in session file.");
         return;
     }
-    
+
     QList<VCDSignal> signalsToLoad;
     QList<VCDSignal> allSignals = vcdParser->getSignals();
-    
+
     int foundCount = 0;
     int missingCount = 0;
     QStringList missingSignals;
-    
-    for (const QJsonValue &signalValue : signalsArray) {
+
+    for (const QJsonValue &signalValue : signalsArray)
+    {
         QJsonObject signalObj = signalValue.toObject();
         QString fullName = signalObj["fullName"].toString();
-        
+
         // Find the signal in the current VCD file
         bool found = false;
-        for (const VCDSignal &signal : allSignals) {
-            if (signal.fullName == fullName) {
+        for (const VCDSignal &signal : allSignals)
+        {
+            if (signal.fullName == fullName)
+            {
                 signalsToLoad.append(signal);
                 found = true;
                 foundCount++;
                 break;
             }
         }
-        
-        if (!found) {
+
+        if (!found)
+        {
             missingCount++;
             missingSignals.append(fullName);
         }
     }
-    
-    if (signalsToLoad.isEmpty()) {
-        QMessageBox::warning(this, "Load Session", 
-                           "None of the saved signals were found in the current VCD file.");
+
+    if (signalsToLoad.isEmpty())
+    {
+        QMessageBox::warning(this, "Load Session",
+                             "None of the saved signals were found in the current VCD file.");
         return;
     }
-    
+
     // Clear current signals first
     waveformWidget->setVisibleSignals(QList<VCDSignal>());
-    
+
     // Load display settings
-    if (sessionData.contains("displaySettings")) {
+    if (sessionData.contains("displaySettings"))
+    {
         QJsonObject displaySettings = sessionData["displaySettings"].toObject();
-        if (displaySettings.contains("signalHeight")) {
+        if (displaySettings.contains("signalHeight"))
+        {
             waveformWidget->setSignalHeight(displaySettings["signalHeight"].toInt());
         }
-        if (displaySettings.contains("lineWidth")) {
+        if (displaySettings.contains("lineWidth"))
+        {
             waveformWidget->setLineWidth(displaySettings["lineWidth"].toInt());
         }
-        if (displaySettings.contains("busFormat")) {
+        if (displaySettings.contains("busFormat"))
+        {
             waveformWidget->setBusDisplayFormat(static_cast<WaveformWidget::BusFormat>(
                 displaySettings["busFormat"].toInt()));
         }
     }
-    
+
     // Set the signals
     waveformWidget->setVisibleSignals(signalsToLoad);
-    
+
     // Restore cursor time
-    if (sessionData.contains("cursorTime")) {
+    if (sessionData.contains("cursorTime"))
+    {
         int cursorTime = sessionData["cursorTime"].toInt();
         waveformWidget->navigateToTime(cursorTime);
     }
-    
+
     // Show result message
     QString message = QString("Successfully loaded session '%1' with %2 signal(s).").arg(savedSessionName).arg(foundCount);
-    if (missingCount > 0) {
+    if (missingCount > 0)
+    {
         message += QString("\n%1 signal(s) not found in current VCD file.").arg(missingCount);
-        if (missingCount <= 10) { // Don't show too many missing signals
+        if (missingCount <= 10)
+        { // Don't show too many missing signals
             message += "\nMissing: " + missingSignals.join(", ");
         }
     }
-    
+
     statusLabel->setText(QString("Loaded session '%1' with %2 signal(s)").arg(savedSessionName).arg(foundCount));
-    
+
     QMessageBox::information(this, "Load Session", message);
     updateSaveLoadActions();
 }
 
 QString MainWindow::getSessionDir() const
 {
-    if (currentVcdFilePath.isEmpty()) {
+    if (currentVcdFilePath.isEmpty())
+    {
         return "";
     }
-    
+
     QFileInfo vcdInfo(currentVcdFilePath);
     QString sessionDir = vcdInfo.absolutePath() + "/" + vcdInfo.completeBaseName() + "_sessions";
     QDir().mkpath(sessionDir); // Create directory if it doesn't exist
@@ -1653,33 +1717,220 @@ QString MainWindow::getSessionDir() const
 QStringList MainWindow::getAvailableSessions(const QString &vcdFile) const
 {
     QStringList sessions;
-    if (vcdFile.isEmpty()) {
+    if (vcdFile.isEmpty())
+    {
         return sessions;
     }
-    
+
     QFileInfo vcdInfo(vcdFile);
     QString sessionDir = vcdInfo.absolutePath() + "/" + vcdInfo.completeBaseName() + "_sessions";
     QDir dir(sessionDir);
-    
-    if (dir.exists()) {
+
+    if (dir.exists())
+    {
         QStringList filters;
         filters << "*.json";
         sessions = dir.entryList(filters, QDir::Files, QDir::Name);
-        
+
         // Remove the .json extension for display
-        for (int i = 0; i < sessions.size(); ++i) {
+        for (int i = 0; i < sessions.size(); ++i)
+        {
             sessions[i] = QFileInfo(sessions[i]).completeBaseName();
         }
     }
-    
+
     return sessions;
 }
 
 bool MainWindow::hasSessionsForCurrentFile() const
 {
-    if (currentVcdFilePath.isEmpty()) {
+    if (currentVcdFilePath.isEmpty())
+    {
         return false;
     }
-    
+
     return !getAvailableSessions(currentVcdFilePath).isEmpty();
+}
+
+void MainWindow::refreshVcd()
+{
+    if (currentVcdFilePath.isEmpty())
+    {
+        QMessageBox::warning(this, "Refresh VCD", "No VCD file loaded.");
+        return;
+    }
+
+    if (!QFile::exists(currentVcdFilePath))
+    {
+        QMessageBox::critical(this, "Refresh VCD",
+                              QString("VCD file no longer exists:\n%1").arg(currentVcdFilePath));
+        return;
+    }
+
+    // Store current state
+    QList<VCDSignal> currentSignals;
+    QMap<QString, QColor> currentColors;
+    int currentCursorTime = waveformWidget->getCursorTime();
+    int currentSignalHeight = waveformWidget->getSignalHeight();
+    int currentLineWidth = waveformWidget->getLineWidth();
+    WaveformWidget::BusFormat currentBusFormat = waveformWidget->getBusDisplayFormat();
+
+    // Get current signals
+    for (int i = 0; i < waveformWidget->getItemCount(); i++)
+    {
+        const DisplayItem *item = waveformWidget->getItem(i);
+        if (item && item->type == DisplayItem::Signal)
+        {
+            currentSignals.append(item->signal.signal);
+        }
+    }
+
+    // Show progress
+    statusLabel->setText("Refreshing VCD data...");
+    QApplication::processEvents();
+
+    // Create progress bar
+    QProgressBar *progressBar = new QProgressBar();
+    progressBar->setRange(0, 0); // Indeterminate progress
+    progressBar->setMaximumWidth(200);
+    progressBar->setTextVisible(false);
+    statusBar()->addPermanentWidget(progressBar);
+
+    // Disable UI during refresh
+    setEnabled(false);
+    QApplication::processEvents();
+
+    // Reload VCD data in background
+    QFuture<bool> refreshFuture = QtConcurrent::run([this]()
+                                                    { return vcdParser->parseHeaderOnly(currentVcdFilePath); });
+
+    QFutureWatcher<bool> *watcher = new QFutureWatcher<bool>(this);
+    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, progressBar, watcher, currentSignals, currentCursorTime, currentSignalHeight, currentLineWidth, currentBusFormat]()
+            {
+        bool success = watcher->result();
+        
+        // Re-enable UI
+        setEnabled(true);
+        
+        // Remove progress bar
+        statusBar()->removeWidget(progressBar);
+        delete progressBar;
+        watcher->deleteLater();
+        
+        if (success) {
+            // Restore display settings
+            waveformWidget->setSignalHeight(currentSignalHeight);
+            waveformWidget->setLineWidth(currentLineWidth);
+            waveformWidget->setBusDisplayFormat(currentBusFormat);
+            
+            // Reload signals that still exist in the new VCD
+            QList<VCDSignal> signalsToReload;
+            QList<VCDSignal> allSignals = vcdParser->getSignals();
+            
+            int foundCount = 0;
+            int missingCount = 0;
+            QStringList missingSignals;
+            
+            for (const VCDSignal &oldSignal : currentSignals) {
+                bool found = false;
+                for (const VCDSignal &newSignal : allSignals) {
+                    if (newSignal.fullName == oldSignal.fullName) {
+                        signalsToReload.append(newSignal);
+                        found = true;
+                        foundCount++;
+                        break;
+                    }
+                }
+                
+                if (!found) {
+                    missingCount++;
+                    missingSignals.append(oldSignal.fullName);
+                }
+            }
+            
+            // Set the VCD data and reload signals
+            waveformWidget->setVcdData(vcdParser);
+            waveformWidget->setVisibleSignals(signalsToReload);
+            
+            // Restore cursor time
+            waveformWidget->navigateToTime(currentCursorTime);
+            
+            // Update status
+            QString statusMessage = QString("VCD refreshed: %1 signal(s) reloaded").arg(foundCount);
+            if (missingCount > 0) {
+                statusMessage += QString(", %1 signal(s) missing").arg(missingCount);
+            }
+            statusLabel->setText(statusMessage);
+            
+            // Show detailed result message
+            if (missingCount > 0) {
+                QString message = QString("Successfully refreshed VCD data.\n\n"
+                                        "Reloaded: %1 signal(s)\n"
+                                        "Missing: %2 signal(s)").arg(foundCount).arg(missingCount);
+                
+                if (missingCount <= 10) {
+                    message += "\n\nMissing signals:\n• " + missingSignals.join("\n• ");
+                }
+                
+                QMessageBox::information(this, "Refresh VCD", message);
+            } else {
+                QMessageBox::information(this, "Refresh VCD", 
+                                       QString("Successfully refreshed VCD data.\n%1 signal(s) reloaded.")
+                                       .arg(foundCount));
+            }
+            
+            // Update window title with refresh indicator
+            setWindowTitle(QString("VCD Wave Viewer - %1 (Refreshed)").arg(QFileInfo(currentVcdFilePath).fileName()));
+            
+        } else {
+            QMessageBox::critical(this, "Refresh VCD",
+                                "Failed to refresh VCD file: " + vcdParser->getError());
+            statusLabel->setText("Refresh failed");
+        }
+        
+        updateSaveLoadActions(); });
+
+    watcher->setFuture(refreshFuture);
+}
+
+void MainWindow::onVcdFileChanged(const QString &path)
+{
+    if (path == currentVcdFilePath)
+    {
+        // File was modified - start debounce timer
+        statusLabel->setText("VCD file modified detected...");
+        refreshTimer->start();
+    }
+}
+
+void MainWindow::checkForVcdUpdates()
+{
+    if (currentVcdFilePath.isEmpty()) {
+        return;
+    }
+    
+    QFileInfo fileInfo(currentVcdFilePath);
+    if (!fileInfo.exists()) {
+        return;
+    }
+    
+    static QDateTime lastModified;
+    static qint64 lastSize = 0;
+    
+    QDateTime currentModified = fileInfo.lastModified();
+    qint64 currentSize = fileInfo.size();
+    
+    if (currentModified != lastModified || currentSize != lastSize) {
+        int result = QMessageBox::question(this, "VCD File Updated",
+                                         "The VCD file has been modified.\n"
+                                         "Would you like to refresh the data?",
+                                         QMessageBox::Yes | QMessageBox::No,
+                                         QMessageBox::Yes);
+        if (result == QMessageBox::Yes) {
+            refreshVcd();
+        }
+    }
+    
+    lastModified = currentModified;
+    lastSize = currentSize;
 }

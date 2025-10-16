@@ -28,6 +28,8 @@
 #include <QJsonArray>
 #include <QJsonValue>
 
+#include <QFileSystemWatcher>
+
 class SignalSelectionDialog;
 
 class MainWindow : public QMainWindow
@@ -50,9 +52,12 @@ protected:
     void closeEvent(QCloseEvent *event) override; // ADD override
 
 private slots:
+    void updateSaveLoadActions();
     void saveSignals();
     void loadSignals();
-    void updateSaveLoadActions();
+    void refreshVcd();
+    void onVcdFileChanged(const QString &path); // NEW: Handle file changes
+
     void setLineThicknessThin();
     void setLineThicknessMedium();
     void openFile();
@@ -79,16 +84,22 @@ private slots:
     void onNextValueClicked();
 
 private:
+void checkForVcdUpdates();
     void manageSessions();
     void loadSpecificSession(const QString &sessionName);
     // Add these new actions
     QAction *saveSignalsAction;
     QAction *loadSignalsAction;
+    QAction *refreshVcdAction;
 
     // Add these helper methods
     QString getSessionDir() const;
     QStringList getAvailableSessions(const QString &vcdFile) const;
     bool hasSessionsForCurrentFile() const;
+    void reloadVcdData();
+
+    QFileSystemWatcher *fileWatcher; // NEW: Monitor VCD file changes
+    QTimer *refreshTimer;            // NEW: Debounce timer for file changes
 
     // Add these helper methods
     QString getSessionFilePath(const QString &vcdFile) const;
