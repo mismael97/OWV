@@ -23,7 +23,6 @@
 #include "waveformwidget.h"
 #include <QProcess>
 
-
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -80,9 +79,16 @@ private slots:
     void onNextValueClicked();
 
 private:
+    void manageSessions();
+    void loadSpecificSession(const QString &sessionName);
     // Add these new actions
     QAction *saveSignalsAction;
     QAction *loadSignalsAction;
+
+    // Add these helper methods
+    QString getSessionDir() const;
+    QStringList getAvailableSessions(const QString &vcdFile) const;
+    bool hasSessionsForCurrentFile() const;
 
     // Add these helper methods
     QString getSessionFilePath(const QString &vcdFile) const;

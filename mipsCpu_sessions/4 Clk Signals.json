@@ -1,0 +1,43 @@
+{
+    "cursorTime": 0,
+    "displaySettings": {
+        "busFormat": 0,
+        "lineWidth": 1,
+        "signalHeight": 24
+    },
+    "saveTime": "2025-10-16T11:15:07",
+    "sessionName": "4 Clk Signals",
+    "signalColors": {
+    },
+    "signals": [
+        {
+            "fullName": "tb_mips16.uut.datamem.clk",
+            "identifier": "!",
+            "name": "clk",
+            "scope": "tb_mips16.uut.datamem",
+            "width": 1
+        },
+        {
+            "fullName": "tb_mips16.clk",
+            "identifier": "!",
+            "name": "clk",
+            "scope": "tb_mips16",
+            "width": 1
+        },
+        {
+            "fullName": "tb_mips16.uut.reg_file.clk",
+            "identifier": "!",
+            "name": "clk",
+            "scope": "tb_mips16.uut.reg_file",
+            "width": 1
+        },
+        {
+            "fullName": "tb_mips16.uut.clk",
+            "identifier": "!",
+            "name": "clk",
+            "scope": "tb_mips16.uut",
+            "width": 1
+        }
+    ],
+    "vcdFile": "C:/Users/mismael/Desktop/OWV/mipsCpu.vcd"
+}
