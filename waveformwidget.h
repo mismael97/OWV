@@ -124,6 +124,9 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    void highlightSignal(int signalIndex, bool highlight);
+    void clearSearchHighlights();
+    void selectSignalByIndex(int index);
 
     // Signal cursor methods
     void setSignalCursor(int itemIndex);
@@ -212,6 +215,8 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    QSet<int> highlightedSignals; // NEW: Track highlighted signals for search results
+
     void drawSignalCursor(QPainter &painter);
     int signalCursorIndex = -1; // -1 means no cursor, otherwise index where cursor is placed
     bool showSignalCursor = false;

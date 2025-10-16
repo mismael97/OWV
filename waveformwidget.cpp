@@ -342,22 +342,21 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
         // Draw background for this row
         bool isSelected = selectedItems.contains(i);
         bool isSearchMatch = searchResults.contains(i);
+        bool isHighlighted = highlightedSignals.contains(i); // NEW: Search value highlight
 
-        if (isSelected)
-        {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(60, 60, 90));
-        }
-        else if (isSearchActive && isSearchMatch)
-        {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(80, 80, 120, 150));
-        }
-        else if (i % 2 == 0)
-        {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(0, 0, 0)); // Value Column | Color 1
-        }
-        else
-        {
-            painter.fillRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight, QColor(0, 0, 0)); // Value Column | Color 2
+        QRect itemRect(valuesColumnStart, currentY, valuesColumnWidth, itemHeight);
+
+        if (isHighlighted) {
+            // NEW: Yellow highlight for value search matches (with transparency)
+            painter.fillRect(itemRect, QColor(255, 255, 0, 100)); // Semi-transparent yellow
+        } else if (isSelected) {
+            painter.fillRect(itemRect, QColor(60, 60, 90));
+        } else if (isSearchActive && isSearchMatch) {
+            painter.fillRect(itemRect, QColor(80, 80, 120, 150));
+        } else if (i % 2 == 0) {
+            painter.fillRect(itemRect, QColor(0, 0, 0)); // Value Column | Color 1
+        } else {
+            painter.fillRect(itemRect, QColor(0, 0, 0)); // Value Column | Color 2
         }
 
         if (item.type == DisplayItem::Signal)
@@ -382,7 +381,12 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
             QFontMetrics fm(painter.font());
             int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
 
-            painter.setPen(QPen(Qt::white));
+            // NEW: Use appropriate pen color based on highlight state
+            if (isHighlighted) {
+                painter.setPen(QPen(QColor(0, 0, 0))); // Black text on yellow background
+            } else {
+                painter.setPen(QPen(Qt::white));
+            }
             painter.drawText(valuesColumnStart + 5, textY, displayValue);
         }
 
@@ -495,43 +499,36 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
         // Draw background based on selection and type
         bool isSelected = selectedItems.contains(i);
         bool isSearchMatch = searchResults.contains(i);
+        bool isHighlighted = highlightedSignals.contains(i); // NEW: Search value highlight
 
-        if (isSelected)
-        {
-            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(60, 60, 90));
-        }
-        else if (isSearchActive && isSearchMatch)
-        {
-            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 80, 120, 150));
-        }
-        else if (item.type == DisplayItem::Space)
-        {
-            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 160, 80, 120));
-        }
-        else if (i % 2 == 0)
-        {
-            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(0, 0, 0)); // Signal Name Column | Color 1
-        }
-        else
-        {
-            painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(0, 0, 0)); // Signal Name Column | Color 2
+        QRect itemRect(0, currentY, signalNamesWidth, itemHeight);
+
+        if (isHighlighted) {
+            // NEW: Yellow highlight for value search matches (with transparency)
+            painter.fillRect(itemRect, QColor(255, 255, 0, 100)); // Semi-transparent yellow
+        } else if (isSelected) {
+            painter.fillRect(itemRect, QColor(60, 60, 90));
+        } else if (isSearchActive && isSearchMatch) {
+            painter.fillRect(itemRect, QColor(80, 80, 120, 150));
+        } else if (item.type == DisplayItem::Space) {
+            painter.fillRect(itemRect, QColor(80, 160, 80, 120));
+        } else if (i % 2 == 0) {
+            painter.fillRect(itemRect, QColor(0, 0, 0)); // Signal Name Column | Color 1
+        } else {
+            painter.fillRect(itemRect, QColor(0, 0, 0)); // Signal Name Column | Color 2
         }
 
         // Draw item name with appropriate styling
-        if (isSelected)
-        {
+        if (isHighlighted) {
+            // NEW: Dark text for better contrast on yellow background
+            painter.setPen(QPen(QColor(0, 0, 0))); // Black text on yellow highlight
+        } else if (isSelected) {
             painter.setPen(QPen(Qt::white));
-        }
-        else if (isSearchActive && isSearchMatch)
-        {
+        } else if (isSearchActive && isSearchMatch) {
             painter.setPen(QPen(QColor(200, 200, 255)));
-        }
-        else if (item.type == DisplayItem::Space)
-        {
+        } else if (item.type == DisplayItem::Space) {
             painter.setPen(QPen(QColor(150, 255, 150)));
-        }
-        else
-        {
+        } else {
             painter.setPen(QPen(Qt::white));
         }
 
@@ -555,24 +552,25 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
 
             // Draw bit range at the right end of the column
             int bitRangeX = signalNamesWidth - bitRangeTextWidth - 5; // 5px padding from right edge
-            painter.setPen(QPen(QColor(180, 180, 180)));              // Gray color for bit range
+            
+            // NEW: Use appropriate pen color for bit range based on highlight state
+            if (isHighlighted) {
+                painter.setPen(QPen(QColor(80, 80, 80))); // Dark gray for bit range on yellow
+            } else {
+                painter.setPen(QPen(QColor(180, 180, 180))); // Gray color for bit range
+            }
             painter.drawText(bitRangeX, textY, bitRangeText);
 
             // Reset pen color for next items
-            if (isSelected)
-            {
+            if (isHighlighted) {
+                painter.setPen(QPen(QColor(0, 0, 0))); // Black for highlighted text
+            } else if (isSelected) {
                 painter.setPen(QPen(Qt::white));
-            }
-            else if (isSearchActive && isSearchMatch)
-            {
+            } else if (isSearchActive && isSearchMatch) {
                 painter.setPen(QPen(QColor(200, 200, 255)));
-            }
-            else if (item.type == DisplayItem::Space)
-            {
+            } else if (item.type == DisplayItem::Space) {
                 painter.setPen(QPen(QColor(150, 255, 150)));
-            }
-            else
-            {
+            } else {
                 painter.setPen(QPen(Qt::white));
             }
         }
@@ -592,103 +590,6 @@ void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
     // Reset clipping
     painter.setClipping(false);
 }
-
-// void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
-// {
-//     // Draw signal names column background
-//     painter.fillRect(0, 0, signalNamesWidth, height(), QColor(0, 0, 0));
-
-//     // Draw names splitter
-//     // painter.fillRect(signalNamesWidth - 1, 0, 2, height(), QColor(100, 100, 100));
-
-//     // Draw pinned header (always visible)
-//     painter.fillRect(0, 0, signalNamesWidth, timeMarkersHeight, QColor(30, 30, 30)); // Signal Name Column | Header Color
-//     painter.setPen(QPen(Qt::white));
-//     painter.drawText(5, timeMarkersHeight - 8, "Signal Name");
-
-//     // Set up clipping to exclude pinned areas from scrolling
-//     painter.setClipRect(0, timeMarkersHeight, signalNamesWidth, height() - timeMarkersHeight);
-
-//     // FIXED: Start drawing signals right below the timeline header
-//     int currentY = timeMarkersHeight - verticalOffset;
-
-//     for (int i = 0; i < displayItems.size(); i++)
-//     {
-//         const auto &item = displayItems[i];
-//         int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
-
-//         // Skip drawing if item is completely outside visible area
-//         if (currentY + itemHeight <= timeMarkersHeight)
-//         {
-//             currentY += itemHeight;
-//             continue;
-//         }
-//         if (currentY >= height())
-//         {
-//             break;
-//         }
-
-//         // Draw background based on selection and type
-//         bool isSelected = selectedItems.contains(i);
-//         bool isSearchMatch = searchResults.contains(i);
-
-//         if (isSelected)
-//         {
-//             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(60, 60, 90));
-//         }
-//         else if (isSearchActive && isSearchMatch)
-//         {
-//             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 80, 120, 150));
-//         }
-//         else if (item.type == DisplayItem::Space)
-//         {
-//             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(80, 160, 80, 120));
-//         }
-//         else if (i % 2 == 0)
-//         {
-//             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(0, 0, 0)); // Signal Name Column | Color 1
-//         }
-//         else
-//         {
-//             painter.fillRect(0, currentY, signalNamesWidth, itemHeight, QColor(0, 0, 0)); // Signal Name Column | Color 2
-//         }
-
-//         // Draw item name with appropriate styling
-//         if (isSelected)
-//         {
-//             painter.setPen(QPen(Qt::white));
-//         }
-//         else if (isSearchActive && isSearchMatch)
-//         {
-//             painter.setPen(QPen(QColor(200, 200, 255)));
-//         }
-//         else if (item.type == DisplayItem::Space)
-//         {
-//             painter.setPen(QPen(QColor(150, 255, 150)));
-//         }
-//         else
-//         {
-//             painter.setPen(QPen(Qt::white));
-//         }
-
-//         QString displayName = item.getName();
-//         int textIndent = 5;
-
-//         // Center text vertically within the item
-//         QFontMetrics fm(painter.font());
-//         int textY = currentY + (itemHeight + fm.ascent() - fm.descent()) / 2;
-//         painter.drawText(textIndent, textY, displayName);
-
-//         // Draw horizontal separator
-//         painter.setPen(QPen(QColor(80, 80, 80)));
-//         painter.drawLine(0, currentY + itemHeight, signalNamesWidth, currentY + itemHeight);
-
-//         currentY += itemHeight;
-//     }
-
-//     // Reset clipping
-//     painter.setClipping(false);
-// }
 
 void WaveformWidget::drawWaveformArea(QPainter &painter)
 {
@@ -3244,4 +3145,50 @@ int WaveformWidget::findLastSignalIndex() const
         }
     }
     return -1;
+}
+
+void WaveformWidget::highlightSignal(int signalIndex, bool highlight)
+{
+    if (signalIndex < 0 || signalIndex >= displayItems.size()) {
+        return;
+    }
+
+    if (highlight) {
+        highlightedSignals.insert(signalIndex);
+    } else {
+        highlightedSignals.remove(signalIndex);
+    }
+    
+    update();
+}
+
+void WaveformWidget::clearSearchHighlights()
+{
+    highlightedSignals.clear();
+    update();
+}
+
+void WaveformWidget::selectSignalByIndex(int index)
+{
+    if (index < 0 || index >= displayItems.size()) {
+        return;
+    }
+
+    selectedItems.clear();
+    selectedItems.insert(index);
+    lastSelectedItem = index;
+    
+    // Ensure the signal is visible in the viewport
+    int signalY = getItemYPosition(index) - verticalOffset;
+    int viewportHeight = height() - timeMarkersHeight;
+    
+    if (signalY < timeMarkersHeight || signalY > height()) {
+        // Scroll to make the signal visible
+        verticalOffset = getItemYPosition(index) - timeMarkersHeight - (viewportHeight / 2);
+        verticalOffset = qMax(0, verticalOffset);
+        verticalScrollBar->setValue(verticalOffset);
+    }
+    
+    update();
+    emit itemSelected(index);
 }

@@ -24,6 +24,7 @@
 #include <QFileSystemWatcher>
 #include <QTimer>
 
+
 // In the constructor, initialize history
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), vcdParser(new VCDParser(this)),
@@ -266,6 +267,23 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 
 void MainWindow::createActions()
 {
+
+    // NEW: Value search actions
+    searchValueAction = new QAction("Search Signal Value...", this);
+    searchValueAction->setShortcut(QKeySequence::Find);
+    connect(searchValueAction, &QAction::triggered, this, &MainWindow::searchSignalValue);
+
+    findNextValueAction = new QAction("Find Next Value", this);
+    findNextValueAction->setShortcut(QKeySequence::FindNext);
+    connect(findNextValueAction, &QAction::triggered, this, &MainWindow::findNextValue);
+
+    findPreviousValueAction = new QAction("Find Previous Value", this);
+    findPreviousValueAction->setShortcut(QKeySequence::FindPrevious);
+    connect(findPreviousValueAction, &QAction::triggered, this, &MainWindow::findPreviousValue);
+
+    clearValueSearchAction = new QAction("Clear Value Search", this);
+    connect(clearValueSearchAction, &QAction::triggered, this, &MainWindow::clearValueSearch);
+
     openAction = new QAction("Open", this);
     openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
@@ -444,14 +462,13 @@ void MainWindow::createMenuBar()
     // File menu
     QMenu *fileMenu = menuBar->addMenu("File");
     fileMenu->addAction(openAction);
-
+    
     // NEW: Add save/load signals actions
     fileMenu->addAction(saveSignalsAction);
     fileMenu->addAction(loadSignalsAction);
     fileMenu->addAction(refreshVcdAction);
     fileMenu->addSeparator();
-
-    fileMenu->addAction("Manage Sessions...", this, &MainWindow::manageSessions);
+    
     // NEW: Recent files submenu
     recentMenu = fileMenu->addMenu("Recent");
     fileMenu->addSeparator();
@@ -473,10 +490,13 @@ void MainWindow::createMenuBar()
     waveMenu->addAction(increaseHeightAction);
     waveMenu->addAction(decreaseHeightAction);
     waveMenu->addSeparator();
-
-    // Help menu
-    QMenu *helpMenu = menuBar->addMenu("Help");
-    helpMenu->addAction(aboutAction);
+    
+    // NEW: Add value search actions to Wave menu
+    waveMenu->addAction(searchValueAction);
+    waveMenu->addAction(findNextValueAction);
+    waveMenu->addAction(findPreviousValueAction);
+    waveMenu->addAction(clearValueSearchAction);
+    waveMenu->addSeparator();
 
     // Signal colors submenu
     QMenu *signalColorsMenu = waveMenu->addMenu("Signal Colors");
@@ -493,6 +513,10 @@ void MainWindow::createMenuBar()
     lineThicknessMenu = waveMenu->addMenu("Line Thickness");
     lineThicknessMenu->addAction(lineThinAction);
     lineThicknessMenu->addAction(lineMediumAction);
+
+    // Help menu
+    QMenu *helpMenu = menuBar->addMenu("Help");
+    helpMenu->addAction(aboutAction);
 
     // NEW: Initially disable save/load until VCD is loaded
     updateSaveLoadActions();
@@ -739,16 +763,18 @@ void MainWindow::showAddSignalsDialog()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     // Clean up signal dialog temp file when application closes
-    if (QFile::exists(tempVcdFilePathForSignalDialog)) {
+    if (QFile::exists(tempVcdFilePathForSignalDialog))
+    {
         QFile::remove(tempVcdFilePathForSignalDialog);
         qDebug() << "Cleaned up signal dialog temp file:" << tempVcdFilePathForSignalDialog;
     }
-    
+
     // NEW: Clean up file watcher
-    if (!currentVcdFilePath.isEmpty()) {
+    if (!currentVcdFilePath.isEmpty())
+    {
         fileWatcher->removePath(currentVcdFilePath);
     }
-    
+
     QMainWindow::closeEvent(event);
 }
 
@@ -1905,32 +1931,367 @@ void MainWindow::onVcdFileChanged(const QString &path)
 
 void MainWindow::checkForVcdUpdates()
 {
-    if (currentVcdFilePath.isEmpty()) {
+    if (currentVcdFilePath.isEmpty())
+    {
         return;
     }
-    
+
     QFileInfo fileInfo(currentVcdFilePath);
-    if (!fileInfo.exists()) {
+    if (!fileInfo.exists())
+    {
         return;
     }
-    
+
     static QDateTime lastModified;
     static qint64 lastSize = 0;
-    
+
     QDateTime currentModified = fileInfo.lastModified();
     qint64 currentSize = fileInfo.size();
-    
-    if (currentModified != lastModified || currentSize != lastSize) {
+
+    if (currentModified != lastModified || currentSize != lastSize)
+    {
         int result = QMessageBox::question(this, "VCD File Updated",
-                                         "The VCD file has been modified.\n"
-                                         "Would you like to refresh the data?",
-                                         QMessageBox::Yes | QMessageBox::No,
-                                         QMessageBox::Yes);
-        if (result == QMessageBox::Yes) {
+                                           "The VCD file has been modified.\n"
+                                           "Would you like to refresh the data?",
+                                           QMessageBox::Yes | QMessageBox::No,
+                                           QMessageBox::Yes);
+        if (result == QMessageBox::Yes)
+        {
             refreshVcd();
         }
     }
-    
+
     lastModified = currentModified;
     lastSize = currentSize;
 }
+
+void MainWindow::searchSignalValue()
+{
+    if (!vcdParser || waveformWidget->getItemCount() == 0) {
+        QMessageBox::information(this, "Search Signal Value", "No signals loaded to search.");
+        return;
+    }
+
+    bool ok;
+    QString searchValue = QInputDialog::getText(this, "Search Signal Value",
+                                               "Enter value to search for:\n\n"
+                                               "Supports: binary (1010), hex (0xA, A), decimal (10), octal (0o12)\n"
+                                               "Special values: x, z, X, Z",
+                                               QLineEdit::Normal, lastSearchValue, &ok);
+    if (!ok || searchValue.isEmpty()) {
+        return;
+    }
+
+    lastSearchValue = searchValue;
+    performValueSearch(searchValue);
+}
+
+void MainWindow::performValueSearch(const QString &searchValue)
+{
+    if (!vcdParser) return;
+
+    valueSearchMatches.clear();
+    currentSearchMatchIndex = -1;
+
+    statusLabel->setText(QString("Searching for value: %1...").arg(searchValue));
+    QApplication::processEvents();
+
+    // Collect all signals from display
+    QList<QString> signalNames;
+    QMap<QString, int> signalIndexMap; // Map signal name to display index
+    QMap<QString, int> signalWidthMap; // Map signal name to width
+
+    for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+        const DisplayItem *item = waveformWidget->getItem(i);
+        if (item && item->type == DisplayItem::Signal) {
+            QString fullName = item->signal.signal.fullName;
+            signalNames.append(fullName);
+            signalIndexMap[fullName] = i;
+            signalWidthMap[fullName] = item->signal.signal.width;
+        }
+    }
+
+    if (signalNames.isEmpty()) {
+        QMessageBox::information(this, "Search Signal Value", "No signals to search.");
+        return;
+    }
+
+    // Search through all signals
+    int totalMatches = 0;
+    
+    for (const QString &signalName : signalNames) {
+        const auto changes = vcdParser->getValueChangesForSignal(signalName);
+        if (changes.isEmpty()) continue;
+
+        int signalWidth = signalWidthMap[signalName];
+        QString prevValue = changes.first().value;
+        int prevTime = changes.first().timestamp;
+
+        // Check initial value
+        if (matchesSearchValue(prevValue, searchValue, signalWidth)) {
+            ValueSearchMatch match;
+            match.signalName = signalName;
+            match.timestamp = 0; // Start time
+            match.value = prevValue;
+            match.signalIndex = signalIndexMap[signalName];
+            valueSearchMatches.append(match);
+            totalMatches++;
+        }
+
+        // Check all value changes
+        for (int i = 1; i < changes.size(); i++) {
+            const auto &change = changes[i];
+            if (matchesSearchValue(change.value, searchValue, signalWidth)) {
+                ValueSearchMatch match;
+                match.signalName = signalName;
+                match.timestamp = change.timestamp;
+                match.value = change.value;
+                match.signalIndex = signalIndexMap[signalName];
+                valueSearchMatches.append(match);
+                totalMatches++;
+            }
+            prevValue = change.value;
+        }
+    }
+
+    if (valueSearchMatches.isEmpty()) {
+        statusLabel->setText(QString("Value '%1' not found").arg(searchValue));
+        QMessageBox::information(this, "Search Signal Value", 
+                               QString("Value '%1' not found in any signal.").arg(searchValue));
+        return;
+    }
+
+    // Sort matches by timestamp
+    std::sort(valueSearchMatches.begin(), valueSearchMatches.end(),
+              [](const ValueSearchMatch &a, const ValueSearchMatch &b) {
+                  return a.timestamp < b.timestamp;
+              });
+
+    statusLabel->setText(QString("Found %1 matches for '%2'").arg(totalMatches).arg(searchValue));
+    
+    // Jump to first match
+    currentSearchMatchIndex = 0;
+    highlightSearchMatch(currentSearchMatchIndex);
+}
+
+bool MainWindow::matchesSearchValue(const QString &signalValue, const QString &searchValue, int signalWidth) const
+{
+    if (searchValue.isEmpty()) return false;
+
+    QString normalizedSearch = searchValue.trimmed().toLower();
+    QString normalizedSignal = signalValue.toLower();
+
+    // Handle special values (x, z)
+    if (normalizedSearch == "x" || normalizedSearch == "z") {
+        return normalizedSignal == normalizedSearch;
+    }
+
+    // Handle binary values (e.g., "1010", "b1010")
+    if (normalizedSearch.startsWith("b") || 
+        (normalizedSearch.length() > 1 && !normalizedSearch.startsWith("0x") && !normalizedSearch.startsWith("0o"))) {
+        QString binarySearch = normalizedSearch;
+        if (binarySearch.startsWith("b")) {
+            binarySearch = binarySearch.mid(1);
+        }
+        
+        // Convert signal value to binary for comparison
+        QString signalBinary = convertToBinary(signalValue, signalWidth);
+        return signalBinary == binarySearch;
+    }
+
+    // Handle hex values (e.g., "0xA", "A", "0xa", "a")
+    if (normalizedSearch.startsWith("0x") || 
+        (normalizedSearch.length() <= 8 && QRegularExpression("^[0-9a-f]+$").match(normalizedSearch).hasMatch())) {
+        QString hexSearch = normalizedSearch;
+        if (hexSearch.startsWith("0x")) {
+            hexSearch = hexSearch.mid(2);
+        }
+        
+        // Convert both to binary for comparison
+        QString searchBinary = convertToBinary(hexSearch, signalWidth, 16); // FIXED: Now matches declaration
+        QString signalBinary = convertToBinary(signalValue, signalWidth);
+        return searchBinary == signalBinary;
+    }
+
+    // Handle octal values (e.g., "0o12", "12")
+    if (normalizedSearch.startsWith("0o") || 
+        (normalizedSearch.length() <= 12 && QRegularExpression("^[0-7]+$").match(normalizedSearch).hasMatch())) {
+        QString octalSearch = normalizedSearch;
+        if (octalSearch.startsWith("0o")) {
+            octalSearch = octalSearch.mid(2);
+        }
+        
+        QString searchBinary = convertToBinary(octalSearch, signalWidth, 8); // FIXED: Now matches declaration
+        QString signalBinary = convertToBinary(signalValue, signalWidth);
+        return searchBinary == signalBinary;
+    }
+
+    // Handle decimal values (e.g., "10", "d10")
+    if (normalizedSearch.startsWith("d") || 
+        QRegularExpression("^\\d+$").match(normalizedSearch).hasMatch()) {
+        QString decimalSearch = normalizedSearch;
+        if (decimalSearch.startsWith("d")) {
+            decimalSearch = decimalSearch.mid(1);
+        }
+        
+        QString searchBinary = convertToBinary(decimalSearch, signalWidth, 10); // FIXED: Now matches declaration
+        QString signalBinary = convertToBinary(signalValue, signalWidth);
+        return searchBinary == signalBinary;
+    }
+
+    return false;
+}
+
+QString MainWindow::convertToBinary(const QString &value, int signalWidth, int base) const
+{
+    if (value.isEmpty() || value.toLower() == "x" || value.toLower() == "z") {
+        return value;
+    }
+
+    // Handle binary values directly
+    if (base == 2 || (base == -1 && QRegularExpression("^[01]+$").match(value).hasMatch())) {
+        QString binary = value;
+        // Pad or truncate to signal width
+        if (binary.length() < signalWidth) {
+            binary = binary.rightJustified(signalWidth, '0');
+        } else if (binary.length() > signalWidth) {
+            binary = binary.right(signalWidth);
+        }
+        return binary;
+    }
+
+    // Convert from other bases
+    bool ok;
+    unsigned long long numericValue;
+    
+    if (base == -1) {
+        // Auto-detect base
+        if (value.startsWith("0x", Qt::CaseInsensitive)) {
+            numericValue = value.mid(2).toULongLong(&ok, 16);
+        } else if (value.startsWith("0o", Qt::CaseInsensitive)) {
+            numericValue = value.mid(2).toULongLong(&ok, 8);
+        } else if (value.startsWith("b", Qt::CaseInsensitive)) {
+            numericValue = value.mid(1).toULongLong(&ok, 2);
+        } else if (value.startsWith("d", Qt::CaseInsensitive)) {
+            numericValue = value.mid(1).toULongLong(&ok, 10);
+        } else {
+            // Try to auto-detect
+            if (QRegularExpression("^[0-9a-fA-F]+$").match(value).hasMatch() && value.length() <= 8) {
+                // Looks like hex without prefix
+                numericValue = value.toULongLong(&ok, 16);
+            } else if (QRegularExpression("^[0-7]+$").match(value).hasMatch()) {
+                // Looks like octal without prefix
+                numericValue = value.toULongLong(&ok, 8);
+            } else if (QRegularExpression("^\\d+$").match(value).hasMatch()) {
+                // Looks like decimal
+                numericValue = value.toULongLong(&ok, 10);
+            } else {
+                return value; // Return original if we can't determine the base
+            }
+        }
+    } else {
+        // Use specified base
+        numericValue = value.toULongLong(&ok, base);
+    }
+    
+    if (!ok) {
+        return value; // Return original if conversion fails
+    }
+
+    // Convert to binary string
+    QString binary;
+    for (int i = signalWidth - 1; i >= 0; i--) {
+        if (signalWidth <= 64) {
+            binary.append((numericValue & (1ULL << i)) ? '1' : '0');
+        } else {
+            // For very wide signals, we need a different approach
+            // This is a simplified version for wide signals
+            if (i < 64) {
+                binary.append((numericValue & (1ULL << i)) ? '1' : '0');
+            } else {
+                binary.append('0'); // Pad with zeros for bits beyond 64
+            }
+        }
+    }
+    return binary;
+}
+
+void MainWindow::highlightSearchMatch(int matchIndex)
+{
+    if (matchIndex < 0 || matchIndex >= valueSearchMatches.size()) {
+        return;
+    }
+
+    const ValueSearchMatch &match = valueSearchMatches[matchIndex];
+    
+    // Clear previous highlights
+    waveformWidget->clearSearchHighlights();
+    
+    // Highlight the current match
+    waveformWidget->highlightSignal(match.signalIndex, true);
+    waveformWidget->selectSignalByIndex(match.signalIndex);
+    
+    // Navigate to the timestamp
+    waveformWidget->navigateToTime(match.timestamp);
+    
+    // Update status
+    statusLabel->setText(QString("Match %1/%2: %3 = %4 at time %5")
+                        .arg(matchIndex + 1)
+                        .arg(valueSearchMatches.size())
+                        .arg(match.signalName)
+                        .arg(match.value)
+                        .arg(match.timestamp));
+    
+    currentSearchMatchIndex = matchIndex;
+}
+
+void MainWindow::clearValueSearch()
+{
+    valueSearchMatches.clear();
+    currentSearchMatchIndex = -1;
+    lastSearchValue.clear();
+    
+    waveformWidget->clearSearchHighlights();
+    statusLabel->setText("Value search cleared");
+}
+
+void MainWindow::findNextValue()
+{
+    if (valueSearchMatches.isEmpty()) {
+        if (!lastSearchValue.isEmpty()) {
+            performValueSearch(lastSearchValue);
+        } else {
+            QMessageBox::information(this, "Find Next", "No previous search to continue.");
+        }
+        return;
+    }
+
+    int nextIndex = currentSearchMatchIndex + 1;
+    if (nextIndex >= valueSearchMatches.size()) {
+        nextIndex = 0; // Wrap around to first match
+        statusLabel->setText("Reached last match, wrapping to first");
+    }
+
+    highlightSearchMatch(nextIndex);
+}
+
+void MainWindow::findPreviousValue()
+{
+    if (valueSearchMatches.isEmpty()) {
+        if (!lastSearchValue.isEmpty()) {
+            performValueSearch(lastSearchValue);
+        } else {
+            QMessageBox::information(this, "Find Previous", "No previous search to continue.");
+        }
+        return;
+    }
+
+    int prevIndex = currentSearchMatchIndex - 1;
+    if (prevIndex < 0) {
+        prevIndex = valueSearchMatches.size() - 1; // Wrap around to last match
+        statusLabel->setText("Reached first match, wrapping to last");
+    }
+
+    highlightSearchMatch(prevIndex);
+}
+

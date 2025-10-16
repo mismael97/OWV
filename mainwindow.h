@@ -30,6 +30,9 @@
 
 #include <QFileSystemWatcher>
 
+#include <QRegularExpression>
+#include <QInputDialog>
+
 class SignalSelectionDialog;
 
 class MainWindow : public QMainWindow
@@ -52,6 +55,11 @@ protected:
     void closeEvent(QCloseEvent *event) override; // ADD override
 
 private slots:
+    void searchSignalValue(); // NEW: Search for signal values
+    void findNextValue();     // NEW: Find next occurrence
+    void findPreviousValue(); // NEW: Find previous occurrence
+    void clearValueSearch();  // NEW: Clear value search highlights
+
     void updateSaveLoadActions();
     void saveSignals();
     void loadSignals();
@@ -84,7 +92,30 @@ private slots:
     void onNextValueClicked();
 
 private:
-void checkForVcdUpdates();
+    // NEW: Value search members
+    QAction *searchValueAction;
+    QAction *findNextValueAction;
+    QAction *findPreviousValueAction;
+    QAction *clearValueSearchAction;
+
+    struct ValueSearchMatch
+    {
+        QString signalName;
+        int timestamp;
+        QString value;
+        int signalIndex;
+    };
+    QList<ValueSearchMatch> valueSearchMatches;
+    int currentSearchMatchIndex;
+    QString lastSearchValue;
+
+    void performValueSearch(const QString &searchValue);
+    QString normalizeValue(const QString &value, int signalWidth) const;
+    bool matchesSearchValue(const QString &signalValue, const QString &searchValue, int signalWidth) const;
+    QString convertToBinary(const QString &value, int signalWidth, int base = -1) const; // FIXED: Added base parameter with default
+    void highlightSearchMatch(int matchIndex);
+
+    void checkForVcdUpdates();
     void manageSessions();
     void loadSpecificSession(const QString &sessionName);
     // Add these new actions
