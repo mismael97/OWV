@@ -124,6 +124,13 @@ class WaveformWidget : public QWidget
     Q_OBJECT
 
 public:
+    // Signal cursor methods
+    void setSignalCursor(int itemIndex);
+    void clearSignalCursor();
+    int getSignalCursorIndex() const;
+    void insertSignalsAtCursor(const QList<VCDSignal> &newSignals, int cursorIndex);
+    int getItemHeight(int index) const;
+
     int getCursorTime() const { return cursorTime; }
     void navigateToTime(int time);
     enum NavigationMode
@@ -201,6 +208,9 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    void drawSignalCursor(QPainter &painter);
+    int signalCursorIndex = -1; // -1 means no cursor, otherwise index where cursor is placed
+    bool showSignalCursor = false;
     void forceNavigationUpdate();
     void debugSignalState(int time) const;
     double calculateZoomFitScale() const

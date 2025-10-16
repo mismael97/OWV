@@ -555,11 +555,20 @@ void MainWindow::showAddSignalsDialog()
             statusLabel->setText(QString("Loading %1 signals...").arg(newSignalsToAdd.size()));
             QApplication::processEvents();
 
-            // Add to current signals
-            QList<VCDSignal> allSignalsToDisplay = currentSignals;
-            allSignalsToDisplay.append(newSignalsToAdd);
-
-            waveformWidget->setVisibleSignals(allSignalsToDisplay);
+            // Get current cursor position from waveform widget
+            int cursorIndex = waveformWidget->getSignalCursorIndex();
+            
+            if (cursorIndex >= 0) {
+                // Insert new signals at cursor position
+                waveformWidget->insertSignalsAtCursor(newSignalsToAdd, cursorIndex);
+                statusLabel->setText(QString("Added %1 signal(s) at cursor position").arg(newSignalsToAdd.size()));
+            } else {
+                // Default behavior: append to end
+                QList<VCDSignal> allSignalsToDisplay = currentSignals;
+                allSignalsToDisplay.append(newSignalsToAdd);
+                waveformWidget->setVisibleSignals(allSignalsToDisplay);
+                statusLabel->setText(QString("Added %1 signal(s) at the end").arg(newSignalsToAdd.size()));
+            }
 
             // Update status
             int displayedCount = 0;

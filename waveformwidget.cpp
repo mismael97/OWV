@@ -35,6 +35,8 @@ WaveformWidget::WaveformWidget(QWidget *parent)
       showCursor(true),
       verticalOffset(0),
       isSearchActive(false),
+      signalCursorIndex(-1),  
+      showSignalCursor(false), 
       MAX_CACHED_SIGNALS(1000)
 {
     qDebug() << "WaveformWidget constructor started";
@@ -383,6 +385,34 @@ void WaveformWidget::drawSignalValuesColumn(QPainter &painter, int cursorTime)
     painter.setClipping(false);
 }
 
+
+void WaveformWidget::drawSignalCursor(QPainter &painter)
+{
+    if (!showSignalCursor || signalCursorIndex < 0 || signalCursorIndex >= displayItems.size())
+        return;
+
+    // Calculate the Y position where the cursor should be drawn
+    int cursorY = getItemYPosition(signalCursorIndex) + getItemHeight(signalCursorIndex) - verticalOffset;
+    
+    // Only draw if cursor is in visible area
+    if (cursorY < timeMarkersHeight || cursorY > height())
+        return;
+
+    // Draw a yellow horizontal line ONLY in the signal names column
+    painter.setPen(QPen(Qt::yellow, 2, Qt::SolidLine));
+    painter.drawLine(0, cursorY, signalNamesWidth, cursorY);
+    
+    // Draw a small triangle or arrow on the left side to indicate insertion point
+    QPolygon triangle;
+    triangle << QPoint(5, cursorY - 5) 
+             << QPoint(15, cursorY) 
+             << QPoint(5, cursorY + 5);
+    painter.setBrush(QBrush(Qt::yellow));
+    painter.drawPolygon(triangle);
+    
+    // REMOVED: "Insertion Point" text - just the line and triangle are enough
+}
+
 void WaveformWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
@@ -407,18 +437,11 @@ void WaveformWidget::paintEvent(QPaintEvent *event)
         return;
     }
 
-    // DEBUG: Verify cursor position
-    int waveformStartX = signalNamesWidth + valuesColumnWidth;
-    int viewportWidth = width() - waveformStartX;
-    int cursorX = timeToX(cursorTime);
-    int centerX = viewportWidth / 2;
-    
-    qDebug() << "Paint event - Cursor X:" << cursorX << "Center X:" << centerX << "Difference:" << (cursorX - centerX);
-
     drawSignalNamesColumn(painter);
     drawSignalValuesColumn(painter, cursorTime);
     drawWaveformArea(painter);
     drawTimeCursor(painter);
+    drawSignalCursor(painter);  // ADD THIS LINE - Draw the signal cursor
 }
 
 void WaveformWidget::drawSignalNamesColumn(QPainter &painter)
@@ -714,16 +737,17 @@ void WaveformWidget::drawTimeCursor(QPainter &painter)
 
     // Calculate the height based on actual signals (stop at last signal)
     int totalSignalsHeight = timeMarkersHeight; // Start below timeline
-    
-    for (int i = 0; i < displayItems.size(); i++) {
+
+    for (int i = 0; i < displayItems.size(); i++)
+    {
         const auto &item = displayItems[i];
         int itemHeight = (item.type == DisplayItem::Signal) ? signalHeight : 30;
         totalSignalsHeight += itemHeight;
     }
-    
+
     // Add some padding at the bottom
     totalSignalsHeight += 10;
-    
+
     // Don't draw beyond the actual content height
     int drawHeight = qMin(totalSignalsHeight, height());
 
@@ -2198,6 +2222,27 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex)
         contextMenu.addAction(removeText, this, &WaveformWidget::removeSelectedSignals);
         contextMenu.addSeparator();
 
+        // Signal cursor option for signals
+        if (isSignalItem(itemIndex))
+        {
+            QString cursorText = "Set Signal Cursor";
+            if (signalCursorIndex == itemIndex) {
+                cursorText = "✓ " + cursorText;
+            }
+            
+            QAction *cursorAction = contextMenu.addAction(cursorText, this, [this, itemIndex]() {
+                setSignalCursor(itemIndex);
+            });
+            
+            // Add option to clear cursor
+            if (signalCursorIndex >= 0) {
+                contextMenu.addAction("Clear Signal Cursor", this, [this]() {
+                    clearSignalCursor();
+                });
+            }
+            contextMenu.addSeparator();
+        }
+
         // Color change for signals - show count if multiple selected
         bool hasSignals = false;
         for (int index : selectedItems)
@@ -2274,6 +2319,14 @@ void WaveformWidget::showContextMenu(const QPoint &pos, int itemIndex)
     }
     else
     {
+        // Global options when clicking empty space
+        if (signalCursorIndex >= 0) {
+            contextMenu.addAction("Clear Signal Cursor", this, [this]() {
+                clearSignalCursor();
+            });
+            contextMenu.addSeparator();
+        }
+
         // Global bus display options when clicking empty space
         QMenu *busFormatMenu = contextMenu.addMenu("Bus Display Format");
 
@@ -2591,62 +2644,66 @@ void WaveformWidget::setNavigationMode(NavigationMode mode)
 
 void WaveformWidget::navigateToTime(int targetTime)
 {
-    if (!vcdParser) return;
-    
+    if (!vcdParser)
+        return;
+
     // Ensure the time is within valid range
     int endTime = vcdParser->getEndTime();
     targetTime = qMax(0, qMin(targetTime, endTime));
-    
+
     qDebug() << "Navigating to time:" << targetTime << "(end time:" << endTime << ")";
-    
+
     int oldCursorTime = cursorTime;
-    
+
     // Set cursor time
     cursorTime = targetTime;
     showCursor = true;
-    
+
     // SIMPLE AND CORRECT: Always center the cursor in the visible waveform area
     int waveformStartX = signalNamesWidth + valuesColumnWidth;
     int viewportWidth = width() - waveformStartX;
-    
-    if (viewportWidth > 0) {
+
+    if (viewportWidth > 0)
+    {
         // Calculate what pixel position the cursor should be at to be centered
         // We want: cursorX = viewportWidth / 2
         // But cursorX = timeToX(cursorTime) = (cursorTime * timeScale) - timeOffset
         // So: (cursorTime * timeScale) - timeOffset = viewportWidth / 2
         // Therefore: timeOffset = (cursorTime * timeScale) - viewportWidth / 2
-        
+
         timeOffset = (cursorTime * timeScale) - (viewportWidth / 2);
-        
+
         // Clamp to valid range
         timeOffset = qMax(0, timeOffset);
         int maxOffset = horizontalScrollBar->maximum();
         timeOffset = qMin(timeOffset, maxOffset);
-        
+
         qDebug() << "Viewport adjustment:";
         qDebug() << "  Cursor time:" << cursorTime;
         qDebug() << "  Time scale:" << timeScale;
         qDebug() << "  Viewport width:" << viewportWidth;
         qDebug() << "  Calculated offset:" << (cursorTime * timeScale) - (viewportWidth / 2);
         qDebug() << "  Final offset:" << timeOffset;
-        
+
         // Update scrollbar
         horizontalScrollBar->setValue(timeOffset);
     }
-    
+
     // Reset navigation for current signal when cursor moves
-    if (!currentlyNavigatedSignal.isEmpty()) {
+    if (!currentlyNavigatedSignal.isEmpty())
+    {
         resetNavigationForCurrentSignal();
     }
-    
+
     // Emit cursor time change if it actually changed
-    if (cursorTime != oldCursorTime) {
+    if (cursorTime != oldCursorTime)
+    {
         emit cursorTimeChanged(cursorTime);
     }
-    
+
     updateScrollBar();
     update();
-    
+
     qDebug() << "Navigation complete - Cursor time:" << cursorTime;
 }
 
@@ -3050,4 +3107,84 @@ void WaveformWidget::handleWaveformClick(const QPoint &pos)
             update();
         }
     }
+}
+
+// Signal cursor methods
+void WaveformWidget::setSignalCursor(int itemIndex)
+{
+    if (itemIndex >= 0 && itemIndex < displayItems.size() && isSignalItem(itemIndex)) {
+        signalCursorIndex = itemIndex;
+        showSignalCursor = true;
+        update();
+        
+        qDebug() << "Signal cursor set below signal:" << displayItems[itemIndex].getName();
+    }
+}
+
+void WaveformWidget::clearSignalCursor()
+{
+    signalCursorIndex = -1;
+    showSignalCursor = false;
+    update();
+    
+    qDebug() << "Signal cursor cleared";
+}
+
+int WaveformWidget::getSignalCursorIndex() const
+{
+    return signalCursorIndex;
+}
+
+int WaveformWidget::getItemHeight(int index) const
+{
+    if (index < 0 || index >= displayItems.size())
+        return 0;
+        
+    const auto &item = displayItems[index];
+    return (item.type == DisplayItem::Signal) ? signalHeight : 30;
+}
+
+void WaveformWidget::insertSignalsAtCursor(const QList<VCDSignal> &newSignals, int cursorIndex)
+{
+    if (cursorIndex < 0 || cursorIndex >= displayItems.size() || newSignals.isEmpty())
+        return;
+
+    // Create display items for new signals
+    QList<DisplayItem> newItems;
+    for (const auto &signal : newSignals) {
+        newItems.append(DisplayItem::createSignal(signal));
+    }
+
+    // Insert after the cursor position
+    int insertPosition = cursorIndex + 1;
+    
+    // Ensure we don't go out of bounds
+    if (insertPosition > displayItems.size()) {
+        insertPosition = displayItems.size();
+    }
+
+    // Insert the new signals
+    for (int i = newItems.size() - 1; i >= 0; i--) {
+        displayItems.insert(insertPosition, newItems[i]);
+    }
+
+    // Load signal data for the new signals
+    if (vcdParser) {
+        QList<QString> fullNames;
+        for (const auto &signal : newSignals) {
+            fullNames.append(signal.fullName);
+        }
+        vcdParser->loadSignalsData(fullNames);
+    }
+
+    // Clear selection and update
+    selectedItems.clear();
+    lastSelectedItem = -1;
+    
+    // Move the cursor to below the newly inserted signals
+    signalCursorIndex = insertPosition + newItems.size() - 1;
+    
+    updateScrollBar();
+    update();
+    emit itemSelected(-1);
 }
