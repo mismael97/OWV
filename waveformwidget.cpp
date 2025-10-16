@@ -412,14 +412,14 @@ void WaveformWidget::drawSignalCursor(QPainter &painter)
         return;
 
     // Draw a yellow horizontal line ONLY in the signal names column
-    painter.setPen(QPen(Qt::yellow, 2, Qt::SolidLine));
+    painter.setPen(QPen(Qt::yellow, 1, Qt::SolidLine));
     painter.drawLine(0, cursorY, signalNamesWidth, cursorY);
     
     // Draw a small triangle or arrow on the left side to indicate insertion point
     QPolygon triangle;
-    triangle << QPoint(2, cursorY - 2) 
-             << QPoint(12, cursorY) 
-             << QPoint(2, cursorY + 2);
+    triangle << QPoint(4, cursorY - 4) 
+             << QPoint(14, cursorY) 
+             << QPoint(4, cursorY + 4);
     painter.setBrush(QBrush(Qt::yellow));
     painter.drawPolygon(triangle);
     
