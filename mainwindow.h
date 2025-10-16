@@ -33,6 +33,35 @@
 #include <QRegularExpression>
 #include <QInputDialog>
 
+#include <QRadioButton>
+#include <QLineEdit>
+#include <QButtonGroup>
+#include <QVBoxLayout>
+#include <QGroupBox>
+
+class ValueSearchDialog : public QDialog
+{
+    Q_OBJECT
+
+public:
+    explicit ValueSearchDialog(QWidget *parent = nullptr);
+
+    QString getSearchValue() const { return valueEdit->text(); }
+    int getSearchFormat() const { return formatGroup->checkedId(); }
+    void setLastValues(const QString &value, int format);
+
+private:
+
+    QString convertToBinaryStrict(const QString &value, int signalWidth, int format) const;
+    QLineEdit *valueEdit;
+    QButtonGroup *formatGroup;
+    QRadioButton *autoRadio;
+    QRadioButton *binaryRadio;
+    QRadioButton *hexRadio;
+    QRadioButton *decimalRadio;
+    QRadioButton *octalRadio;
+};
+
 class SignalSelectionDialog;
 
 class MainWindow : public QMainWindow
@@ -92,6 +121,9 @@ private slots:
     void onNextValueClicked();
 
 private:
+    unsigned long long convertToNumeric(const QString &value, int format) const;
+QString convertToBinaryStrict(const QString &value, int signalWidth, int format) const;
+
     // NEW: Value search members
     QAction *searchValueAction;
     QAction *findNextValueAction;
@@ -105,15 +137,26 @@ private:
         QString value;
         int signalIndex;
     };
+
     QList<ValueSearchMatch> valueSearchMatches;
     int currentSearchMatchIndex;
     QString lastSearchValue;
+    int lastSearchFormat; // NEW: Remember last search format
 
-    void performValueSearch(const QString &searchValue);
-    QString normalizeValue(const QString &value, int signalWidth) const;
-    bool matchesSearchValue(const QString &signalValue, const QString &searchValue, int signalWidth) const;
-    QString convertToBinary(const QString &value, int signalWidth, int base = -1) const; // FIXED: Added base parameter with default
+    void performValueSearch(const QString &searchValue, int searchFormat); // FIXED: Added searchFormat parameter
+    QString convertToBinary(const QString &value, int signalWidth) const;
+    bool matchesSearchValue(const QString &signalValue, const QString &searchValue, int signalWidth, int searchFormat) const; // FIXED: Added searchFormat parameter
     void highlightSearchMatch(int matchIndex);
+
+    // NEW: Search format constants
+    enum SearchFormat
+    {
+        FormatAuto = 0,
+        FormatBinary = 1,
+        FormatHex = 2,
+        FormatDecimal = 3,
+        FormatOctal = 4
+    };
 
     void checkForVcdUpdates();
     void manageSessions();

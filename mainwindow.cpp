@@ -28,7 +28,9 @@
 // In the constructor, initialize history
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), vcdParser(new VCDParser(this)),
-      rtlProcessedForSignalDialog(false)
+      rtlProcessedForSignalDialog(false),
+      currentSearchMatchIndex(-1),
+      lastSearchFormat(0) // NEW: Initialize search format
 {
     qRegisterMetaType<VCDSignal>("VCDSignal");
     setWindowTitle("VCD Wave Viewer");
@@ -1972,34 +1974,72 @@ void MainWindow::searchSignalValue()
         return;
     }
 
-    bool ok;
-    QString searchValue = QInputDialog::getText(this, "Search Signal Value",
-                                               "Enter value to search for:\n\n"
-                                               "Supports: binary (1010), hex (0xA, A), decimal (10), octal (0o12)\n"
-                                               "Special values: x, z, X, Z",
-                                               QLineEdit::Normal, lastSearchValue, &ok);
-    if (!ok || searchValue.isEmpty()) {
+    // NEW: Collect signal width information for better search
+    QMap<QString, int> signalWidths;
+    int maxWidth = 0;
+    int minWidth = 1000;
+    
+    for (int i = 0; i < waveformWidget->getItemCount(); i++) {
+        const DisplayItem *item = waveformWidget->getItem(i);
+        if (item && item->type == DisplayItem::Signal) {
+            int width = item->signal.signal.width;
+            signalWidths[item->signal.signal.fullName] = width;
+            maxWidth = qMax(maxWidth, width);
+            minWidth = qMin(minWidth, width);
+        }
+    }
+
+    ValueSearchDialog dialog(this);
+    dialog.setLastValues(lastSearchValue, lastSearchFormat);
+    
+    // NEW: Show width information in dialog title
+    if (maxWidth > 0) {
+        dialog.setWindowTitle(QString("Search Signal Value (Signal widths: %1-%2 bits)").arg(minWidth).arg(maxWidth));
+    }
+    
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    QString searchValue = dialog.getSearchValue();
+    int searchFormat = dialog.getSearchFormat();
+    
+    if (searchValue.isEmpty()) {
         return;
     }
 
     lastSearchValue = searchValue;
-    performValueSearch(searchValue);
+    lastSearchFormat = searchFormat;
+    performValueSearch(searchValue, searchFormat);
 }
 
-void MainWindow::performValueSearch(const QString &searchValue)
+void MainWindow::performValueSearch(const QString &searchValue, int searchFormat)
 {
     if (!vcdParser) return;
 
     valueSearchMatches.clear();
     currentSearchMatchIndex = -1;
 
-    statusLabel->setText(QString("Searching for value: %1...").arg(searchValue));
+    // Get format name for status
+    QString formatName;
+    switch (searchFormat) {
+    case FormatBinary: formatName = "binary"; break;
+    case FormatHex: formatName = "hex"; break;
+    case FormatDecimal: formatName = "decimal"; break;
+    case FormatOctal: formatName = "octal"; break;
+    default: formatName = "auto"; break;
+    }
+    
+    qDebug() << "=== STARTING VALUE SEARCH ===";
+    qDebug() << "Search value:" << searchValue << "Format:" << formatName;
+    
+    statusLabel->setText(QString("Searching for %1 value: %2...").arg(formatName).arg(searchValue));
     QApplication::processEvents();
 
     // Collect all signals from display
     QList<QString> signalNames;
-    QMap<QString, int> signalIndexMap; // Map signal name to display index
-    QMap<QString, int> signalWidthMap; // Map signal name to width
+    QMap<QString, int> signalIndexMap;
+    QMap<QString, int> signalWidthMap;
 
     for (int i = 0; i < waveformWidget->getItemCount(); i++) {
         const DisplayItem *item = waveformWidget->getItem(i);
@@ -2008,6 +2048,7 @@ void MainWindow::performValueSearch(const QString &searchValue)
             signalNames.append(fullName);
             signalIndexMap[fullName] = i;
             signalWidthMap[fullName] = item->signal.signal.width;
+            qDebug() << "Signal to search:" << fullName << "Width:" << item->signal.signal.width;
         }
     }
 
@@ -2021,14 +2062,20 @@ void MainWindow::performValueSearch(const QString &searchValue)
     
     for (const QString &signalName : signalNames) {
         const auto changes = vcdParser->getValueChangesForSignal(signalName);
-        if (changes.isEmpty()) continue;
+        if (changes.isEmpty()) {
+            qDebug() << "No changes for signal:" << signalName;
+            continue;
+        }
 
+        qDebug() << "Searching signal:" << signalName << "Changes count:" << changes.size();
+        
         int signalWidth = signalWidthMap[signalName];
         QString prevValue = changes.first().value;
         int prevTime = changes.first().timestamp;
 
         // Check initial value
-        if (matchesSearchValue(prevValue, searchValue, signalWidth)) {
+        if (matchesSearchValue(prevValue, searchValue, signalWidth, searchFormat)) {
+            qDebug() << "FOUND MATCH - Initial value:" << prevValue << "at time 0";
             ValueSearchMatch match;
             match.signalName = signalName;
             match.timestamp = 0; // Start time
@@ -2041,7 +2088,8 @@ void MainWindow::performValueSearch(const QString &searchValue)
         // Check all value changes
         for (int i = 1; i < changes.size(); i++) {
             const auto &change = changes[i];
-            if (matchesSearchValue(change.value, searchValue, signalWidth)) {
+            if (matchesSearchValue(change.value, searchValue, signalWidth, searchFormat)) {
+                qDebug() << "FOUND MATCH - Value:" << change.value << "at time" << change.timestamp;
                 ValueSearchMatch match;
                 match.signalName = signalName;
                 match.timestamp = change.timestamp;
@@ -2054,10 +2102,13 @@ void MainWindow::performValueSearch(const QString &searchValue)
         }
     }
 
+    qDebug() << "Total matches found:" << totalMatches;
+
     if (valueSearchMatches.isEmpty()) {
         statusLabel->setText(QString("Value '%1' not found").arg(searchValue));
         QMessageBox::information(this, "Search Signal Value", 
-                               QString("Value '%1' not found in any signal.").arg(searchValue));
+                               QString("Value '%1' (%2 format) not found in any signal.")
+                               .arg(searchValue).arg(formatName));
         return;
     }
 
@@ -2067,153 +2118,296 @@ void MainWindow::performValueSearch(const QString &searchValue)
                   return a.timestamp < b.timestamp;
               });
 
-    statusLabel->setText(QString("Found %1 matches for '%2'").arg(totalMatches).arg(searchValue));
+    statusLabel->setText(QString("Found %1 matches for '%2' (%3 format)").arg(totalMatches).arg(searchValue).arg(formatName));
     
     // Jump to first match
     currentSearchMatchIndex = 0;
     highlightSearchMatch(currentSearchMatchIndex);
 }
 
-bool MainWindow::matchesSearchValue(const QString &signalValue, const QString &searchValue, int signalWidth) const
+unsigned long long MainWindow::convertToNumeric(const QString &value, int format) const
+{
+    if (value.isEmpty() || value.toLower() == "x" || value.toLower() == "z") {
+        return 0; // Can't convert special values
+    }
+
+    QString processedValue = value.toLower();
+    int base = 2;
+
+    // Determine base based on format or auto-detect
+    if (format != -1) {
+        switch (format) {
+        case FormatBinary: base = 2; break;
+        case FormatHex: base = 16; break;
+        case FormatDecimal: base = 10; break;
+        case FormatOctal: base = 8; break;
+        default: base = 2; break;
+        }
+        
+        // Remove prefixes if present
+        if (base == 16 && processedValue.startsWith("0x")) {
+            processedValue = processedValue.mid(2);
+        } else if (base == 8 && processedValue.startsWith("0o")) {
+            processedValue = processedValue.mid(2);
+        } else if (base == 2 && processedValue.startsWith("b")) {
+            processedValue = processedValue.mid(1);
+        } else if (base == 10 && processedValue.startsWith("d")) {
+            processedValue = processedValue.mid(1);
+        }
+    } else {
+        // Auto-detect format for signal values
+        if (processedValue.startsWith("0x")) {
+            processedValue = processedValue.mid(2);
+            base = 16;
+        } else if (processedValue.startsWith("0o")) {
+            processedValue = processedValue.mid(2);
+            base = 8;
+        } else if (processedValue.startsWith("b")) {
+            processedValue = processedValue.mid(1);
+            base = 2;
+        } else if (processedValue.startsWith("d")) {
+            processedValue = processedValue.mid(1);
+            base = 10;
+        } else if (QRegularExpression("^[01]+$").match(processedValue).hasMatch()) {
+            base = 2;
+        } else if (QRegularExpression("^[0-7]+$").match(processedValue).hasMatch()) {
+            base = 8;
+        } else if (QRegularExpression("^[0-9a-f]+$").match(processedValue).hasMatch()) {
+            base = 16;
+        } else if (QRegularExpression("^\\d+$").match(processedValue).hasMatch()) {
+            base = 10;
+        } else {
+            base = 2; // Default fallback
+        }
+    }
+
+    bool ok;
+    unsigned long long numericValue = processedValue.toULongLong(&ok, base);
+    
+    if (!ok) {
+        qDebug() << "Numeric conversion failed for:" << processedValue << "base:" << base;
+        return 0;
+    }
+
+    return numericValue;
+}
+
+QString MainWindow::convertToBinaryStrict(const QString &value, int signalWidth, int format) const
+{
+    if (value.isEmpty() || value.toLower() == "x" || value.toLower() == "z") {
+        return value;
+    }
+
+    QString processedValue = value.toLower();
+    int base = 2;
+
+    // Determine base based on format
+    if (format != -1) {
+        switch (format) {
+        case FormatBinary: base = 2; break;
+        case FormatHex: base = 16; break;
+        case FormatDecimal: base = 10; break;
+        case FormatOctal: base = 8; break;
+        default: base = 2; break;
+        }
+        
+        // Remove prefixes if present
+        if (base == 16 && processedValue.startsWith("0x")) {
+            processedValue = processedValue.mid(2);
+        } else if (base == 8 && processedValue.startsWith("0o")) {
+            processedValue = processedValue.mid(2);
+        } else if (base == 2 && processedValue.startsWith("b")) {
+            processedValue = processedValue.mid(1);
+        } else if (base == 10 && processedValue.startsWith("d")) {
+            processedValue = processedValue.mid(1);
+        }
+    } else {
+        // Auto-detect format for signal values
+        if (processedValue.startsWith("0x")) {
+            processedValue = processedValue.mid(2);
+            base = 16;
+        } else if (processedValue.startsWith("0o")) {
+            processedValue = processedValue.mid(2);
+            base = 8;
+        } else if (processedValue.startsWith("b")) {
+            processedValue = processedValue.mid(1);
+            base = 2;
+        } else if (processedValue.startsWith("d")) {
+            processedValue = processedValue.mid(1);
+            base = 10;
+        } else if (QRegularExpression("^[01]+$").match(processedValue).hasMatch()) {
+            base = 2;
+        } else if (QRegularExpression("^[0-7]+$").match(processedValue).hasMatch()) {
+            base = 8;
+        } else if (QRegularExpression("^[0-9a-f]+$").match(processedValue).hasMatch()) {
+            base = 16;
+        } else if (QRegularExpression("^\\d+$").match(processedValue).hasMatch()) {
+            base = 10;
+        }
+    }
+
+    // Convert to numeric first
+    bool ok;
+    unsigned long long numericValue = processedValue.toULongLong(&ok, base);
+    
+    if (!ok) {
+        return value; // Return original if conversion fails
+    }
+
+    // Convert to binary string of exactly signalWidth bits
+    QString binary;
+    for (int i = signalWidth - 1; i >= 0; i--) {
+        if (i < 64) { // Only consider bits within 64-bit range
+            binary.append((numericValue & (1ULL << i)) ? '1' : '0');
+        } else {
+            binary.append('0'); // Pad with zeros for wider signals
+        }
+    }
+
+    return binary;
+}
+
+bool MainWindow::matchesSearchValue(const QString &signalValue, const QString &searchValue, int signalWidth, int searchFormat) const
 {
     if (searchValue.isEmpty()) return false;
 
     QString normalizedSearch = searchValue.trimmed().toLower();
     QString normalizedSignal = signalValue.toLower();
 
+    qDebug() << "Matching - Signal:" << signalValue << "Search:" << searchValue << "Width:" << signalWidth;
+
+    // First try direct string comparison (case insensitive)
+    // This handles exact matches and special values
+    if (normalizedSignal == normalizedSearch) {
+        qDebug() << "Direct string match found!";
+        return true;
+    }
+
     // Handle special values (x, z)
     if (normalizedSearch == "x" || normalizedSearch == "z") {
         return normalizedSignal == normalizedSearch;
     }
 
-    // Handle binary values (e.g., "1010", "b1010")
-    if (normalizedSearch.startsWith("b") || 
-        (normalizedSearch.length() > 1 && !normalizedSearch.startsWith("0x") && !normalizedSearch.startsWith("0o"))) {
-        QString binarySearch = normalizedSearch;
-        if (binarySearch.startsWith("b")) {
-            binarySearch = binarySearch.mid(1);
-        }
-        
-        // Convert signal value to binary for comparison
-        QString signalBinary = convertToBinary(signalValue, signalWidth);
-        return signalBinary == binarySearch;
+    // NEW: Convert search value to see what numeric value it represents
+    unsigned long long searchNumeric = convertToNumeric(normalizedSearch, searchFormat);
+    qDebug() << "Search represents numeric value:" << searchNumeric;
+
+    // Convert signal value to numeric
+    unsigned long long signalNumeric = convertToNumeric(normalizedSignal, -1); // Auto-detect format
+    qDebug() << "Signal represents numeric value:" << signalNumeric;
+
+    // NEW: Critical fix - Handle signal width properly!
+    // For the match to be valid, the search value must fit within the signal width
+    unsigned long long maxValueForWidth = (1ULL << signalWidth) - 1;
+    
+    qDebug() << "Max value for width" << signalWidth << ":" << maxValueForWidth;
+    
+    // If search value is too large for this signal width, it can't match
+    if (searchNumeric > maxValueForWidth) {
+        qDebug() << "Search value too large for signal width - no match";
+        return false;
     }
 
-    // Handle hex values (e.g., "0xA", "A", "0xa", "a")
-    if (normalizedSearch.startsWith("0x") || 
-        (normalizedSearch.length() <= 8 && QRegularExpression("^[0-9a-f]+$").match(normalizedSearch).hasMatch())) {
-        QString hexSearch = normalizedSearch;
-        if (hexSearch.startsWith("0x")) {
-            hexSearch = hexSearch.mid(2);
-        }
-        
-        // Convert both to binary for comparison
-        QString searchBinary = convertToBinary(hexSearch, signalWidth, 16); // FIXED: Now matches declaration
-        QString signalBinary = convertToBinary(signalValue, signalWidth);
-        return searchBinary == signalBinary;
-    }
-
-    // Handle octal values (e.g., "0o12", "12")
-    if (normalizedSearch.startsWith("0o") || 
-        (normalizedSearch.length() <= 12 && QRegularExpression("^[0-7]+$").match(normalizedSearch).hasMatch())) {
-        QString octalSearch = normalizedSearch;
-        if (octalSearch.startsWith("0o")) {
-            octalSearch = octalSearch.mid(2);
-        }
-        
-        QString searchBinary = convertToBinary(octalSearch, signalWidth, 8); // FIXED: Now matches declaration
-        QString signalBinary = convertToBinary(signalValue, signalWidth);
-        return searchBinary == signalBinary;
-    }
-
-    // Handle decimal values (e.g., "10", "d10")
-    if (normalizedSearch.startsWith("d") || 
-        QRegularExpression("^\\d+$").match(normalizedSearch).hasMatch()) {
-        QString decimalSearch = normalizedSearch;
-        if (decimalSearch.startsWith("d")) {
-            decimalSearch = decimalSearch.mid(1);
-        }
-        
-        QString searchBinary = convertToBinary(decimalSearch, signalWidth, 10); // FIXED: Now matches declaration
-        QString signalBinary = convertToBinary(signalValue, signalWidth);
-        return searchBinary == signalBinary;
-    }
-
-    return false;
+    // Now compare the numeric values
+    bool match = (searchNumeric == signalNumeric);
+    qDebug() << "Numeric match result:" << match;
+    
+    return match;
 }
 
-QString MainWindow::convertToBinary(const QString &value, int signalWidth, int base) const
+
+QString MainWindow::convertToBinary(const QString &value, int signalWidth) const
 {
     if (value.isEmpty() || value.toLower() == "x" || value.toLower() == "z") {
+        qDebug() << "convertToBinary: Special value or empty ->" << value;
         return value;
     }
 
+    QString processedValue = value.toLower();
+    int base = 2; // Default to binary
+
+    qDebug() << "convertToBinary: Input:" << value << "Width:" << signalWidth;
+
+    // Auto-detect base from prefixes
+    if (processedValue.startsWith("0x")) {
+        processedValue = processedValue.mid(2);
+        base = 16;
+        qDebug() << "Detected HEX format";
+    } else if (processedValue.startsWith("0o")) {
+        processedValue = processedValue.mid(2);
+        base = 8;
+        qDebug() << "Detected OCTAL format";
+    } else if (processedValue.startsWith("b")) {
+        processedValue = processedValue.mid(1);
+        base = 2;
+        qDebug() << "Detected BINARY format";
+    } else if (processedValue.startsWith("d")) {
+        processedValue = processedValue.mid(1);
+        base = 10;
+        qDebug() << "Detected DECIMAL format";
+    } else {
+        // Auto-detect from content
+        if (QRegularExpression("^[01]+$").match(processedValue).hasMatch()) {
+            base = 2;
+            qDebug() << "Auto-detected BINARY from content";
+        } else if (QRegularExpression("^[0-7]+$").match(processedValue).hasMatch()) {
+            base = 8;
+            qDebug() << "Auto-detected OCTAL from content";
+        } else if (QRegularExpression("^[0-9a-f]+$").match(processedValue).hasMatch()) {
+            base = 16;
+            qDebug() << "Auto-detected HEX from content";
+        } else if (QRegularExpression("^\\d+$").match(processedValue).hasMatch()) {
+            base = 10;
+            qDebug() << "Auto-detected DECIMAL from content";
+        } else {
+            qDebug() << "Could not auto-detect format, using BINARY";
+        }
+    }
+
     // Handle binary values directly
-    if (base == 2 || (base == -1 && QRegularExpression("^[01]+$").match(value).hasMatch())) {
-        QString binary = value;
+    if (base == 2) {
+        QString binary = processedValue;
         // Pad or truncate to signal width
         if (binary.length() < signalWidth) {
             binary = binary.rightJustified(signalWidth, '0');
         } else if (binary.length() > signalWidth) {
             binary = binary.right(signalWidth);
         }
+        qDebug() << "Binary result:" << binary;
         return binary;
     }
 
     // Convert from other bases
     bool ok;
-    unsigned long long numericValue;
-    
-    if (base == -1) {
-        // Auto-detect base
-        if (value.startsWith("0x", Qt::CaseInsensitive)) {
-            numericValue = value.mid(2).toULongLong(&ok, 16);
-        } else if (value.startsWith("0o", Qt::CaseInsensitive)) {
-            numericValue = value.mid(2).toULongLong(&ok, 8);
-        } else if (value.startsWith("b", Qt::CaseInsensitive)) {
-            numericValue = value.mid(1).toULongLong(&ok, 2);
-        } else if (value.startsWith("d", Qt::CaseInsensitive)) {
-            numericValue = value.mid(1).toULongLong(&ok, 10);
-        } else {
-            // Try to auto-detect
-            if (QRegularExpression("^[0-9a-fA-F]+$").match(value).hasMatch() && value.length() <= 8) {
-                // Looks like hex without prefix
-                numericValue = value.toULongLong(&ok, 16);
-            } else if (QRegularExpression("^[0-7]+$").match(value).hasMatch()) {
-                // Looks like octal without prefix
-                numericValue = value.toULongLong(&ok, 8);
-            } else if (QRegularExpression("^\\d+$").match(value).hasMatch()) {
-                // Looks like decimal
-                numericValue = value.toULongLong(&ok, 10);
-            } else {
-                return value; // Return original if we can't determine the base
-            }
-        }
-    } else {
-        // Use specified base
-        numericValue = value.toULongLong(&ok, base);
-    }
+    unsigned long long numericValue = processedValue.toULongLong(&ok, base);
     
     if (!ok) {
+        qDebug() << "Conversion failed for:" << processedValue << "base:" << base;
         return value; // Return original if conversion fails
     }
 
-    // Convert to binary string
-    QString binary;
-    for (int i = signalWidth - 1; i >= 0; i--) {
-        if (signalWidth <= 64) {
+    qDebug() << "Numeric value:" << numericValue;
+
+    // For signals with width <= 64, convert properly
+    if (signalWidth <= 64) {
+        QString binary;
+        for (int i = signalWidth - 1; i >= 0; i--) {
             binary.append((numericValue & (1ULL << i)) ? '1' : '0');
-        } else {
-            // For very wide signals, we need a different approach
-            // This is a simplified version for wide signals
-            if (i < 64) {
-                binary.append((numericValue & (1ULL << i)) ? '1' : '0');
-            } else {
-                binary.append('0'); // Pad with zeros for bits beyond 64
-            }
         }
+        qDebug() << "Final binary:" << binary;
+        return binary;
+    } else {
+        // For very wide signals, we need a different approach
+        // Convert to binary string and pad/truncate
+        QString binary = QString::number(numericValue, 2);
+        if (binary.length() < signalWidth) {
+            binary = binary.rightJustified(signalWidth, '0');
+        } else if (binary.length() > signalWidth) {
+            binary = binary.right(signalWidth);
+        }
+        qDebug() << "Final binary (wide):" << binary;
+        return binary;
     }
-    return binary;
 }
 
 void MainWindow::highlightSearchMatch(int matchIndex)
@@ -2259,7 +2453,7 @@ void MainWindow::findNextValue()
 {
     if (valueSearchMatches.isEmpty()) {
         if (!lastSearchValue.isEmpty()) {
-            performValueSearch(lastSearchValue);
+            performValueSearch(lastSearchValue, lastSearchFormat);
         } else {
             QMessageBox::information(this, "Find Next", "No previous search to continue.");
         }
@@ -2279,7 +2473,7 @@ void MainWindow::findPreviousValue()
 {
     if (valueSearchMatches.isEmpty()) {
         if (!lastSearchValue.isEmpty()) {
-            performValueSearch(lastSearchValue);
+            performValueSearch(lastSearchValue, lastSearchFormat);
         } else {
             QMessageBox::information(this, "Find Previous", "No previous search to continue.");
         }
@@ -2295,3 +2489,85 @@ void MainWindow::findPreviousValue()
     highlightSearchMatch(prevIndex);
 }
 
+
+
+ValueSearchDialog::ValueSearchDialog(QWidget *parent)
+    : QDialog(parent)
+{
+    setWindowTitle("Search Signal Value");
+    setMinimumWidth(400);
+    
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+    
+    // Value input
+    QLabel *valueLabel = new QLabel("Value to search for:");
+    valueEdit = new QLineEdit();
+    valueEdit->setPlaceholderText("Enter value (e.g., 1010, 0xA, 10, 0o12, x, z)");
+    
+    // Format selection
+    QGroupBox *formatGroupBox = new QGroupBox("Number Format");
+    QVBoxLayout *formatLayout = new QVBoxLayout(formatGroupBox);
+    
+    formatGroup = new QButtonGroup(this);
+    
+    autoRadio = new QRadioButton("Auto-detect (recommended)");
+    binaryRadio = new QRadioButton("Binary (e.g., 1010, b1010)");
+    hexRadio = new QRadioButton("Hexadecimal (e.g., 0xA, A, 0xa)");
+    decimalRadio = new QRadioButton("Decimal (e.g., 10, d10)");
+    octalRadio = new QRadioButton("Octal (e.g., 0o12, 12)");
+    
+    formatGroup->addButton(autoRadio, 0);
+    formatGroup->addButton(binaryRadio, 1);
+    formatGroup->addButton(hexRadio, 2);
+    formatGroup->addButton(decimalRadio, 3);
+    formatGroup->addButton(octalRadio, 4);
+    
+    formatLayout->addWidget(autoRadio);
+    formatLayout->addWidget(binaryRadio);
+    formatLayout->addWidget(hexRadio);
+    formatLayout->addWidget(decimalRadio);
+    formatLayout->addWidget(octalRadio);
+    
+    autoRadio->setChecked(true);
+    
+    // Examples label
+    QLabel *examplesLabel = new QLabel(
+        "Examples:\n"
+        "• Binary: 1010, b1010\n"
+        "• Hex: 0xA, A, 0xa\n"
+        "• Decimal: 10, d10\n"
+        "• Octal: 0o12, 12\n"
+        "• Special: x, z, X, Z"
+    );
+    examplesLabel->setStyleSheet("color: gray; font-size: 9pt;");
+    
+    // Buttons
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    
+    // Layout
+    mainLayout->addWidget(valueLabel);
+    mainLayout->addWidget(valueEdit);
+    mainLayout->addSpacing(10);
+    mainLayout->addWidget(formatGroupBox);
+    mainLayout->addWidget(examplesLabel);
+    mainLayout->addSpacing(10);
+    mainLayout->addWidget(buttonBox);
+    
+    // Set focus to value edit
+    valueEdit->setFocus();
+}
+
+void ValueSearchDialog::setLastValues(const QString &value, int format)
+{
+    valueEdit->setText(value);
+    
+    switch (format) {
+    case 1: binaryRadio->setChecked(true); break;
+    case 2: hexRadio->setChecked(true); break;
+    case 3: decimalRadio->setChecked(true); break;
+    case 4: octalRadio->setChecked(true); break;
+    default: autoRadio->setChecked(true); break;
+    }
+}
